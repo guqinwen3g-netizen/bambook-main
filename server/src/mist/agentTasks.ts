@@ -2,7 +2,7 @@ import type { MistStoredFile } from './files';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import { normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import { activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
@@ -625,19 +625,13 @@ export async function personalTaskActivityCandidates(db: any, workspaceId: strin
   return rows.map((row: unknown) => record(row, workspaceId));
 }
 
-function activityText(value: string | undefined) {
-  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft1)[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
-  return value.replace(/[\u0000-\u001f\u007f\s]+/gu, ' ').trim() || undefined;
-}
-
 export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | undefined {
   if ((view.state !== 'running' && view.state !== 'queued') || view.waitingProposalIds.length
     || view.questions?.some(question => !question.answeredAt)) return;
-  const last = view.trail?.at(-1);
-  const currentStep = view.executionStage === 'tool' && last && !last.completed ? activityText(last.label) : undefined;
+  const currentStep = activeAgentTaskStep(view);
   return {
     id: view.id,
-    name: activityText(view.name) ?? '小竹任务',
+    name: agentTaskActivityText(view.name) ?? '小竹任务',
     state: view.state,
     ...(view.executionStage && { executionStage: view.executionStage }),
     ...(view.state === 'running' && view.executionStage === 'model' && !view.runnerStatus && view.executionStageSince

@@ -66,6 +66,17 @@ export type AgentTaskView = {
   wakeReason?:'changed'|'deadline';
   requiredRead?:{type:string;id:string}|null;
 };
+export function agentTaskActivityText(value: string | undefined) {
+  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft1)[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
+  return value.replace(/[\u0000-\u001f\u007f\s]+/gu, ' ').trim() || undefined;
+}
+
+export function activeAgentTaskStep(task: Pick<AgentTaskView, 'state' | 'executionStage' | 'runnerStatus' | 'contentRestricted' | 'trail'>) {
+  if (task.state!=='running' || task.executionStage!=='tool' || task.runnerStatus || task.contentRestricted) return;
+  const last=task.trail?.at(-1);
+  if(last && last.completed===false && !last.failed) return agentTaskActivityText(last.label);
+}
+
 export type AgentTaskPage = { items: AgentTaskView[]; nextCursor: string | null };
 export const TASK_ACCESS_BATCH_LIMIT = 30;
 export type PersonalTaskAccess = { restrictedIds: string[] };

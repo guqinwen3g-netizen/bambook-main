@@ -48,6 +48,25 @@ it('keeps an unreceived confirmation in its original task and offers a read-only
  expect(host.textContent).toContain('已停止');
 });
 
+it('shows the current read on a collapsed task and clears it after the phase changes',async()=>{
+ const first={at:'',kind:'read',label:'读取附件 报价.pdf',completed:false};
+ const f={...fns(),workLog:{expanded:new Map([['t1',false]]),setExpanded:vi.fn()}};
+ await paint([task({executionStage:'tool',trail:[first]})],f);
+ expect(getByRole(host,'status').textContent).toBe('读取附件 报价.pdf');
+ expect(host.querySelector('.mist-xz-steps')).toBeNull();
+ const next={...first,label:'续读附件 报价.pdf'};
+ const model=task({executionStage:'tool',trail:[{...first,completed:true},next]});
+ await paint([model],f);
+ expect(getByRole(host,'status').textContent).toBe('续读附件 报价.pdf');
+ await paint([model],{...f,staleProgressIds:new Set(['t1'])});
+ expect(getByRole(host,'status').textContent).toBe('执行进度暂未更新');
+ await paint([task({...model,executionStage:'model'})],f);
+ expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+ await paint([task({executionStage:'tool',trail:[{...first,label:'读取 sk-do-not-show-credential'}]})],f);
+ expect(getByRole(host,'status').textContent).toBe('正在办理');
+ expect(host.textContent).not.toContain('sk-do-not-show-credential');
+});
+
 it('summarizes confirmed sources while the model waits without counting repeated or failed reads',async()=>{
  const record={type:'order',id:'o1',label:'SO-1'};
  const completed={at:'',kind:'read' as const,label:'读取订单 SO-1',completed:true,ref:record};
