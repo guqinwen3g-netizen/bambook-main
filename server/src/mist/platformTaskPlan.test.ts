@@ -149,10 +149,14 @@ it('summarizes only continuous PDF page windows with the same verified source an
   result:{kind:'pdf',file:{id:fileId},sourceHash:'a'.repeat(64),pages,range:{start:0,end:5,pageFrom:from,pageTo:to},
    hasMore:!!nextCursor,...(nextCursor?{nextCursor,nextPageFrom:to+1}:{}),...extra},
  });
- const first=makeRead('first',1,20,23,undefined,'aft1.first');
+ const first=makeRead('first',1,20,23,undefined,'aft1.first',{pagesWithoutText:[3]});
+ expect(platformTaskHistory([first])).toMatchObject({
+  pdfPendingCoverage:[{fileId:'first',pagesInOriginal:23,returnedThroughPage:20,pagesWithoutText:[3],unreadPages:{from:21,to:23}}],
+ });
+ expect(platformTaskHistory([first])).not.toHaveProperty('pdfCoverage');
  const last=makeRead('first',21,23,23,'aft1.first',undefined,{pagesWithoutText:[22],reason:'第 22 页没有可提取文字',truncated:true,complete:false});
  const unrelated=makeRead('other',21,21,21,'aft1.other',undefined);
- expect(platformTaskHistory([first,unrelated,last]).pdfCoverage).toEqual([{fileId:'first',pagesChecked:23,pagesWithoutText:[22]}]);
+ expect(platformTaskHistory([first,unrelated,last]).pdfCoverage).toEqual([{fileId:'first',pagesChecked:23,pagesWithoutText:[3,22]}]);
  for(const variant of [
   {...last,plan:{...last.plan,arguments:{fileId:'first',cursor:'aft1.other'}}},
   {...last,result:{...last.result,sourceHash:'b'.repeat(64)}},
@@ -177,6 +181,13 @@ it('requires contiguous character offsets when a PDF page window is split',()=>{
  });
  const first=read(1,20,0,3500,undefined,'aft1.slice',undefined,true);
  const second=read(1,20,3500,4400,'aft1.slice','aft1.tail',21);
+ expect(platformTaskHistory([first]).pdfPendingCoverage).toEqual([
+  {fileId:'pdf',pagesInOriginal:23,returnedThroughPage:0,pagesWithoutText:[],partialWindow:{from:1,to:20},unreadPages:{from:21,to:23}},
+ ]);
+ expect(platformTaskHistory([first,second]).pdfPendingCoverage).toEqual([
+  {fileId:'pdf',pagesInOriginal:23,returnedThroughPage:20,pagesWithoutText:[],unreadPages:{from:21,to:23}},
+ ]);
+
  const last=read(21,23,0,400,'aft1.tail');
  expect(platformTaskHistory([first,second,last]).pdfCoverage).toEqual([{fileId:'pdf',pagesChecked:23,pagesWithoutText:[]}]);
  for(const bad of [
@@ -185,7 +196,9 @@ it('requires contiguous character offsets when a PDF page window is split',()=>{
   read(1,19,3500,4400,'aft1.slice','aft1.tail',20),
   read(1,20,3500,4400,'aft1.wrong','aft1.tail',21),
  ]){
-  expect(platformTaskHistory([first,bad,last])).not.toHaveProperty('pdfCoverage');
+  const history=platformTaskHistory([first,bad,last]);
+  expect(history).not.toHaveProperty('pdfCoverage');
+  expect(history).not.toHaveProperty('pdfPendingCoverage');
  }
  expect(platformTaskHistory([first,last])).not.toHaveProperty('pdfCoverage');
  expect(platformTaskHistory([first,second,read(21,23,0,400,'aft1.tail',undefined,undefined,true)])).not.toHaveProperty('pdfCoverage');

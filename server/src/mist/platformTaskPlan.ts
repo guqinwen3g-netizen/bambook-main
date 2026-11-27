@@ -201,7 +201,18 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
   const coverage=pdfReadCoverage(steps.filter(step=>included.has(step.id)));
   const pdfCoverage=[...coverage].flatMap(([fileId,read])=>!read.next
     ? [{fileId,pagesChecked:read.pages,pagesWithoutText:read.pagesWithoutText}] : []);
-  return{recent,...(pdfCoverage.length?{pdfCoverage}:{}),omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
+  const pdfPendingCoverage=[...coverage].flatMap(([fileId,read])=>{
+    const next=read.next;
+    if(!next)return [];
+    const unreadFrom=next.to===undefined?next.from:next.to+1;
+    return [{
+      fileId,pagesInOriginal:read.pages,returnedThroughPage:next.from-1,pagesWithoutText:read.pagesWithoutText,
+      ...(next.to!==undefined?{partialWindow:{from:next.from,to:next.to}}:{}),
+      ...(unreadFrom<=read.pages?{unreadPages:{from:unreadFrom,to:read.pages}}:{}),
+    }];
+  });
+  return{recent,...(pdfCoverage.length?{pdfCoverage}:{}),...(pdfPendingCoverage.length?{pdfPendingCoverage}:{}),
+    omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
 }
 /** Keep durable completed-operation references, while bounding the registry and future prompts. */
 export function compactPlatformTaskSteps(input:PlatformTaskStep[]):PlatformTaskStep[]{
