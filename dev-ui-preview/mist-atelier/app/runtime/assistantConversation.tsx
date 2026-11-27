@@ -20,9 +20,10 @@ type Conversation = ComposerDraft & {
   messages: AssistantReply[];
   inactiveDrafts: Map<string, ComposerDraft>;
   answerDrafts: Map<string,TaskAnswerDraft>;
+  workLogExpanded: Map<string,boolean>;
 };
 const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [], attachmentRefs: [] });
-const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map() });
+const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map(), workLogExpanded:new Map() });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
 const attachmentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,6 +74,9 @@ function useConversationState(scope: string) {
     if(text)next.set(key,{taskId,questionId,text});else next.delete(key);
     return next;
   }),[update]);
+  const setWorkLogExpanded = React.useCallback((taskId: string, expanded: boolean) =>
+    update('workLogExpanded', previous => previous.get(taskId) === expanded
+      ? previous : new Map(previous).set(taskId, expanded)), [update]);
   const discardAnswerDrafts = React.useCallback((discard:(draft:TaskAnswerDraft)=>boolean)=>update('answerDrafts',old=>{
     const retained=[...old].filter(([,draft])=>!discard(draft));
     return retained.length===old.size?old:new Map(retained);
@@ -100,7 +104,7 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests };
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests,setWorkLogExpanded };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);

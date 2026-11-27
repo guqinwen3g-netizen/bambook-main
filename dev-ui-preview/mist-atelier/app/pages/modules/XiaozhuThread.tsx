@@ -53,19 +53,20 @@ function PhaseTimer({ at, countdown = false }: { at: string; countdown?: boolean
   return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {countdown ? ui`最早 ${seconds} 秒后重试` : ui`${seconds} 秒`}</span>;
 }
 
-function Trail({ task, items, active, activeLabel, since, retryAt, recovering, onOpen, onPreviewAttachment }: {
+function Trail({ task, items, active, activeLabel, since, retryAt, recovering, workLog, onOpen, onPreviewAttachment }: {
   task: AgentTaskView; items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; retryAt?: string; recovering?: boolean; onOpen: OpenRecord;
+  workLog?: ThreadActions['workLog'];
   onPreviewAttachment?: ThreadActions['onPreviewAttachment'];
 }) {
   const [expanded, setExpanded] = React.useState<boolean>();
-  const open = expanded ?? active;
+  const open = workLog?.expanded.get(task.id) ?? expanded ?? active;
   const label = uiText(activeLabel ?? '正在办理');
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
       <span role="status" className={recovering?undefined:'mist-xz-shimmer'}>{label}</span>
       {retryAt ? <PhaseTimer at={retryAt} countdown /> : since && <PhaseTimer at={since} />}
     </div>}
-    {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setExpanded(!open)}>
+    {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => workLog ? workLog.setExpanded(task.id, !open) : setExpanded(!open)}>
       {uiText('办理过程')}<ChevronRight size={13} />
     </button>}
     {open && !!items.length && <ol className="mist-xz-steps" aria-live={active ? 'polite' : 'off'} aria-relevant="additions text">
@@ -158,6 +159,7 @@ export type ThreadActions = {
   answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
   controls?: Record<string,TaskControlState>;
   staleProgressIds?: ReadonlySet<string>;
+  workLog?: { expanded: ReadonlyMap<string, boolean>; setExpanded: (taskId: string, expanded: boolean) => void };
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
   retryBlocked?: boolean;
@@ -240,7 +242,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} recovering={progressStale || !!t.runnerStatus} since={since} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
+        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} workLog={actions.workLog} recovering={progressStale || !!t.runnerStatus} since={since} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
         <AnsweredQuestions questions={t.questions}/>
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments}
           onOpenAttachment={actions.onPreviewAttachment ? file => actions.onPreviewAttachment?.(t, file) : undefined} />}
