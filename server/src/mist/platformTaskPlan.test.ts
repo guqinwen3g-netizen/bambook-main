@@ -77,12 +77,30 @@ it('limits automatic PDF continuation to one short page window without a prior c
  const result={kind:'pdf',pages:24,range:{pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:'aft1.original'};
  const first={...newPlatformTaskStep(plan,0),result};
  expect(shortPdfTailPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
- expect(shortPdfTailPlan([file,{...file,id:'another-pdf'}],[first])).toBeUndefined();
  expect(shortPdfTailPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
  expect(shortPdfTailPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
  expect(shortPdfTailPlan([file],[{...first,compacted:true}])).toBeUndefined();
  const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};
  expect(shortPdfTailPlan([file],[first,failed])).toBeUndefined();
+});
+
+it('continues each eligible PDF using its own cursor and skips long or already attempted sources',()=>{
+ const first={id:'short-one',name:'first.pdf',mimeType:'application/pdf',size:1200};
+ const second={...first,id:'short-two',name:'second.pdf'};
+ const longer={...first,id:'long-pdf',name:'longer.pdf'};
+ const read=(id:string,pages:number,cursor:string)=>({
+  ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:id}},0),
+  result:{kind:'pdf',pages,range:{pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:cursor},
+ });
+ const heads=[read(first.id,21,'aft1.first'),read(second.id,24,'aft1.second'),read(longer.id,25,'aft1.long')];
+ const files=[longer,first,second];
+ const firstTail=shortPdfTailPlan(files,heads);
+ expect(firstTail?.arguments).toEqual({fileId:first.id,cursor:'aft1.first',maxChars:3500});
+ const failed={...newPlatformTaskStep(firstTail!,1),result:{error:true}};
+ const secondTail=shortPdfTailPlan(files,[...heads,failed]);
+ expect(secondTail?.arguments).toEqual({fileId:second.id,cursor:'aft1.second',maxChars:3500});
+ const completed={...newPlatformTaskStep(secondTail!,2),result:{hasMore:false}};
+ expect(shortPdfTailPlan(files,[...heads,failed,completed])).toBeUndefined();
 });
 
 it('identifies the full quotation amount and the exact converted line amounts in a complete read', () => {
