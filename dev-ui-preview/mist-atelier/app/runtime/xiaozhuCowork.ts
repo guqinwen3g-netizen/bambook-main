@@ -75,6 +75,8 @@ const TASK_READ_TIMEOUT_MS = 5000;
 const HISTORY_READ_TIMEOUT_MS = 10_000;
 const TASK_SEND_TIMEOUT_MS = 45_000;
 const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
+const BACKGROUND_PROGRESS_INTERVAL_MS = 3000;
+const BACKGROUND_PROGRESS_MAX_IN_FLIGHT = 3;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
 const REPORT_ACCESS_INTERVAL_MS = 10_000;
@@ -378,7 +380,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (!hasProgressTargets || !base || !enabled) return;
     const inFlight = new Map<string, {controller:AbortController;promise:Promise<void>}>();
     const retry = new Map<string, { delay: number; at: number }>();
-    let lastBackground = 0;
+    const backgroundAt = new Map<string, number>();
     const markStale = (ids: string[]) => setStaleProgress(old => {
       const previous = old?.scope === scope ? old.ids : undefined;
       if (previous && ids.every(id => previous.has(id))) return old;
@@ -388,6 +390,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const pending=inFlight.get(id);
       if(pending)return pending.promise;
       const controller=new AbortController(), denial=deniedHistory.current;
+      backgroundAt.set(id,Date.now()+BACKGROUND_PROGRESS_INTERVAL_MS);
       const promise=readCoworkTask(base,id,controller.signal)
         .then(next=>{
           if(controller.signal.aborted||live.current!==scope||deniedHistory.current!==denial)return;
@@ -402,7 +405,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           retry.set(id,{delay,at:Date.now()+delay});
           markStale([id]);
         })
-        .finally(()=>{if(inFlight.get(id)?.controller===controller)inFlight.delete(id);});
+        .finally(()=>{
+          if(inFlight.get(id)?.controller!==controller)return;
+          inFlight.delete(id);
+          if(!controller.signal.aborted)fillBackground();
+        });
       inFlight.set(id,{controller,promise});
       return promise;
     };
@@ -416,20 +423,27 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       inFlight.clear();
     };
     manualProgressRead.current=manual;
-    const poll = () => {
-      const {foregroundId,background,available}=progressTargets.current;
-      // Model availability gates automatic polling, not reads of an existing task.
-      if (!available || live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
-      const ids = foregroundId ? [foregroundId] : [];
+    const canPoll = () => progressTargets.current.available && live.current === scope
+      && navigator.onLine && document.visibilityState !== 'hidden';
+    const isDue = (id:string,now:number) => !inFlight.has(id) && now >= (retry.get(id)?.at ?? 0);
+    function fillBackground() {
+      if (!canPoll()) return;
+      const {background,foregroundId} = progressTargets.current;
+      const backgroundInFlight = inFlight.size - (foregroundId && inFlight.has(foregroundId) ? 1 : 0);
+      const slots = BACKGROUND_PROGRESS_MAX_IN_FLIGHT - backgroundInFlight;
+      if (slots <= 0) return;
       const now = Date.now();
-      if (background.length && now - lastBackground >= 3000) {
-        ids.push(...background);
-        lastBackground = now;
-      }
-      for(const id of ids){
-        if(inFlight.has(id)||now<(retry.get(id)?.at??0))continue;
-        void readProgress(id);
-      }
+      const dueAt = (id:string) => backgroundAt.get(id) ?? 0;
+      // Unread and oldest tasks get the next freed slots before recently updated tasks.
+      const ready = background.filter(id => dueAt(id) <= now && isDue(id,now)).sort((left,right) => dueAt(left) - dueAt(right));
+      for (const id of ready.slice(0,slots)) void readProgress(id);
+    }
+    const poll = () => {
+      // Model availability gates automatic polling, not reads of an existing task.
+      if (!canPoll()) return;
+      const {foregroundId} = progressTargets.current;
+      if (foregroundId && isDue(foregroundId,Date.now())) void readProgress(foregroundId);
+      fillBackground();
     };
     const offline = () => {
       abortReads();
@@ -446,11 +460,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         inFlight.delete(id);
       }
       for(const id of retry.keys())if(!active.has(id))retry.delete(id);
+      for(const id of backgroundAt.keys())if(!active.has(id))backgroundAt.delete(id);
       if(navigator.onLine)poll();
       else offline();
     };
     syncProgressTargets.current=sync;
-    const refreshVisible = () => { lastBackground = 0; poll(); };
+    const refreshVisible = () => { backgroundAt.clear(); poll(); };
     const reconnect = () => { retry.clear(); refreshVisible(); };
     const timer = window.setInterval(poll, 1000);
     document.addEventListener('visibilitychange', refreshVisible);

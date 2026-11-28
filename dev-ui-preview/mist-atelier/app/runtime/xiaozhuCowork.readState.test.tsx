@@ -42,6 +42,28 @@ it('keeps the other progress read in flight when a concurrent task finishes',asy
  expect(channel.staleProgressIds?.has('second')).toBeFalsy();
 });
 
+it('gives the visible task a read while background tasks fill a bounded, fair queue',async()=>{
+ const first={...task,id:'visible',conversationId:'c_visible',state:'running',version:2,executionStage:'model'};
+ const background=Array.from({length:6},(_,index)=>({...first,id:'background-'+index,conversationId:'c_background_'+index}));
+ const all=[first,...background], reads=new Map<string,(result:unknown)=>void>(),order:string[]=[];
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-tasks'))return {items:all,nextCursor:null};
+  const id=url.split('/').at(-1)!;
+  if(all.some(item=>item.id===id))return new Promise(resolve=>{order.push(id);reads.set(id,resolve);});
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId="c_visible"/>));
+ expect(order).toEqual(['visible','background-0','background-1','background-2']);
+ for(let index=0;index<3;index++){
+  const current=background[index];
+  await act(async()=>reads.get(current.id)!({item:{...current,version:3}}));
+  expect(order.at(-1)).toBe(background[index+3].id);
+ }
+ expect(order.filter(id=>id==='visible')).toHaveLength(1);
+ expect(order.slice(1)).toEqual(background.map(item=>item.id));
+});
+
 it('rechecks a stale task directly and coalesces concurrent progress reads',async()=>{
  const waiting={...task,state:'running',executionStage:'model',version:2,canControl:true};
  const finished={...waiting,state:'succeeded',version:3,result:'已恢复原报告'};
