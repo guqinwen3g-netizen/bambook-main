@@ -14,6 +14,29 @@ const loaded=async(url:string)=>url.includes('/agent-identities')?{items:[{id:'i
 function View({workspace='workspace',conversationId}:{workspace?:string;conversationId?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true,conversationId);return <div>{channel.tasks.length}</div>}
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();api.mockReset();});
 
+it('looks up the visible paused task on focus even when the model is unavailable',async()=>{
+ const paused={...task,id:'visible-paused',state:'paused',conversationId:'c_focus',version:5,result:''};
+ const offscreen={...paused,id:'offscreen-paused',conversationId:'c_other'};
+ let complete:(value:unknown)=>void=()=>{};
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-tasks'))return {items:[paused,offscreen],nextCursor:null};
+  if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:false};
+  if(url.endsWith('/agent-tasks/visible-paused'))return new Promise(resolve=>{complete=resolve;});
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId="c_focus"/>));
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks/visible-paused'))).toHaveLength(0);
+ await act(async()=>{
+  window.dispatchEvent(new Event('focus'));
+  window.dispatchEvent(new Event('focus'));
+ });
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks/visible-paused'))).toHaveLength(1);
+ expect(api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/offscreen-paused'))).toBe(false);
+ await act(async()=>complete({item:{...paused,state:'succeeded',version:6,result:'另一窗口续办后的报告'}}));
+ expect(channel.tasks.find(item=>item.id===paused.id)).toMatchObject({state:'succeeded',result:'另一窗口续办后的报告'});
+});
+
 it('keeps the other progress read in flight when a concurrent task finishes',async()=>{
  const first={...task,id:'first',conversationId:'c_first',state:'running',version:2,executionStage:'model'};
  const second={...first,id:'second',conversationId:'c_second'};

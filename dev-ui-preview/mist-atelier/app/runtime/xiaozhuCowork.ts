@@ -438,6 +438,44 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.removeEventListener('offline', suspend);
     };
   }, [base, enabled, openReportIds, scope]);
+  const visiblePausedIds = visibleConversationId ? tasks.filter(task => task.state === 'paused'
+    && (task.conversationId || 'legacy_' + task.id) === visibleConversationId)
+    .slice(-BACKGROUND_PROGRESS_MAX_IN_FLIGHT).map(task => task.id).join(',') : '';
+  React.useEffect(() => {
+    if (!base || !enabled || !visiblePausedIds) return;
+    let request: AbortController | undefined;
+    const suspend = () => {
+      const previous = request;
+      request = undefined;
+      previous?.abort();
+    };
+    const wake = async () => {
+      if (request || live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
+      const controller = new AbortController(), denial = deniedHistory.current;
+      request = controller;
+      const replies = await Promise.allSettled(visiblePausedIds.split(',').map(id =>
+        shareCoworkTaskRead(taskReads, base, id, denial, controller.signal)));
+      if (request !== controller) return;
+      request = undefined;
+      if (live.current !== scope || deniedHistory.current !== denial) return;
+      const updates = new Map(replies.flatMap(reply => reply.status === 'fulfilled' ? [[reply.value.id, reply.value] as const] : []));
+      if (updates.size) setTasks(previous => previous.map(task => {
+        const next = updates.get(task.id);
+        return next ? mergeTaskUpdate(task, next) : task;
+      }));
+    };
+    window.addEventListener('focus', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('offline', suspend);
+    document.addEventListener('visibilitychange', wake);
+    return () => {
+      suspend();
+      window.removeEventListener('focus', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('offline', suspend);
+      document.removeEventListener('visibilitychange', wake);
+    };
+  }, [base, enabled, scope, taskReads, visiblePausedIds]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
