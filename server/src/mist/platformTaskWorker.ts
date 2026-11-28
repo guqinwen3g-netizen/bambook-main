@@ -1,5 +1,5 @@
 import type { FileTextWindowCache } from './agentFileWindow';
-import { isTaskImage, taskAttachmentLabels, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION, isWorksheetNameQuestion } from '../shared/mistTaskAttachments';
+import { isTaskImage, isTaskPdf, officeKind, taskAttachmentLabels, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION, isWorksheetNameQuestion } from '../shared/mistTaskAttachments';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import{randomUUID}from'node:crypto';
 import{createLlmCompleter,LlmProviderRetryError,LlmProviderCooldownError,type LlmCompletionInput}from'../ai/llmProviders';
@@ -54,6 +54,9 @@ export function namedDraftOrderLines(request:string,orderId:string,lineCount:num
   return lines.filter(line=>named.has(line.style!.toUpperCase())).map(line=>line.id!);
 }
 
+const ATTACHMENT_HANDLE_RULES='\n本任务附件用 task.attachments 中的简短 id，例如 attachment_1。调用 bambook_file_text 时把对应附件的简短 id 原样填入 fileId；续读保留同一简短 id，不猜原件编号或借用其他附件的编号。';
+const PDF_ATTACHMENT_RULES='\nPDF 的 pdfTextByPage 逐页对应原件；引用正文的明确单页时，以其中对应文字为准，文件名或 reportLabel 紧接“第 N 页”（英文 page N）。只有页段时，不推断段落属于哪一页。pagesWithoutText 只用于说明哪些页无可提取文字。fileText 回执的 pageScopeStart 和 pageScopeLimit 表示本人明确限定的 PDF 页码边界；pageScopeWindows 列出不连续的指定范围。只核实实际返回正文的页，范围之外不请求读取。';
+const WORKBOOK_ATTACHMENT_RULES='\nExcel 摘录中“工作表”与“第 N 行”的前缀标记原表行号，只用这些已标记的行编号，不按摘录顺序推断。引用核对过的原表行时，在文件名标题下使用“工作表：表名 第 N 行”引出该行结论；用表格时可分列“工作表”和“行号”，涉及多文件时每行另列实际文件名。Excel 引用已读取的具体工作表时，在文件名或 reportLabel 后紧接“（工作表：名称）”，名称使用该次读取的 observedSheets 原文。只有名称、未返回该表正文时，不把其他表的字段归给它。worksheetScope 表示只读取了本人指定的工作表；worksheetComplete 为 true 表示该表的可提取正文在本次已完整返回；此时 complete 为 false 表示整份工作簿仍未核实。';
 const ORDER_BATCH_RULES='只读核对多个订单且已有查询返回的准确编号时，优先用 bambook_get_orders 一次读取 2 至 6 张订单，再汇总实际状态和交期。需要超过 6 张时按已确定的范围分批。批量读取只供报告。写入预演或任务明确要求重新核对原件时，仍用 bambook_get 逐条回源。';
 const redact=(text:string)=>text.replace(/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+/g,'<redacted>');
 const COMPARISON_REPORT_RULES='核对多份资料时，首句直接说关键字段的实际关系：一致、有差异，或缺哪一方依据而无法判断。给出各方值及来源并保留原有含义，例如系统原交期和附件提议交期。使用“一致”前逐项确认双方值相同且口径可比；核对动作完成、来源可读或部分字段相同，均不能据此说整体一致。发现差异先写差异，确认口径可比后再写方向和差值。限定比较订单和指定附件等来源时，所需字段已读到，或已确认指定来源缺字段，就直接提交有依据的结论。除非本人要求扩大查找，或原资料明确指向必要的同一业务依据，不再搜索其他单据或逐行重复查找。本人要求追溯实际关联时，优先对已读的来源调用 bambook_related，已知目标类型就传 relatedType（从订单查原报价传 quotation），再读取命中的对象确认关系；若只需核对目标订单的转单条目，读取该报价时在 bambook_get 传入目标 orderId。orderConversion.lines 仅包含该订单的条目，data.total 仍是整份报价总额；有 nextOffset 且需读更多条目时沿用相同订单与报价，同时将原样的 sourceHash 传为 lineSourceHash；若来源已变化则从首段重读，旧片段不得与新片段合并。需要完整报价作业务回源时，按原方式读取。报价分批转单时，按对应报价行的转单记录确认目标订单；报价头可能只指向首张订单。history 中的 quotationAmountScope 区分原报价总额和各转单条目的金额。报告每次写金额都保留对象和范围：整份原报价用报价总额，某批订单只引用对应条目的报价金额或订单自身总额。对照附件时按用户问题选同口径的值，复述时不要把原报价条目金额简称为“原报价总额”或“原报价为”。附件中的编号是独立线索，不替代已登记的关联。相同客户、数值或名称不证明是同一单据。币种不同且无适用汇率及日期，保留各币种原值，不算差额；单位不同须有适用的换算依据，注明来源及计算，否则说明无法判断。币种相同也须确认金额性质、覆盖范围及相关费用口径可比；附件仅写“金额”而未注明总额、分项或计价范围时，只列原值和缺少的依据，不核算业务差额。本人明确要求对指定数值作算术运算时，可以列算式，注明结果是算术差值。比较三个及以上来源时，分别核对每个来源的各字段。仅在每个来源的同一字段关系确实相同时才用“均”；有的来源同币种、有的跨币种，或范围缺少可比依据时，首句分别注明涉及的来源。提交 finish 前检查首句中的每项关系与明细是否相符。';
@@ -394,19 +397,27 @@ export class MistPlatformTaskWorker{
               const imageSources=images?.map(image=>image.name);
               const pdfPageImages=images?.flatMap(image=>image.pdfPage?[image.pdfPage]:[])??[];
               const attachmentHandles=platformTaskAttachmentHandles(context.task.attachments);
-              const attachmentRules=attachmentHandles.size ? '\n本任务附件用 task.attachments 中的简短 id，例如 attachment_1。调用 bambook_file_text 时把对应附件的简短 id 原样填入 fileId；续读保留同一简短 id，不猜原件编号或借用其他附件的编号。PDF 的 pdfTextByPage 逐页对应原件；引用正文的明确单页时，以其中对应文字为准，文件名或 reportLabel 紧接“第 N 页”（英文 page N）。只有页段时，不推断段落属于哪一页。pagesWithoutText 只用于说明哪些页无可提取文字。fileText 回执的 pageScopeStart 和 pageScopeLimit 表示本人明确限定的 PDF 页码边界；pageScopeWindows 列出不连续的指定范围。只核实实际返回正文的页，范围之外不请求读取。 Excel 摘录中“工作表”与“第 N 行”的前缀标记原表行号，只用这些已标记的行编号，不按摘录顺序推断。引用核对过的原表行时，在文件名标题下使用“工作表：表名 第 N 行”引出该行结论；用表格时可分列“工作表”和“行号”，涉及多文件时每行另列实际文件名。Excel 引用已读取的具体工作表时，在文件名或 reportLabel 后紧接“（工作表：名称）”，名称使用该次读取的 observedSheets 原文。只有名称、未返回该表正文时，不把其他表的字段归给它。worksheetScope 表示只读取了本人指定的工作表；worksheetComplete 为 true 表示该表的可提取正文在本次已完整返回；此时 complete 为 false 表示整份工作簿仍未核实。' : '';
               const labels=taskAttachmentLabels(context.task.attachments);
               const attachments=context.task.attachments?.flatMap((file,index)=>outsideAttachmentScope(file.id)?[]:[
                 labels[index]===file.name?file:{...file,reportLabel:labels[index]},
               ]);
-              const identifierRules=attachmentHandles.size
+              const history=platformTaskHistory(readableSteps);
+              const hasRead=(kind:string)=>history.recent.some(step=>step.name==='bambook_file_text'
+                &&(step.result as {kind?:string}|undefined)?.kind===kind);
+              const attachmentRules=(attachments?.length?ATTACHMENT_HANDLE_RULES:'')
+                +(attachments?.some(isTaskPdf)||hasRead('pdf')?PDF_ATTACHMENT_RULES:'')
+                +(attachments?.some(file=>officeKind(file)==='xlsx')||hasRead('xlsx')?WORKBOOK_ATTACHMENT_RULES:'');
+              const identifierRules=attachments?.length
                 ? '\n本人要求核对编号或控制码时，若原文列出独立标识却未注明类型，逐字保留该标识，并说明原件未标为控制码；不要把有标识的来源报告为没有编号。'
                 : '';
               const numberedAttachments=attachments?.some(file=>'reportLabel' in file)
                 ? '\n同名附件按短 id 区分。写报告时使用对应的 reportLabel 原样引用，包括括号中的编号，只写文本，不生成网址。'
                 : '';
-              // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
-              const {trail:_uiTrail,...modelTask}=context.task;
+              // The planner needs the work and its constraints, not the UI's control and heartbeat metadata.
+              const {name,ownerName,instructions,state,mode,expiresAt,stepsUsed,stepLimit,runtimeUsedMs,runtimeLimitMs,
+                checkpoint,result,waitingProposalIds,questions,intentRefs,resumeAt,waitingFor,nextCheckAt,wakeReason,requiredRead,stopReason}=context.task;
+              const modelTask={name,ownerName,instructions,state,mode,expiresAt,stepsUsed,stepLimit,runtimeUsedMs,runtimeLimitMs,
+                checkpoint,result,waitingProposalIds,questions,intentRefs,resumeAt,waitingFor,nextCheckAt,wakeReason,requiredRead,stopReason};
               const confirmedScopeCorrections=modelTask.questions?.flatMap(question=>{
                 const correction=question.attachmentScopeCorrection;
                 if(!correction||!question.answeredAt)return [];
@@ -430,7 +441,6 @@ export class MistPlatformTaskWorker{
               }
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
               if(allowedFiles||excludedFileIds||pdfRanges.size||worksheetScope)modelTask.instructions=splitTaskRequest(modelTask.instructions);
-              const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'
                 : '';
