@@ -90,7 +90,7 @@ it('exposes a focused recheck while task progress is stale',async()=>{
 
 it('can check a running task when automatic progress polling is paused',async()=>{
  const onRecheckProgress=vi.fn(async()=>{});
- const actions={...fns(),onRecheckProgress,progressPollingPaused:true};
+ const actions={...fns(),onRecheckProgress,offerProgressRecheck:true};
  await paint([task({executionStage:'model'})],actions);
  await act(async()=>getByRole(host,'button',{name:'重新读取进度',exact:true}).click());
  expect(onRecheckProgress).toHaveBeenCalledExactlyOnceWith('t1');

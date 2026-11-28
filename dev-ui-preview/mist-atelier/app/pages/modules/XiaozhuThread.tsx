@@ -217,7 +217,7 @@ export type ThreadActions = {
   controls?: Record<string,TaskControlState>;
   staleProgressIds?: ReadonlySet<string>;
   onRecheckProgress?: (taskId: string) => Promise<void>;
-  progressPollingPaused?: boolean;
+  offerProgressRecheck?: boolean;
   workLog?: { expanded: ReadonlyMap<string, boolean>; setExpanded: (taskId: string, expanded: boolean) => void };
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
@@ -327,7 +327,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
-          {active && (progressStale || actions.progressPollingPaused) && actions.onRecheckProgress && <ProgressRecheck taskId={t.id} onRead={actions.onRecheckProgress} />}
+          {active && (progressStale || actions.offerProgressRecheck) && actions.onRecheckProgress && <ProgressRecheck taskId={t.id} onRead={actions.onRecheckProgress} />}
           {missingProposals && actions.onRefreshProposals && <Button size="sm" variant="quiet"
             disabled={actions.refreshingProposals} loading={actions.refreshingProposals}
             onClick={actions.onRefreshProposals}>{uiText('刷新待确认事项')}</Button>}

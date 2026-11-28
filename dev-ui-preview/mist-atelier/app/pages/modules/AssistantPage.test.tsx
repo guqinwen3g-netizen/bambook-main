@@ -985,7 +985,7 @@ it('retains completed task conversations while the worker is offline and require
   expect(button('对话列表')).toBeTruthy();
   await click('核对历史业务任务');
   expect(host.textContent).toContain('原任务真实读回');
-  expect(host.textContent).toContain('任务服务暂不可用');
+  expect(host.textContent).toContain('暂不可交办');
   expect(button('重新提问')).toBeUndefined();
   await question('留到任务服务恢复再问');
   expect(button('发送')!.disabled).toBe(true);

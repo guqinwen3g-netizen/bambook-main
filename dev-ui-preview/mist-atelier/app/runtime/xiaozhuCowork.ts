@@ -552,8 +552,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const staleProgressIds = staleProgress?.scope === scope ? staleProgress.ids : undefined;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
   const hasProgressTargets = activeTasks.length > 0;
-  const progressTargets = React.useRef({ foregroundId, background: [] as string[], available });
-  progressTargets.current = { foregroundId, background: backgroundIds ? backgroundIds.split(',') : [], available };
+  const progressTargets = React.useRef({ foregroundId, background: [] as string[] });
+  progressTargets.current = { foregroundId, background: backgroundIds ? backgroundIds.split(',') : [] };
   const syncProgressTargets = React.useRef<(() => void) | undefined>(undefined);
   const manualProgressRead = React.useRef<((taskId:string)=>Promise<void>|undefined)|undefined>(undefined);
   const recheckProgress = React.useCallback(async(taskId:string)=>{ await manualProgressRead.current?.(taskId); },[]);
@@ -605,8 +605,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       inFlight.clear();
     };
     manualProgressRead.current=manual;
-    const canPoll = () => progressTargets.current.available && live.current === scope
-      && navigator.onLine && document.visibilityState !== 'hidden';
+    const canPoll = () => live.current === scope && navigator.onLine && document.visibilityState !== 'hidden';
     const isDue = (id:string,now:number) => !inFlight.has(id) && now >= (retry.get(id)?.at ?? 0);
     function fillBackground() {
       if (!canPoll()) return;
@@ -621,7 +620,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       for (const id of ready.slice(0,slots)) void readProgress(id);
     }
     const poll = () => {
-      // Model availability gates automatic polling, not reads of an existing task.
+      // An existing task may finish or pause while new model execution is unavailable.
       if (!canPoll()) return;
       const {foregroundId} = progressTargets.current;
       if (foregroundId && isDue(foregroundId,Date.now())) void readProgress(foregroundId);
@@ -647,12 +646,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       else offline();
     };
     syncProgressTargets.current=sync;
-    const refreshVisible = () => { backgroundAt.clear(); poll(); };
-    const reconnect = () => { retry.clear(); refreshVisible(); };
+    const refreshVisible = () => {
+      if (document.visibilityState === 'hidden') {
+        abortReads();
+        return;
+      }
+      retry.clear();
+      backgroundAt.clear();
+      poll();
+    };
     const timer = window.setInterval(poll, 1000);
     document.addEventListener('visibilitychange', refreshVisible);
     window.addEventListener('offline', offline);
-    window.addEventListener('online', reconnect);
+    window.addEventListener('online', refreshVisible);
     return () => {
       if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
       if(syncProgressTargets.current===sync)syncProgressTargets.current=undefined;
@@ -660,12 +666,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
       window.removeEventListener('offline', offline);
-      window.removeEventListener('online', reconnect);
+      window.removeEventListener('online', refreshVisible);
     };
   }, [hasProgressTargets, base, enabled, scope, clearStaleProgress, taskReads]);
   React.useEffect(() => {
     syncProgressTargets.current?.();
-  }, [foregroundId, backgroundIds, available, base, enabled, scope]);
+  }, [foregroundId, backgroundIds, base, enabled, scope]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
