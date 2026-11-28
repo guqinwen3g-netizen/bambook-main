@@ -165,7 +165,7 @@
 |---|---|---|
 | `InModalContext` | True inside a Dialog or Drawer: page-level feedback there must stay in the overlay, not go to the shell behind the scrim. | — |
 | `useInModal` | — | `()` |
-| `useModalFocus` | 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 | `(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement \| null>)` |
+| `useModalFocus` | 顶层浮层独占交互，关闭后回到触发器；允许自身的 portal 菜单。 | `(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement \| null>)` |
 | `Portal` | 浮层统一挂到 .mist-root 内（保证 token 生效），没有则挂 body。 | `({ children }: { children: React.ReactNode })` |
 | `DialogProps` | — | `type DialogProps = { open: boolean; onClose: () => void; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon; tone?: 'accent' \| 'bad' \| 'warn' \| 'ok'; children?: React.ReactNode; footer?: React.ReactNode; width?: number };` |
 | `Dialog` | 居中弹窗：只用于需要打断的确认（删除、提交不可撤回操作）。普通编辑用 Drawer 或页内表单。 | `({ open, onClose, title, description, icon, tone = 'accent', children, footer, width }: DialogProps)` |
@@ -185,7 +185,7 @@
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
 | `ChatMessage` | — | `type ChatMessage = \| { role: 'user'; text: string } \| { role: 'assistant'; html?: string; content?: React.ReactNode; sources?: string[]; actions?: React.ReactNode } \| { role: 'typing' };` |
-| `AssistantDrawer` | 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。 html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。 | `({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes, onExpand }: { open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; onExpand?: () => void; })` |
+| `AssistantDrawer` | 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。 html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。 onExpand 收到当前草稿，返回 true 时清空侧栏输入。 | `({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes, onExpand }: { open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; onExpand?: (draft: string) => boolean \| void; })` |
 
 ## 品牌 · `components/mist/MistMark.tsx`
 

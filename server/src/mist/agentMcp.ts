@@ -1,3 +1,4 @@
+import type { FileTextWindowCache } from './agentFileWindow';
 import { MistApiError } from './errors';
 /**
  * Mist 的标准 MCP 接口（JSON-RPC 2.0，POST /api/mist/mcp）：让桌面工作助手和外部 Agent 不经前端操作同一套业务。
@@ -45,7 +46,7 @@ export type McpRepository = {
   execute(actor: TokenPayload, id: string, input: { requestId: string; expectedRevision: number; command: { type: string; payload: Record<string, unknown> } }): Promise<{ receipt: unknown; replayed?: boolean }>;
   receipt(actor: TokenPayload, id: string, requestId: string): Promise<{ expectedRevision: number; result?: { id?: unknown } }>;
   mailReceivingViews(actor:TokenPayload,id:string,now?:number):Promise<unknown>;
-  fileText?(actor:TokenPayload,id:string,fileId:string,maxChars?:number,cursor?:unknown):Promise<unknown>;
+  fileText?(actor:TokenPayload,id:string,fileId:string,maxChars?:number,cursor?:unknown,fileCache?:FileTextWindowCache):Promise<unknown>;
   mailStateViews(actor:TokenPayload,id:string):Promise<unknown>;
   agentAudits(actor:TokenPayload,id:string,input?:Record<string,unknown>):Promise<unknown>;
   agentAudit(actor:TokenPayload,id:string,requestId:string,input?:Record<string,unknown>):Promise<unknown>;
@@ -103,6 +104,20 @@ const TOOLS = [
 class ToolInputError extends Error {}
 /** One bound catalog for both a standard task client and the platform model executor. */
 export function taskMcpTools(){return TOOLS.filter(t=>t.name!=='bambook_workspaces').map(t=>{const properties:Record<string,unknown>={...t.inputSchema.properties};delete properties.workspaceId;delete properties.taskId;return{...t,inputSchema:{...t.inputSchema,properties,required:(t.inputSchema.required??[]).filter(k=>!['workspaceId','taskId'].includes(k)),additionalProperties:false}};});}
+/** The platform prompt shares repeated definitions. The published MCP catalog keeps complete schemas. */
+export function platformTaskModelToolCatalog(){
+  const objectTypes=AGENT_OBJECT_TYPES.map(type=>type.type);
+  const serializedTypes=JSON.stringify(objectTypes);
+  const tools=taskMcpTools().map(tool=>{
+    const properties=Object.fromEntries(Object.entries(tool.inputSchema.properties).map(([key,shape])=>{
+      if(!shape||typeof shape!=='object'||!('enum' in shape)||JSON.stringify(shape.enum)!==serializedTypes)return [key,shape];
+      const {enum:_types,...details}=shape;
+      return [key,{...details,$ref:'#/$defs/objectType'}];
+    }));
+    return {...tool,inputSchema:{...tool.inputSchema,properties}};
+  });
+  return {$defs:{objectType:{type:'string',enum:objectTypes}},tools};
+}
 const need = (args: Record<string, unknown>, key: string) => { const v = args[key]; if (typeof v !== 'string' || !v.trim() || v.length > 300) throw new ToolInputError(`缺少参数 ${key}`); return v; };
 function commandOf(args: Record<string, unknown>) {
   const command = args.command as { type?: unknown; payload?: unknown } | undefined;
@@ -112,7 +127,7 @@ function commandOf(args: Record<string, unknown>) {
 }
 const canOperate = (actor: TokenPayload) => isAgentActor(actor) && actor.agentMode === 'operate';
 
-async function callTool(repository: McpRepository, actor: TokenPayload, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function callTool(repository: McpRepository, actor: TokenPayload, name: string, args: Record<string, unknown>, fileCache?: FileTextWindowCache): Promise<unknown> {
   switch (name) {
     case 'bambook_task': {
       if(Object.keys(args).some(k=>!['workspaceId','taskId','action','requestId','summary','question','until','delaySeconds','condition','outcome','result'].includes(k)))throw new ToolInputError('任务请求字段无效');
@@ -130,7 +145,12 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
     case 'bambook_file_text': {
       if(Object.keys(args).some(k=>!['workspaceId','fileId','maxChars','cursor'].includes(k)))throw new ToolInputError('只接受 workspaceId、fileId、maxChars、cursor');
       if(!repository.fileText)throw new ToolInputError('当前连接不支持附件正文');
-      try{return await repository.fileText(actor,need(args,'workspaceId'),need(args,'fileId'),args.maxChars as number|undefined,...(args.cursor===undefined?[]:[args.cursor]));}catch(error){if(error instanceof RangeError)throw new ToolInputError(error.message);throw error;}
+      const workspaceId=need(args,'workspaceId'),fileId=need(args,'fileId'),maxChars=args.maxChars as number|undefined;
+      try {
+        return fileCache
+          ? await repository.fileText(actor,workspaceId,fileId,maxChars,args.cursor,fileCache)
+          : await repository.fileText(actor,workspaceId,fileId,maxChars,...(args.cursor===undefined?[]:[args.cursor]));
+      }catch(error){if(error instanceof RangeError)throw new ToolInputError(error.message);throw error;}
     }
     case 'bambook_mail_receiving': { if(Object.keys(args).some(k=>k!=='workspaceId'))throw new ToolInputError('只接受workspaceId');return {items:await repository.mailReceivingViews(actor,need(args,'workspaceId')),stateResults:await repository.mailStateViews(actor,need(args,'workspaceId'))}; }
     case 'bambook_workspaces': return { workspaces: (await repository.list(actor)).map(w => ({ id: w.id, name: w.name, revision: w.revision })) };
@@ -232,7 +252,7 @@ type RpcRequest = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: 
 const rpcError = (id: unknown, code: number, message: string) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
 
 /** 处理一条 JSON-RPC 消息；通知（无 id）返回 null，由路由回 202。 */
-export async function handleMcpMessage(repository: McpRepository, actor: TokenPayload, message: RpcRequest, describeError: (error: unknown) => string): Promise<object | null> {
+export async function handleMcpMessage(repository: McpRepository, actor: TokenPayload, message: RpcRequest, describeError: (error: unknown) => string, fileCache?: FileTextWindowCache): Promise<object | null> {
   if (!message || typeof message !== 'object' || Array.isArray(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') return rpcError(message?.id, -32600, 'Invalid Request');
   const { id, method } = message, params = (message.params && typeof message.params === 'object' ? message.params : {}) as Record<string, unknown>;
   if (id === undefined) return null;
@@ -245,7 +265,7 @@ export async function handleMcpMessage(repository: McpRepository, actor: TokenPa
       const name = params.name, args = (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Record<string, unknown>;
       if (typeof name !== 'string') return rpcError(id, -32602, 'Invalid params');
       try {
-        const data = await callTool(repository, actor, name, args);
+        const data = await callTool(repository, actor, name, args, fileCache);
         return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data } };
       } catch (error) {
         // 业务和权限错误作为工具结果返回，Agent 能据此修正；不暴露内部细节。
