@@ -98,6 +98,34 @@ it('honors a streaming Retry-After without immediately retrying the same provide
  expect(cancelBody).toHaveBeenCalledOnce();
 });
 
+it.each([
+ ['60', Date.UTC(2026, 10, 1, 0, 1)],
+ ['Fri, 06 Nov 2026 00:00:00 GMT', Date.UTC(2026, 10, 6)],
+ ['Friday, 06-Nov-26 00:00:00 GMT', Date.UTC(2026, 10, 6)],
+ ['Fri Nov  6 00:00:00 2026', Date.UTC(2026, 10, 6)],
+ ['Sunday, 01-Jan-51 00:00:00 GMT', Date.UTC(2051, 0, 1)],
+ ['Sunday, 01-Nov-76 00:00:00 GMT', Date.UTC(2076, 10, 1)],
+ ['Saturday, 06-Nov-76 00:00:00 GMT', undefined],
+ ['January 2031', undefined],
+ ['Fri, 06 Nov 2026 00:00:00', undefined],
+ ['Wed, 31 Feb 2027 00:00:00 GMT', undefined],
+ ['Thu, 06 Nov 2026 00:00:00 GMT', undefined],
+])('interprets Retry-After %s using HTTP date syntax and UTC time', async (value, scheduledAt) => {
+ const clock=Date.UTC(2026,10,1),time=vi.spyOn(Date,'now').mockReturnValue(clock);
+ process.env.ARK_API_KEY='fixture-flash-key';
+ process.env.BAMBOOK_MODEL_BASE_URL='https://ark.cn-beijing.volces.com/api/plan/v3';
+ process.env.BAMBOOK_MODEL_NAME='deepseek-v4.1-flash';
+ const fetchMock=vi.fn().mockResolvedValueOnce(new Response(null,{status:429,headers:{'Retry-After':value}}));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]}});
+  const retryNotBefore=scheduledAt??clock+20_000;
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore});
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({message:'LLM_PROVIDER_COOLDOWN',retryNotBefore});
+  expect(fetchMock).toHaveBeenCalledOnce();
+ }finally{time.mockRestore();}
+});
+
 it('rechecks authority before using a ready fallback when the primary is cooling down',async()=>{
  process.env.ARK_API_KEY='primary-key';
  process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
