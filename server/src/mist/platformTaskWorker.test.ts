@@ -989,7 +989,7 @@ it('ignores late model output after human stop, even when the model ignores its 
  const current=await f.current(task.id);await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:current.version}).expect(200);const stopped=(await f.human.get(f.base).expect(200)).body.workspace.state;await f.worker.stop();resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.email.messages[0].id,flag:'starred',value:true}}}));await Promise.resolve();
  expect((await f.current(task.id)).state).toBe('cancelled');const after=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(after).toEqual(stopped);expect(after.email).toEqual(before.email);
 });
-it('reports a same-turn backup through the task and personal activity until the next tool starts', async () => {
+it.each([500,503])('reports a same-turn backup after HTTP %i and updates it for the next model request', async status => {
  vi.stubEnv('ARK_API_KEY','test-primary');
  vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');
  vi.stubEnv('BAMBOOK_LLM_BACKUP_KEY','test-backup');
@@ -1010,7 +1010,7 @@ it('reports a same-turn backup through the task and personal activity until the 
   await f.worker.tick();
   await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(await f.current(task.id)).not.toHaveProperty('modelFallbackSince');
-  releasePrimary(new Response('{}',{status:503}));
+  releasePrimary(new Response('{}',{status}));
   await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
   const backupView=await f.current(task.id);
   expect(backupView).toMatchObject({state:'running',executionStage:'model',modelFallbackSince:expect.any(String)});
@@ -1020,7 +1020,14 @@ it('reports a same-turn backup through the task and personal activity until the 
   ]);
   releaseBackup(success(tool('bambook_get',{type:'email',id:f.workspace.state.email.messages[0].id})));
   await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(3));
-  expect(await f.current(task.id)).not.toHaveProperty('modelFallbackSince');
+  const nextView=await f.current(task.id);
+  if(status===503){
+   expect(fetchMock.mock.calls[2][0]).toBe('https://backup.example/v1/chat/completions');
+   expect(nextView).toHaveProperty('modelFallbackSince');
+  }else{
+   expect(fetchMock.mock.calls[2][0]).toBe(fetchMock.mock.calls[0][0]);
+   expect(nextView).not.toHaveProperty('modelFallbackSince');
+  }
   releaseNext(success(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟来信。'})));
   await f.worker.settled();
   const finished=await f.current(task.id);
@@ -1119,7 +1126,11 @@ it.each([429,503])('respects provider retry timing for %i and retains acknowledg
  }finally{vi.unstubAllGlobals();}
 });
 
-it('queues another task during the same provider cooldown without recording a model failure',async()=>{
+it.each([
+ {status:429,retryAfter:'60',delay:60_000},
+ {status:429,retryAfter:undefined,delay:20_000},
+ {status:503,retryAfter:'invalid',delay:20_000},
+])('queues another task without recording a model failure on $status with Retry-After $retryAfter',async({status,retryAfter,delay})=>{
  vi.stubEnv('ARK_API_KEY','fixture-shared-flash-key');
  vi.stubEnv('BAMBOOK_MODEL_BASE_URL','https://ark.cn-beijing.volces.com/api/plan/v3');
  vi.stubEnv('BAMBOOK_MODEL_NAME','deepseek-v4.1-flash');
@@ -1127,19 +1138,19 @@ it('queues another task during the same provider cooldown without recording a mo
  const f=await fixture(complete);
  let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
  const fetchMock=vi.fn()
-  .mockResolvedValueOnce(new Response('{}',{status:429,headers:{'Retry-After':'60'}}))
+  .mockResolvedValueOnce(new Response('{}',{status,headers:retryAfter?{'Retry-After':retryAfter}:undefined}))
   .mockImplementation(async()=>new Response(JSON.stringify({choices:[{message:{content:tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已续办原任务。'})}}]})));
  vi.stubGlobal('fetch',fetchMock);
  try{
   f.worker.start(3_600_000);
   const first=await f.create('platform');await f.drain();
   const second=await f.create('platform');await f.drain();
-  const retryAt=new Date(clock+60_000).toISOString();
+  const retryAt=new Date(clock+delay).toISOString();
   for(const task of [first,second])expect(await f.current(task.id)).toMatchObject({state:'queued',executionIssue:{retryAt}});
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const stored=(await taskRecord((f.repository as any).prisma,f.workspace.id,second.id)).value;
   expect(stored.platform?.failures).toBe(0);
-  clock+=59_999;await f.drain();expect(fetchMock).toHaveBeenCalledTimes(1);
+  clock+=delay-1;await f.drain();expect(fetchMock).toHaveBeenCalledTimes(1);
   clock+=1;await f.drain();await f.drain();
   for(const task of [first,second])expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已续办原任务。'});
   expect(fetchMock).toHaveBeenCalledTimes(3);
