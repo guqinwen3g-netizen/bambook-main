@@ -339,6 +339,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   },[base,enabled,scope]);
+  const clearDeniedHistory = React.useCallback(()=>{
+    deniedHistory.current++;trackedOrigin.current=undefined;
+    receiptReconnectPending.current=false;receiptRead.current?.abort();
+    abortOlderRead();moreRecovery.current=undefined;
+    setLoadingMore(false);setMoreError('');
+    setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
+  },[abortOlderRead]);
   const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
     historyRecovery.current=mode==='reconnect'?'pending':undefined;
@@ -406,13 +413,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (current()) {
         const status=Number((e as {status?:number})?.status);
         historyRecovery.current=transientHistoryRead(status)?'needed':undefined;
-        if ([401,403,404].includes(status)) {
-          deniedHistory.current++;trackedOrigin.current=undefined;
-          receiptReconnectPending.current=false;receiptRead.current?.abort();
-          abortOlderRead();moreRecovery.current=undefined;
-          setLoadingMore(false);setMoreError('');
-          setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
-        }
+        if ([401,403,404].includes(status)) clearDeniedHistory();
         setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
         setError(e instanceof Error ? e.message : '读取失败');
       }
@@ -426,30 +427,80 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         setLoading(false);setCheckingAvailability(false);
       }
     }
-  }, [abortOlderRead, base, enabled, scope, checkReceipts]);
+  }, [abortOlderRead, base, enabled, scope, checkReceipts, clearDeniedHistory]);
   React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); abortOlderRead(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [abortOlderRead,load,scope]);
   React.useEffect(() => {
     if(!base||!enabled)return;
+    let resumeReceipts=false;
     const disconnect=()=>{
-      const active=historyRead.current;
-      if(!active||live.current!==scope)return;
-      historyRecovery.current='needed';
+      if(live.current!==scope)return;
       const reason=new Error('网络连接已断开');
-      active.abort(reason);
-      capabilityRead.current?.abort(reason);
+      const capability=capabilityRead.current;
+      if(historyRead.current){
+        historyRecovery.current='needed';
+        historyRead.current.abort(reason);
+      }else if(capability){
+        capabilityRead.current=undefined;
+        resumeReceipts=false;
+        setCheckingAvailability(false);
+      }
+      capability?.abort(reason);
     };
-    const reconnect=()=>{
+    const recheck=async()=>{
+      if(capabilityRead.current)return;
+      const controller=new AbortController(),run=version.current;
+      capabilityRead.current=controller;
+      setCheckingAvailability(true);
+      const current=()=>live.current===scope&&version.current===run&&capabilityRead.current===controller;
+      try{
+        const [caps,mine]=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,'任务服务检查超时',signal=>Promise.all([
+          mistApiRequest(base+'/agent-task-capabilities',{signal}) as Promise<{platformAvailable:boolean}>,
+          mistApiRequest(base+'/agent-identities?scope=mine',{signal}) as Promise<{items:AgentIdentityView[]}>,
+        ]));
+        if(!current()||controller.signal.aborted)return;
+        const own=mine.items.find(identity=>identity.kind==='personal');
+        const nextAvailable=caps.platformAvailable===true&&own?.state!=='disabled';
+        lastAvailability.current={scope,available:nextAvailable};
+        setAvailable(nextAvailable);
+      }catch(error){
+        if(current()&&[401,403,404].includes(Number((error as {status?:number})?.status))){
+          resumeReceipts=false;
+          clearDeniedHistory();
+          setAvailable(false);
+          setError(error instanceof Error?error.message:'读取失败');
+        }
+      }finally{
+        if(current()){
+          capabilityRead.current=undefined;
+          setCheckingAvailability(false);
+          if(resumeReceipts&&navigator.onLine)void checkReceipts('reconnect');
+          resumeReceipts=false;
+        }
+        controller.abort();
+      }
+    };
+    const wake=(reconnect:boolean)=>{
       if(!navigator.onLine||live.current!==scope||historyRecovery.current==='pending')return;
-      if(historyRecovery.current==='needed')void load('reconnect');
-      else void checkReceipts('reconnect');
+      if(historyRecovery.current==='needed'){
+        if(reconnect)void load('reconnect');
+        return;
+      }
+      if(!historyRead.current&&lastAvailability.current?.scope===scope&&!lastAvailability.current.available){
+        resumeReceipts=reconnect||!!capabilityRead.current&&resumeReceipts;
+        void recheck();
+      }else if(reconnect)void checkReceipts('reconnect');
     };
+    const reconnect=()=>wake(true);
+    const focus=()=>{if(document.visibilityState!=='hidden')wake(false);};
     window.addEventListener('offline',disconnect);
     window.addEventListener('online',reconnect);
+    window.addEventListener('focus',focus);
     return()=>{
       window.removeEventListener('offline',disconnect);
       window.removeEventListener('online',reconnect);
+      window.removeEventListener('focus',focus);
     };
-  },[base,checkReceipts,enabled,load,scope]);
+  },[base,checkReceipts,clearDeniedHistory,enabled,load,scope]);
   const openReportIds = React.useMemo(() => {
     if (!visibleConversationId) return '';
     const personal = cachedTasks.filter(task => !task.automationId);
