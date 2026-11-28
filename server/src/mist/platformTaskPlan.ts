@@ -7,14 +7,24 @@ import type { PdfPageTextSpan } from './agentFileText';
 import { isFileTextCursor, type PdfPageRange, type PdfPageScope } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
 
-export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
+export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string;providedMaterialsOnly?:true};
 export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
 export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:AgentTaskIssueCode};
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const ATTACHMENT_PREFETCH_CHARS=3500;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
-export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;proposalReadBack?:{proposalId:string;outcome:'confirmed'|'rejected';ref:AgentTaskIntentRef;stepOffset:number};steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
+export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;providedMaterialsOnly?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;proposalReadBack?:{proposalId:string;outcome:'confirmed'|'rejected';ref:AgentTaskIntentRef;stepOffset:number};steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
 const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_get_orders','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
+
+/** Recognize an explicit source limit in the owner's current request. */
+export function requestsProvidedMaterialsOnly(instructions:string):boolean {
+  const request=splitTaskRequest(instructions).normalize('NFKC')
+    .replace(/```[\s\S]*?```|^\s*>[^\n]*|“[^”]*”|「[^」]*」|『[^』]*』|"[^"]*"/gm,' ')
+    // The speech transcript can attach the homophone for 只 to the preceding clause.
+    .replace(/(核对|确认)[只之][。.,，\s]+用(?=我(?:本轮)?提供)/gu,'$1。只用');
+  return /(?:^|[。！？；，.,!?;\n])\s*(?:请\s*)?(?:只|仅)\s*(?:用|使用|根据|依据|基于)\s*(?:我(?:本轮)?提供的?|本轮提供的?|已提供的?|我口述的?|本轮口述的?)\s*(?:模拟)?\s*(?:数据|资料|材料|信息|事实|附件)(?=$|[，。；！？,:;.?!(\s])/u.test(request)
+    || /(?:^|[.!?;\n])\s*(?:please\s+)?(?:only\s+(?:use|rely on)|(?:use|rely on)\s+only)\s+(?:the\s+)?(?:data|material[s]?|facts|information|attachments)\s+(?:I (?:provided|supplied)|(?:provided|supplied) in this (?:turn|request))\b/i.test(request);
+}
 
 function assignsPlatformRequestId(name:string,args:Record<string,unknown>){
   return name==='bambook_execute'||name==='bambook_task'&&args.action!=='status';

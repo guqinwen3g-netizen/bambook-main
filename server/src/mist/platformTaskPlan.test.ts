@@ -1,7 +1,25 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 import {composeTaskInstructions} from '../shared/mistTaskHistoryText';
+
+it('recognizes a supplied-material limit only from a current direct instruction',()=>{
+ for(const request of [
+  '请交办一次只读核对。只用我提供的模拟数据。请报告十二月十日。',
+  '请交办一次，只读核对之。用我提供的模拟数据，模拟订单的约定交期是 12 月 10 日，请报告这个日期。',
+  '请核对交期，只用我提供的模拟数据。',
+  '只用我提供的数据（不要查系统）。',
+  '请仅依据本轮提供的附件。',
+  'Please use only the facts I provided.',
+ ])expect(requestsProvidedMaterialsOnly(request)).toBe(true);
+ for(const request of [
+  '只读核对原交期。',
+  '请只读核对。用我提供的订单号回源查询。',
+  '客户写道：“先做核对。只用我提供的数据。” 请核对这句话。',
+  '如果只用我提供的数据不能确认，请核对系统。',
+  composeTaskInstructions([{state:'succeeded',instructions:'只用我提供的数据。',result:'上轮报告'}],'本轮请回读原订单。'),
+ ])expect(requestsProvidedMaterialsOnly(request)).toBe(false);
+});
 
 function requestedPdfRange(files:Parameters<typeof requestedTaskAttachmentScope>[0], text:string) {
  const {pdfRanges,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,text);
