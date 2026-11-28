@@ -268,10 +268,16 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setMissingReceipt(undefined);setBusy(false); }, [proposal?.id,scopeKey]);
   const incoming=proposal?incomingProposalDetails(proposal.command,state,incomingAccess,businessNow().toISOString()):null;
   const sourceReview=proposal?(developmentReferenceProposalDetails(proposal.command,state,referenceAccess,businessNow().toISOString())||commercialSampleProposalDetails(proposal.command,state,commercialSampleLoanSources,canConfirmShippingBasis,businessNow().toISOString())||developmentTaskProposalDetails(proposal.command,state,taskClosePlans)||shippingSampleProposalDetails(proposal.command,state,canConfirmShippingBasis)):null;
+  const patch=proposal?.command.payload.patch as {terms?:unknown}|undefined;
+  const changesCustomerTerms=!!proposal&&['customer.update','market.customer.update'].includes(proposal.command.type)
+    &&typeof patch?.terms==='string';
+  const termsCustomer=changesCustomerTerms?state?.customers.find(customer=>customer.id===proposal?.command.payload.id):undefined;
+  const sourceFingerprint=sourceReview?.fingerprint??(termsCustomer?stableJson([termsCustomer.id,termsCustomer.terms]):'');
+  const sourceReason=sourceReview?.reason??(changesCustomerTerms&&state&&!termsCustomer?'客户已不可见，请重新核对':'');
   const sourceBasis=React.useRef({key:'',fingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
   if(sourceBasis.current.key!==sourceKey)sourceBasis.current={key:sourceKey,fingerprint:''};
-  if(sourceReview&&!sourceReview.reason&&!sourceBasis.current.fingerprint)sourceBasis.current.fingerprint=sourceReview.fingerprint;
-  const sourceChanged=!!sourceReview?.fingerprint&&!!sourceBasis.current.fingerprint&&sourceReview.fingerprint!==sourceBasis.current.fingerprint;
+  if(sourceFingerprint&&!sourceReason&&!sourceBasis.current.fingerprint)sourceBasis.current.fingerprint=sourceFingerprint;
+  const sourceChanged=!!sourceFingerprint&&!!sourceBasis.current.fingerprint&&sourceFingerprint!==sourceBasis.current.fingerprint;
   const incomingBasis=React.useRef({key:'',fingerprint:''}),incomingKey=scopeKey+':'+proposal?.id;
   if(incomingBasis.current.key!==incomingKey)incomingBasis.current={key:incomingKey,fingerprint:''};
   if(incoming&&!incoming.reason&&!incomingBasis.current.fingerprint)incomingBasis.current.fingerprint=incoming.fingerprint;
@@ -296,7 +302,7 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
   const signing = commandRequiresSignature(proposal.command);
   const awaitingReceipt=pendingFailure||!!pendingRequestId;
-  const confirmBlocked=!!mail?.reason||!!reopening?.reason||!!incoming?.reason||incomingChanged||!!sourceReview?.reason
+  const confirmBlocked=!!mail?.reason||!!reopening?.reason||!!incoming?.reason||incomingChanged||!!sourceReason
     ||sourceChanged||!!proposal.taskBlocked||!!proposal.unavailable||!!draftSourceMissing||quoteSourceMissing||rfqSourceUnavailable
     ||orderSourceUnavailable||incomplete||(risk==='high'&&!password)||(signing&&!signature);
   const canReplay=checkedMissing&&!!onReplayOriginal
@@ -344,7 +350,8 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
       {orderSourceUnavailable&&<Banner tone="warn" title={uiText('订单或来源资料已不可见，请重新核对')} />}
       {(incoming?.reason||incomingChanged)&&<Banner tone="warn" title={uiText(incoming?.reason||'来样或工厂任务已变化，请重新提出提议')} />}
-      {(sourceReview?.reason||sourceChanged)&&<Banner tone="warn" title={uiText(sourceReview?.reason||'办理资料已变化，请重新提出提议')}/>}
+      {(sourceReason||sourceChanged&&(!changesCustomerTerms||!awaitingReceipt))&&<Banner tone="warn"
+        title={uiText(sourceReason||(changesCustomerTerms?'客户付款条件已更新，请重新提出提议':'办理资料已变化，请重新提出提议'))}/>}
       {reopening?.reason&&<Banner tone="warn" title={uiText(reopening.reason)} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{(incoming?[incoming.title]:sourceReview?[sourceReview.title]:reopening?['恢复开发案']:proposal.summary).map((line, i) => <span key={i}>{incoming||sourceReview||reopening?uiText(line):line}</span>)}</div>

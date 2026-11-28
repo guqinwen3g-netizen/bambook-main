@@ -325,14 +325,22 @@ it.each(['customer.update','market.customer.update'])('compares current and prop
  state.customers=[{id:'customer-private',code:'CUS-SIM',name:'Birchline',terms:'T/T 20% 预付',creditLimit:0,currency:'GBP'} as any];
  const proposal:any={id:'terms-proposal',ownerId:'u',owner:'Manager',summary:['变更付款条件'],state:'pending',createdAt:'2026-11-28',
   command:{type,payload:{id:'customer-private',patch:{terms:'T/T 40% 预付'}}}};
- const host=document.createElement('div'),root=createRoot(host);
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
  document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
  try{
-  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  render();
   const changes=document.querySelector('[data-agent-proposal-changes]')?.textContent;
   expect(changes).toContain('当前付款条件 · T/T 20% 预付');
   expect(changes).toContain('拟改付款条件 · T/T 40% 预付');
   expect(changes).not.toContain('customer-private');
+  state.customers[0].city='Manchester';render();
+  expect(getConfirm(host).disabled).toBe(false);
+  state.customers[0].terms='由另一会话修改的条款';render();
+  expect(document.body.textContent).toContain('客户付款条件已更新，请重新提出提议');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
  }finally{act(()=>root.unmount());host.remove();}
 });
 
