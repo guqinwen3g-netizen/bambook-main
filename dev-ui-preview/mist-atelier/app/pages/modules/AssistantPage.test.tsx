@@ -575,6 +575,50 @@ it.each([false,true])('looks up a lost receipt in place and preserves an edited 
  expect(mock.api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
 });
 
+it.each([
+ { reconnectWhileSending:false, edited:true, found:true },
+ { reconnectWhileSending:true, edited:false, found:true },
+ { reconnectWhileSending:false, edited:false, found:false },
+])('checks an uncertain submission on reconnect ($reconnectWhileSending, $found)', async ({reconnectWhileSending,edited,found})=>{
+ let posted:any, rejectUpload:((error:Error)=>void)|undefined;
+ let reads=0;
+ mock.fetch.mockResolvedValue(response({configured:true}));
+ mock.api.mockImplementation(async(url:string,init:any)=>{
+  if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+  if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+  if(init?.method==='POST'&&url.endsWith('/personal-agent/tasks')){
+   posted=JSON.parse(init.body);
+   if(reconnectWhileSending)return new Promise((_,reject)=>{rejectUpload=reject;});
+   throw new Error('连接断开');
+  }
+  if(url.includes('/personal-agent/tasks/receipt/')){
+   reads++;
+   expect(url.endsWith(posted.requestId)).toBe(true);
+   if(!found)throw Object.assign(new Error('任务回执不存在'),{status:404});
+   return {item:{id:'recovered-on-reconnect',identityId:'personal',executor:'platform',conversationId:posted.conversationId,name:'原任务',instructions:posted.instructions,state:'succeeded',result:'原报告已恢复',createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:01:00Z',questions:[],waitingProposalIds:[]}};
+  }
+  return {items:[],nextCursor:null};
+ });
+ await mount();await question('原问题');await click('发送');
+ if(edited)await question('保留修改后的草稿');
+ if(reconnectWhileSending){
+  const tile=host.querySelector<HTMLButtonElement>('.mist-xz-tile')!;
+  expect(tile.disabled).toBe(true);
+  await act(async()=>tile.click());
+  expect(host.querySelector('textarea')?.value).toBe('原问题');
+ }
+ await act(async()=>window.dispatchEvent(new Event('online')));
+ if(reconnectWhileSending){
+  expect(reads).toBe(0);
+  expect(rejectUpload).toBeTypeOf('function');
+  await act(async()=>rejectUpload?.(new Error('连接断开')));
+ }
+ expect(reads).toBe(1);
+ expect(host.textContent).toContain(found?'原报告已恢复':'提交结果待核对');
+ expect(host.querySelector('textarea')?.value).toBe(edited?'保留修改后的草稿':found?'':'原问题');
+ expect(mock.api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
+});
+
 it('restores the request, order and original attachment of a failed task for review before resending', async () => {
   const failure = {
     id: '00000000-0000-4000-8000-000000000047',

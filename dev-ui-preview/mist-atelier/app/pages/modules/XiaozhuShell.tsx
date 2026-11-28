@@ -97,11 +97,11 @@ export function greeting(name: string | undefined, now = new Date()) {
   const h = (now.getUTCHours() + 8) % 24, part = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
   return name ? `${part}，${name}` : part;
 }
-export function XiaozhuEmpty({ name, suggestions, onPick, children }: { name?: string; suggestions: string[]; onPick: (text: string) => void; children: React.ReactNode }) {
+export function XiaozhuEmpty({ name, suggestions, suggestionsDisabled, onPick, children }: { name?: string; suggestions: string[]; suggestionsDisabled?: boolean; onPick: (text: string) => void; children: React.ReactNode }) {
   return <div className="mist-xz-empty">
     <AIBadge icon={AssistantEyes} size="lg" />
     <h2>{uiText(greeting(name))}</h2>
     <div className="mist-xz-empty-composer">{children}</div>
-    <div className="mist-xz-tiles">{suggestions.slice(0, 4).map((s, i) => <button key={s} type="button" className="mist-xz-tile" onClick={() => onPick(s)}><Icon icon={TILE_ICON[i] ?? Sparkles} size="sm" /><span>{uiText(s)}</span></button>)}</div>
+    <div className="mist-xz-tiles">{suggestions.slice(0, 4).map((s, i) => <button key={s} type="button" className="mist-xz-tile" disabled={suggestionsDisabled} onClick={() => onPick(s)}><Icon icon={TILE_ICON[i] ?? Sparkles} size="sm" /><span>{uiText(s)}</span></button>)}</div>
   </div>;
 }
