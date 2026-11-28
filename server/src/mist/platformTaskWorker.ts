@@ -366,7 +366,7 @@ export class MistPlatformTaskWorker{
           const namedLinePlan:PlatformTaskPlan|undefined=unreadLine
             ? {name:'bambook_get',arguments:{type:'order_line',id:unreadLine.id}}:undefined;
           const prefetch=intentRead.plan??lineIndexPlan??namedLinePlan;
-          if(prefetch){step=await this.repository.savePlatformTaskPlan(actor,prefetch);}
+          if(prefetch){step=await this.repository.savePlatformTaskPlan(actor,prefetch,true);}
           else{
             const attachment=readableAttachments?.find(file=>!isTaskImage(file.name)&&(pendingScopedReads.has(file.id)
               ||!readableSteps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined)));
@@ -374,7 +374,7 @@ export class MistPlatformTaskWorker{
               ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:ATTACHMENT_PREFETCH_CHARS}}
               :shortDisjointPdfContinuationPlan(pdfRanges,readableSteps)??shortPdfContinuationPlan(readableAttachments,readableSteps,context.task.instructions)??shortOfficeTailPlan(readableAttachments,readableSteps);
             if(attachmentPlan){
-              step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
+              step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan,true);
             }else{
               if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
               phase='model';
