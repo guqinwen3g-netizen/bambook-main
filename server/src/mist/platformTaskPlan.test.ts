@@ -127,6 +127,22 @@ it('uses a dedicated platform task reasoning profile while retaining the existin
 });
 
 
+it('normalizes a question progress string from arguments into the public update',()=>{
+  const question={action:'question',question:'请补充约定交期。'};
+  const payload={name:'bambook_task',arguments:{...question,progress:'读取报价后\n需要核对交期。',requestId:'ignored'}};
+  expect(parsePlatformTaskPlan(JSON.stringify(payload))).toEqual({name:'bambook_task',arguments:question,progress:'读取报价后 需要核对交期。'});
+  expect(parsePlatformTaskPlan(JSON.stringify({...payload,progress:'请核对交期。'}))).toEqual({name:'bambook_task',arguments:question,progress:'请核对交期。'});
+  expect(parsePlatformTaskPlan(JSON.stringify({...payload,progress:'Bearer abcdef1234567890'}))).toEqual({name:'bambook_task',arguments:question});
+  expect(parsePlatformTaskPlan(JSON.stringify({...payload,arguments:{...question,progress:'bmt1_abc123'}}))).toEqual({name:'bambook_task',arguments:question});
+});
+
+it('leaves unexpected tool arguments in place for strict validation',()=>{
+  const question={action:'question',question:'请补充约定交期。',progress:{unexpected:true},unknown:'must not be stripped'};
+  expect(parsePlatformTaskPlan(JSON.stringify({name:'bambook_task',arguments:question}))).toEqual({name:'bambook_task',arguments:question});
+  const finish={action:'finish',outcome:'succeeded',result:'已核对。',progress:'更新'};
+  expect(parsePlatformTaskPlan(JSON.stringify({name:'bambook_task',arguments:finish}))).toEqual({name:'bambook_task',arguments:finish});
+});
+
 it('accepts a bounded public progress update without forwarding it to the tool',()=>{
   const plan=parsePlatformTaskPlan(JSON.stringify({name:'bambook_get',arguments:{type:'order',id:'so-demo'},progress:'先核对订单中的交期，再与附件对照。'}));
   expect(plan.progress).toBe('先核对订单中的交期，再与附件对照。');

@@ -44,8 +44,13 @@ export function parsePlatformTaskPlan(text:string):PlatformTaskPlan{
   if(value.name==='bambook_task'&&!['status','checkpoint','question','wait','finish'].includes(value.arguments.action))throw Error('MODEL_PLAN_INVALID');
   const args={...value.arguments};
   if(assignsRequestId)delete args.requestId;
-  const progress=typeof value.progress==='string'&&!/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value.progress)
-    ? value.progress.replace(/[\u0000-\u001f\u007f\s]+/gu,' ').trim().slice(0,240) : '';
+  let rawProgress:unknown=value.progress;
+  if(value.name==='bambook_task'&&args.action==='question'&&typeof args.progress==='string'){
+    if(!('progress'in value))rawProgress=args.progress;
+    delete args.progress;
+  }
+  const progress=typeof rawProgress==='string'&&!/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(rawProgress)
+    ? rawProgress.replace(/[\u0000-\u001f\u007f\s]+/gu,' ').trim().slice(0,240) : '';
   return{name:value.name,arguments:args,...(progress?{progress}:{})};
 }
 export function newPlatformTaskStep(plan:PlatformTaskPlan,now:number):PlatformTaskStep{

@@ -134,7 +134,7 @@ it('does not bypass the supplied-material scope when a live business record is a
 
 it('reads only the supplied original again after the owner answers a missing detail',async()=>{
  const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'确认报价：十二月十日。'}))
-  .mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请提供约定交期。'}));
+  .mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请提供约定交期。',progress:'附件未登记约定交期。'}));
  const f=await fixture(complete),read=vi.spyOn(f.repository,'getForAgent'),file=vi.spyOn(f.repository,'fileText');
  f.worker.start(3_600_000);
  const task=(await f.human.post(f.base+'/personal-agent/tasks')
@@ -143,6 +143,8 @@ it('reads only the supplied original again after the owner answers a missing det
  await f.drain();
  const waiting=await f.current(task.id);
  expect(waiting.state).toBe('waiting_human');
+ expect(waiting.trail).toEqual(expect.arrayContaining([expect.objectContaining({progress:'附件未登记约定交期。'})]));
+ expect(complete).toHaveBeenCalledOnce();
  expect(file).toHaveBeenCalledTimes(1);
  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
   requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'约定交期十二月十日。',
