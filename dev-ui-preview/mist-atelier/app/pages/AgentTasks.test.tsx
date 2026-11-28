@@ -374,6 +374,53 @@ it('refreshes the open task and its history even after it leaves the first page'
  act(paint);await flush();await click(getByText(host,'核对邮件'));advanced=true;await click(getByRole(host,'button',{name:'刷新'}));
  expect(getByText(document.body,'当前检查点')).toBeTruthy();expect(getByText(document.body,'保存检查点')).toBeTruthy();expect(getByText(document.body,'执行中')).toBeTruthy();
 });
+it('loads the finish event as the active task reaches its report, before the list poll',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const running={...row(),executor:'platform',state:'running'};
+ let selected=running;
+ const events=[{action:'claimed',version:3,at:'2026-11-01T00:01:00Z',actorName:'邮件助理'}];
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:selected}
+  :url.endsWith('/history')?{items:[...events],nextCursor:null}
+  :url.includes('agent-identities')?{items:[identity()]}:{items:[running],nextCursor:null}));
+ try{
+  act(paint);await flush();await click(getByText(host,'核对邮件'));
+  const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+  expect(getByText(dialog,'执行器领取')).toBeTruthy();
+  selected={...running,state:'succeeded',version:4,result:'核对报告'};
+  events.unshift({action:'finished',version:4,at:'2026-11-01T00:02:00Z',actorName:'邮件助理'});
+  await act(async()=>vi.advanceTimersByTimeAsync(2_500));
+  expect(getByText(dialog,'核对报告')).toBeTruthy();
+  expect(getByText(dialog,'执行器领取')).toBeTruthy();
+  expect(dialog.textContent?.match(/执行结束/g)).toHaveLength(2);
+  expect(seam.api.mock.calls.filter(([url])=>String(url).endsWith('/agent-tasks'))).toHaveLength(1);
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+it('retries the failed newest history page without jumping to the older cursor',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const running={...row(),executor:'platform',state:'running'};
+ let selected=running,historyFails=false;
+ seam.api.mockImplementation((url:string)=>{
+  if(url.endsWith('/history')&&historyFails)return Promise.reject(new Error('记录刷新失败'));
+  return Promise.resolve(url.endsWith('/task')?{item:selected}
+   :url.endsWith('/history')?{items:[],nextCursor:'older-history'}
+   :url.includes('agent-identities')?{items:[identity()]}:{items:[running],nextCursor:null});
+ });
+ try{
+  act(paint);await flush();await click(getByText(host,'核对邮件'));
+  const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+  expect(getByRole(dialog,'button',{name:'更多记录'})).toBeTruthy();
+  selected={...running,state:'succeeded',version:4};
+  historyFails=true;
+  await act(async()=>vi.advanceTimersByTimeAsync(2_500));
+  expect(getByText(dialog,'任务记录读取失败')).toBeTruthy();
+  historyFails=false;
+  await click(getByRole(dialog,'button',{name:'重试'}));
+  expect(String(seam.api.mock.lastCall?.[0])).toMatch(/\/task\/history$/);
+  expect(dialog.textContent).not.toContain('任务记录读取失败');
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
 it('includes active owner connections beyond the first page',async()=>{
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.includes('agent-identities')?url.includes('cursor=next')?{items:[identity()],nextCursor:null}:{items:[],nextCursor:'next'}:{items:[],nextCursor:null}));
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));expect(getByRole(document.body,'option',{name:'邮件助理 · 可办理'})).toBeTruthy();
