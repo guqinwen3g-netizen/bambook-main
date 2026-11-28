@@ -1085,13 +1085,14 @@ it.each([429,503])('respects provider retry timing for %i and retains acknowledg
  vi.stubEnv('BAMBOOK_MODEL_BASE_URL','https://ark.cn-beijing.volces.com/api/plan/v3');
  vi.stubEnv('BAMBOOK_MODEL_NAME','deepseek-v4.1-flash');
  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
- const f=await fixture(complete);const order=f.workspace.state.orders[0];
+ const f=await fixture(complete,{modelTimeoutMs:200});const order=f.workspace.state.orders[0];
  f.worker.start(3_600_000);
  let clock=Math.floor(Date.now()/1000)*1000;
  vi.spyOn(Date,'now').mockImplementation(()=>clock);
  const retryAfter=status===429?'60':new Date(clock+60_000).toUTCString();
+ const cancelBody=vi.fn();
  const fetchMock=vi.fn()
-  .mockResolvedValueOnce(new Response(JSON.stringify({error:{message:'Provider briefly busy'}}),{status,headers:{'Retry-After':retryAfter}}))
+  .mockResolvedValueOnce(new Response(new ReadableStream({cancel:cancelBody}),{status,headers:{'Retry-After':retryAfter}}))
   .mockResolvedValueOnce(new Response(JSON.stringify({choices:[{message:{content:tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原单。'})}}]})));
  vi.stubGlobal('fetch',fetchMock);
  try{
@@ -1101,6 +1102,7 @@ it.each([429,503])('respects provider retry timing for %i and retains acknowledg
   await f.drain();
   const waiting=await f.current(item.id);
   expect(waiting).toMatchObject({state:'queued',executionIssue:{code:'model_unavailable',retryAt:new Date(clock+60_000).toISOString()}});
+  expect(cancelBody).toHaveBeenCalledOnce();
   expect(waiting.trail.filter((entry:{completed?:boolean})=>entry.completed)).toHaveLength(1);
   clock+=59_999;await f.drain();
   expect(fetchMock).toHaveBeenCalledTimes(1);

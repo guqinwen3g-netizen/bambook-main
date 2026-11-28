@@ -39,6 +39,14 @@ function responseRetryNotBefore(response: Response, now: number) {
   return Number.isSafeInteger(at) && at > now ? at : undefined;
 }
 
+function honorRetryAfter(response: Response): void {
+  const retryNotBefore = responseRetryNotBefore(response, Date.now());
+  if (retryNotBefore === undefined) return;
+  // The headers already establish the retry time. A slow error body must not delay it.
+  void response.body?.cancel().catch(() => {});
+  throw new LlmProviderRetryError(`Model API failed with ${response.status}`, retryNotBefore);
+}
+
 export type LlmProviderConfig = {
   id: string;
   baseUrl: string;
@@ -258,7 +266,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
         signal: input.signal, onDelta: input.onDelta,
       });
     } catch (streamErr: any) {
-      if (streamErr?.name === 'AbortError') throw streamErr;
+      if (streamErr?.name === 'AbortError' || streamErr instanceof LlmProviderRetryError) throw streamErr;
       // 流式失败，降级到非流式后仍由外层链负责转移到下一个 provider
     }
   }
@@ -289,10 +297,9 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const retryNotBefore = responseRetryNotBefore(res, Date.now());
+    honorRetryAfter(res);
     const data: any = await res.json().catch(() => ({}));
     const message = data?.error?.message || data?.message || `Model API failed with ${res.status}`;
-    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(message, retryNotBefore);
     throw new Error(message);
   }
   const data: any = await res.json().catch(() => ({}));
@@ -314,7 +321,10 @@ async function streamChatCompletion(params: {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
     body: JSON.stringify({ model: params.model, temperature: params.temperature, stream: true, messages: params.messages }),
   });
-  if (!res.ok) throw new Error(`Model API stream failed with ${res.status}`);
+  if (!res.ok) {
+    honorRetryAfter(res);
+    throw new Error(`Model API stream failed with ${res.status}`);
+  }
   if (!res.body) throw new Error('Model API stream returned no body');
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
