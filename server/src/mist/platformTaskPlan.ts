@@ -9,7 +9,7 @@ import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string;providedMaterialsOnly?:true};
 export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
-export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:AgentTaskIssueCode};
+export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;providerRetryAt?:number;failures?:number;issue?:AgentTaskIssueCode};
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const ATTACHMENT_PREFETCH_CHARS=3500;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
