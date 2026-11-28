@@ -140,7 +140,7 @@ it('rechecks a stale task directly and coalesces concurrent progress reads',asyn
  expect(api.mock.calls.map(([url])=>url)).toEqual(['/api/mist/workspaces/workspace/agent-tasks/task']);
 });
 
-it('allows a direct progress read while model execution is unavailable',async()=>{
+it('automatically reads a completed original task while model execution is unavailable',async()=>{
  const running={...task,state:'running',executionStage:'model',version:2,canControl:true};
  api.mockImplementation(async(url:string)=>{
   if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:false};
@@ -151,12 +151,56 @@ it('allows a direct progress read while model execution is unavailable',async()=
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
  await act(async()=>root!.render(<View/>));
  expect(channel.available).toBe(false);
- expect(channel.tasks[0].state).toBe('running');
- expect(api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/task'))).toBe(false);
- api.mockClear();
- await act(async()=>{await channel.recheckProgress('task');});
- expect(api.mock.calls.map(([url])=>url)).toEqual(['/api/mist/workspaces/workspace/agent-tasks/task']);
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks/task'))).toHaveLength(1);
+ expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
  expect(channel.tasks[0]).toMatchObject({state:'succeeded',result:'已读回原报告'});
+});
+
+it('does not repeat a fresh progress read when the availability check settles',async()=>{
+ const running={...task,conversationId:'c_slow_capability',state:'running',version:2,result:''};
+ let allow:(value:unknown)=>void=()=>{};
+ const count=()=>api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks/task')).length;
+ api.mockImplementation(async(url:string)=>{
+  if(url.includes('/personal-agent/task-access?'))return {restrictedIds:[]};
+  if(url.endsWith('/agent-tasks'))return {items:[running],nextCursor:null};
+  if(url.endsWith('/agent-task-capabilities'))return new Promise(resolve=>{allow=resolve;});
+  if(url.endsWith('/agent-tasks/task'))return {item:running};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId={running.conversationId}/>));
+ expect(count()).toBe(1);
+ await act(async()=>allow({platformAvailable:true}));
+ expect(channel.available).toBe(true);
+ expect(count()).toBe(1);
+});
+
+it('drops a hanging progress request on tab hide and checks the visible task on return',async()=>{
+ const running={...task,conversationId:'c_tab_progress',state:'running',version:2,result:''};
+ const requests:{signal:AbortSignal;resolve:(value:unknown)=>void}[]=[];
+ let visibility:DocumentVisibilityState='visible';
+ const state=vi.spyOn(document,'visibilityState','get').mockImplementation(()=>visibility);
+ try {
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.includes('/personal-agent/task-access?'))return {restrictedIds:[]};
+   if(url.endsWith('/agent-tasks'))return {items:[running],nextCursor:null};
+   if(url.endsWith('/agent-tasks/task'))return new Promise(resolve=>requests.push({signal:init!.signal!,resolve}));
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View conversationId={running.conversationId}/>));
+  expect(requests).toHaveLength(1);
+  visibility='hidden';
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(requests[0].signal.aborted).toBe(true);
+  expect(requests).toHaveLength(1);
+  visibility='visible';
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(requests).toHaveLength(2);
+  await act(async()=>requests[1].resolve({item:{...running,state:'succeeded',version:3,result:'后台已完成'}}));
+  await act(async()=>requests[0].resolve({item:running}));
+  expect(channel.tasks[0]).toMatchObject({state:'succeeded',result:'后台已完成'});
+ } finally { state.mockRestore(); }
 });
 
 it('resumes the same paused task and recovers its lost receipt by reading that task',async()=>{

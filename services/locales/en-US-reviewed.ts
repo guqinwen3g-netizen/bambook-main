@@ -685,6 +685,7 @@ export const reviewedEnglish: Record<string, string> = {
   '对话读取超时':'Loading conversations timed out',
   '正在读取对话':'Loading conversations',
   '任务服务暂不可用':'Task service unavailable',
+  '暂不可交办':'New tasks are unavailable',
   '规则读取失败':'Could not load rules',
   '规则响应无效':'Invalid rule response',
   '票据读取未完成':'Invoice loading incomplete',
