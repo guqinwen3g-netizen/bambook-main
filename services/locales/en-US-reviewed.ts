@@ -686,6 +686,7 @@ export const reviewedEnglish: Record<string, string> = {
   '正在读取对话':'Loading conversations',
   '任务服务暂不可用':'Task service unavailable',
   '暂不可交办':'New tasks are unavailable',
+  '网络连接已断开':'Network connection lost',
   '规则读取失败':'Could not load rules',
   '规则响应无效':'Invalid rule response',
   '票据读取未完成':'Invoice loading incomplete',

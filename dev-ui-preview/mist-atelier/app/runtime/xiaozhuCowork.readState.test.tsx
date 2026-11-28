@@ -7,6 +7,7 @@ const api=vi.hoisted(()=>vi.fn());
 vi.mock('./workspace',()=>({mistApiRequest:(...args:any[])=>api(...args)}));
 import {useXiaozhuCowork} from './xiaozhuCowork';
 import {readTaskControls,saveTaskControls} from './xiaozhuControlRequests';
+import {savePendingSubmissions} from './xiaozhuSubmissions';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let root:Root|undefined,host:HTMLElement,channel:ReturnType<typeof useXiaozhuCowork>;
 const task={id:'task',identityId:'identity',executor:'platform',state:'succeeded',instructions:'原业务核对',result:'已完成',createdAt:'2026-11-17T04:00:00Z',updatedAt:'2026-11-17T04:01:00Z'};
@@ -678,6 +679,130 @@ it('retains the known task channel and history after a failed refresh, blocks a 
  api.mockImplementation(loaded);host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<View/>));expect(channel.available).toBe(true);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);
  api.mockRejectedValue(new Error('任务读取失败'));await act(async()=>channel.reload());expect(channel.available).toBe(true);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);expect(channel.error).toBe('任务读取失败');await act(async()=>{expect(await channel.send('不应创建任务')).toBeNull()});expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
  api.mockImplementation(loaded);await act(async()=>channel.reload());expect(channel.error).toBe('');expect(channel.loading).toBe(false);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it('waits for connectivity before requesting the first task list when opened offline',async()=>{
+ let connected=false;
+ const online=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>connected);
+ try{
+  api.mockImplementation(loaded);
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  expect(channel.error).toBe('网络连接已断开');
+  expect(api).not.toHaveBeenCalled();
+  connected=true;
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+  expect(channel.tasks.map(item=>item.id)).toEqual([task.id]);
+  expect(channel.error).toBe('');
+ }finally{online.mockRestore();}
+});
+
+it.each([503,403])('retries a failed initial history read on reconnect only for a transient status (%s)',async(status)=>{
+ let restored=false;
+ const reads=()=>api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks')).length;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-tasks')&&!restored)throw Object.assign(new Error('对话读取失败'),{status});
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ expect(channel.error).toBe('对话读取失败');
+ expect(reads()).toBe(1);
+ restored=true;
+ await act(async()=>{
+  window.dispatchEvent(new Event('online'));
+  window.dispatchEvent(new Event('online'));
+ });
+ expect(reads()).toBe(status===503?2:1);
+ expect(channel.tasks.map(item=>item.id)).toEqual(status===503?[task.id]:[]);
+ expect(channel.error).toBe(status===503?'':'对话读取失败');
+ expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it('checks a stored receipt once even when duplicate online events arrive during history recovery',async()=>{
+ const scope='account:workspace';
+ savePendingSubmissions(scope,new Map([['receipt',{requestId:'01234567-0123-4567-89ab-0123456789ab',instructions:'待核对',locale:'zh-CN',draftKey:'draft',hasAttachments:false}]]));
+ let restore=false,listDone:(value:unknown)=>void=()=>{};
+ const receiptReads=()=>api.mock.calls.filter(([url])=>url.includes('/tasks/receipt/')).length;
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.includes('/tasks/receipt/'))throw Object.assign(new Error('暂未找回回执'),{status:404});
+   if(url.endsWith('/agent-tasks')){
+    if(!restore)throw Object.assign(new Error('暂时读取失败'),{status:503});
+    return new Promise(resolve=>{listDone=resolve;});
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  restore=true;
+  await act(async()=>{
+   window.dispatchEvent(new Event('online'));
+   window.dispatchEvent(new Event('online'));
+  });
+  expect(receiptReads()).toBe(0);
+  await act(async()=>listDone({items:[task],nextCursor:null}));
+  expect(receiptReads()).toBe(1);
+  expect(channel.hasPendingSubmission).toBe(true);
+ } finally{savePendingSubmissions(scope,new Map());}
+});
+
+it('keeps an old receipt from restoring a report after history returns a permission denial',async()=>{
+ const scope='account:workspace',conversationId='c_old_receipt';
+ const recovered={...task,id:'old-receipt',conversationId};
+ savePendingSubmissions(scope,new Map([['receipt',{requestId:'01234567-0123-4567-89ab-0123456789ab',instructions:'待核对',locale:'zh-CN',draftKey:'draft',conversationId,hasAttachments:false}]]));
+ let denied=false,holdReceipt=false,resumeReceipt:(value:unknown)=>void=()=>{};
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.includes('/tasks/receipt/')){
+    if(!holdReceipt)throw Object.assign(new Error('未找到回执'),{status:404});
+    return new Promise(resolve=>{resumeReceipt=resolve;});
+   }
+   if(url.endsWith('/agent-tasks')&&denied)throw Object.assign(new Error('权限不足'),{status:403});
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View conversationId={conversationId}/>));
+  holdReceipt=true;
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(channel.checkingReceipt).toBe(true);
+  denied=true;
+  await act(async()=>channel.reload());
+  expect(channel.tasks).toEqual([]);
+  await act(async()=>resumeReceipt({item:recovered}));
+  expect(channel.tasks).toEqual([]);
+  expect(channel.hasPendingSubmission).toBe(true);
+  expect(channel.checkingReceipt).toBe(false);
+ } finally{savePendingSubmissions(scope,new Map());}
+});
+
+it('aborts a hanging first history request on disconnect and ignores its reply after recovery',async()=>{
+ const old={...task,id:'old',result:'失效的旧列表'};
+ const reads:{signal:AbortSignal;resolve:(value:unknown)=>void}[]=[];
+ let connected=true;
+ const status=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>connected);
+ try {
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks'))return new Promise(resolve=>reads.push({signal:init!.signal!,resolve}));
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  expect(reads).toHaveLength(1);
+  await act(async()=>{
+   connected=false;
+   window.dispatchEvent(new Event('offline'));
+   connected=true;
+   window.dispatchEvent(new Event('online'));
+  });
+  expect(reads[0].signal.aborted).toBe(true);
+  expect(reads).toHaveLength(2);
+  await act(async()=>reads[1].resolve({items:[task],nextCursor:null}));
+  await act(async()=>reads[0].resolve({items:[old],nextCursor:null}));
+  expect(channel.tasks.map(item=>item.id)).toEqual([task.id]);
+  expect(channel.error).toBe('');
+ } finally { status.mockRestore(); }
 });
 
 it('times out an older page without blocking composition and ignores a page from the previous workspace', async () => {

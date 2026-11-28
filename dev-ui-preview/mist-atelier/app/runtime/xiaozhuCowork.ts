@@ -278,6 +278,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
+  const historyRecovery = React.useRef<'needed'|'pending'|undefined>(undefined);
   const capabilityRead = React.useRef<AbortController | undefined>(undefined);
   const moreRead = React.useRef<AbortController | undefined>(undefined);
   const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
@@ -293,14 +294,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const missing = [...pending.current].filter(([,entry]) => mode==='reconnect'
       || (mode==='startup' ? entry.recoveredFromStorage : (entry.sourceConversationId??entry.conversationId) === conversation));
     if (!missing.length) return;
-    const controller = new AbortController();
+    const controller = new AbortController(), authority=deniedHistory.current;
     receiptRead.current=controller;setCheckingReceipt(true);
     const current=()=>live.current===scope&&receiptRead.current===controller;
+    const authorized=()=>current()&&deniedHistory.current===authority;
     try {
       const replies = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '提交结果暂时无法核对', signal =>
         Promise.allSettled(missing.map(async ([fingerprint,entry]) => {
           const task = await readSubmissionReceipt(base,entry,signal);
-          if (signal.aborted || !current() || pending.current.get(fingerprint)!==entry) return;
+          if (signal.aborted || !authorized() || pending.current.get(fingerprint)!==entry) return;
           pending.current.delete(fingerprint);
           savePendingSubmissions(scope,pending.current);
           setTasks(old=>{
@@ -311,7 +313,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           setSendFailure(old=>old&&(entry.sourceConversationId??entry.conversationId)===old.conversationId?undefined:old);
           setRecoveredSubmissions(old=>[...old,{...entry,fingerprint}]);
         })));
-      if (!current() || mode!=='manual') return;
+      if (!authorized() || mode!=='manual') return;
       const unresolved=replies.filter((_,index)=>{
         const [fingerprint,entry]=missing[index];
         return pending.current.get(fingerprint)===entry;
@@ -319,7 +321,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if(unresolved.length)setSendFailure({conversationId:conversation,message:unresolved.every(reply=>reply.status==='rejected'&&reply.reason?.status===404)
         ?'暂未查到原提交回执':'提交结果暂时无法核对'});
     } catch {
-      if (current()&&mode==='manual')setSendFailure({conversationId:conversation,message:'提交结果暂时无法核对'});
+      if (authorized()&&mode==='manual')setSendFailure({conversationId:conversation,message:'提交结果暂时无法核对'});
     } finally {
       if(current()){
         receiptRead.current=undefined;setCheckingReceipt(false);
@@ -327,13 +329,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   },[base,enabled,scope]);
-  React.useEffect(()=>{
-    const reconnect=()=>{void checkReceipts('reconnect');};
-    window.addEventListener('online',reconnect);
-    return()=>window.removeEventListener('online',reconnect);
-  },[checkReceipts]);
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
+    historyRecovery.current=mode==='reconnect'?'pending':undefined;
     historyRead.current?.abort();
     capabilityRead.current?.abort();
     moreRead.current?.abort();
@@ -341,6 +339,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     setLoadingMore(false);
     setMoreError('');
     if (!base || !enabled) { setLoading(false); setCheckingAvailability(false); setAvailable(false); return; }
+    if(!navigator.onLine){
+      historyRecovery.current='needed';
+      setError('网络连接已断开');setLoading(false);setCheckingAvailability(false);
+      return;
+    }
     const controller = new AbortController(), capabilityController = new AbortController();
     const knownTaskIds = new Set(currentTasks.current.map(task => task.id));
     historyRead.current = controller;
@@ -377,7 +380,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       setLoading(false);
       setError('');
 
-      await checkReceipts('startup');
+      await checkReceipts(mode);
       const result = await capability;
       if (!current()) return;
       if ('error' in result) throw result.error;
@@ -387,8 +390,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } catch (e) {
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
       if (current()) {
-        if ([401,403,404].includes(Number((e as {status?:number})?.status))) {
+        const status=Number((e as {status?:number})?.status);
+        const transient=!Number.isFinite(status)||status===0||status===408||status===429||status>=500;
+        historyRecovery.current=transient?'needed':undefined;
+        if ([401,403,404].includes(status)) {
           deniedHistory.current++;trackedOrigin.current=undefined;
+          receiptReconnectPending.current=false;receiptRead.current?.abort();
           setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
         }
         setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
@@ -399,10 +406,35 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       capabilityController.abort();
       if (historyRead.current === controller) historyRead.current = undefined;
       if (capabilityRead.current === capabilityController) capabilityRead.current = undefined;
-      if (current()) { setLoading(false); setCheckingAvailability(false); }
+      if (current()) {
+        if(historyRecovery.current==='pending')historyRecovery.current=undefined;
+        setLoading(false);setCheckingAvailability(false);
+      }
     }
   }, [base, enabled, scope, checkReceipts]);
   React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  React.useEffect(() => {
+    if(!base||!enabled)return;
+    const disconnect=()=>{
+      const active=historyRead.current;
+      if(!active||live.current!==scope)return;
+      historyRecovery.current='needed';
+      const reason=new Error('网络连接已断开');
+      active.abort(reason);
+      capabilityRead.current?.abort(reason);
+    };
+    const reconnect=()=>{
+      if(!navigator.onLine||live.current!==scope||historyRecovery.current==='pending')return;
+      if(historyRecovery.current==='needed')void load('reconnect');
+      else void checkReceipts('reconnect');
+    };
+    window.addEventListener('offline',disconnect);
+    window.addEventListener('online',reconnect);
+    return()=>{
+      window.removeEventListener('offline',disconnect);
+      window.removeEventListener('online',reconnect);
+    };
+  },[base,checkReceipts,enabled,load,scope]);
   const openReportIds = React.useMemo(() => {
     if (!visibleConversationId) return '';
     const personal = cachedTasks.filter(task => !task.automationId);
