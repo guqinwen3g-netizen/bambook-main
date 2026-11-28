@@ -30,13 +30,39 @@ export class LlmProviderCooldownError extends LlmProviderRetryError {}
 
 const MAX_PROVIDER_COOLDOWNS = 32;
 const TASK_BUSY_RETRY_MS = 20_000;
+const HTTP_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HTTP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const HTTP_DATE = /^(?<weekday>[A-Za-z]{3}), (?<day>\d{2}) (?<month>[A-Za-z]{3}) (?<year>\d{4}) (?<time>\d{2}:\d{2}:\d{2}) GMT$/;
+const RFC850_DATE = /^(?<weekday>Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), (?<day>\d{2})-(?<month>[A-Za-z]{3})-(?<year>\d{2}) (?<time>\d{2}:\d{2}:\d{2}) GMT$/;
+const ASCTIME_DATE = /^(?<weekday>[A-Za-z]{3}) (?<month>[A-Za-z]{3}) (?<day>\d{2}| \d) (?<time>\d{2}:\d{2}:\d{2}) (?<year>\d{4})$/;
+
+function parseHttpDate(value: string, now: number): number {
+  const parts = HTTP_DATE.exec(value)?.groups ?? RFC850_DATE.exec(value)?.groups ?? ASCTIME_DATE.exec(value)?.groups;
+  if (!parts) return NaN;
+  const month = HTTP_MONTHS.indexOf(parts.month), day = Number(parts.day);
+  const [hour, minute, second] = parts.time.split(':').map(Number);
+  if (month < 0 || day < 1 || hour > 23 || minute > 59 || second > 60) return NaN;
+
+  let year = Number(parts.year);
+  if (parts.year.length === 2) {
+    // RFC 9110 §5.6.7 uses a rolling 50-year limit for obsolete two-digit years.
+    const limit = new Date(now);
+    limit.setUTCFullYear(limit.getUTCFullYear() + 50);
+    year += Math.floor(limit.getUTCFullYear() / 100) * 100;
+    if (Date.UTC(year, month, day, hour, minute, second) > limit.getTime()) year -= 100;
+  }
+  if (year < 1900) return NaN;
+  const date = new Date(Date.UTC(year, month, day, hour, minute, Math.min(second, 59)));
+  if (date.getUTCDate() !== day || HTTP_WEEKDAYS[date.getUTCDay()] !== parts.weekday.slice(0, 3)) return NaN;
+  return date.getTime() + (second === 60 ? 1000 : 0);
+}
 
 function honorRetryAfter(response: Response, missingRetryAfterMs?: number): void {
   if (response.status !== 429 && response.status !== 503) return;
   const now = Date.now();
   const value = response.headers?.get('retry-after')?.trim() ?? '';
   const at = /^\d+$/.test(value) ? Math.min(Number.MAX_SAFE_INTEGER, now + Number(value) * 1000)
-    : /^[A-Za-z]{3}/.test(value) ? Date.parse(value) : NaN;
+    : parseHttpDate(value, now);
   const retryNotBefore = Number.isSafeInteger(at) && at > now ? at
     : missingRetryAfterMs === undefined ? undefined : now + missingRetryAfterMs;
   if (retryNotBefore === undefined) return;
