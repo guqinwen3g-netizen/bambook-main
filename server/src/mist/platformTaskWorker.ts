@@ -12,6 +12,7 @@ import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
 import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,shortDisjointPdfContinuationPlan,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
+import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 
 class PlatformModelTimeout extends Error {}
 
@@ -19,6 +20,7 @@ export type PlatformTaskWorkerOptions={complete?:(input:LlmCompletionInput)=>Pro
 /** Keep the current Shanghai business clock explicit; never relabel UTC digits with +08:00. */
 export function platformTaskClock(now:number){return{now:new Date(now+8*60*60_000).toISOString().replace(/Z$/,'+08:00'),utc:new Date(now).toISOString(),timeZone:'Asia/Shanghai'};}
 const MODEL_TOOL_CATALOG=JSON.stringify(platformTaskModelToolCatalog());
+const CUSTOMER_UPDATE = MIST_COMMAND_CATALOG.find(command => command.type === 'customer.update')?.type;
 const ORDER_BATCH_RULES='只读核对多个订单且已有查询返回的准确编号时，优先用 bambook_get_orders 一次读取 2 至 6 张订单，再汇总实际状态和交期。需要超过 6 张时按已确定的范围分批。批量读取只供报告。写入预演或任务明确要求重新核对原件时，仍用 bambook_get 逐条回源。';
 const redact=(text:string)=>text.replace(/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+/g,'<redacted>');
 const COMPARISON_REPORT_RULES='核对多份资料时，首句直接说关键字段的实际关系：一致、有差异，或缺哪一方依据而无法判断。给出各方值及来源并保留原有含义，例如系统原交期和附件提议交期。使用“一致”前逐项确认双方值相同且口径可比；核对动作完成、来源可读或部分字段相同，均不能据此说整体一致。发现差异先写差异，确认口径可比后再写方向和差值。限定比较订单和指定附件等来源时，所需字段已读到，或已确认指定来源缺字段，就直接提交有依据的结论。除非本人要求扩大查找，或原资料明确指向必要的同一业务依据，不再搜索其他单据或逐行重复查找。本人要求追溯实际关联时，优先对已读的来源调用 bambook_related，已知目标类型就传 relatedType（从订单查原报价传 quotation），再读取命中的对象确认关系；若只需核对目标订单的转单条目，读取该报价时在 bambook_get 传入目标 orderId。orderConversion.lines 仅包含该订单的条目，data.total 仍是整份报价总额；有 nextOffset 且需读更多条目时沿用相同订单与报价，同时将原样的 sourceHash 传为 lineSourceHash；若来源已变化则从首段重读，旧片段不得与新片段合并。需要完整报价作业务回源时，按原方式读取。报价分批转单时，按对应报价行的转单记录确认目标订单；报价头可能只指向首张订单。history 中的 quotationAmountScope 区分原报价总额和各转单条目的金额。报告每次写金额都保留对象和范围：整份原报价用报价总额，某批订单只引用对应条目的报价金额或订单自身总额。对照附件时按用户问题选同口径的值，复述时不要把原报价条目金额简称为“原报价总额”或“原报价为”。附件中的编号是独立线索，不替代已登记的关联。相同客户、数值或名称不证明是同一单据。币种不同且无适用汇率及日期，保留各币种原值，不算差额；单位不同须有适用的换算依据，注明来源及计算，否则说明无法判断。币种相同也须确认金额性质、覆盖范围及相关费用口径可比；附件仅写“金额”而未注明总额、分项或计价范围时，只列原值和缺少的依据，不核算业务差额。本人明确要求对指定数值作算术运算时，可以列算式，注明结果是算术差值。比较三个及以上来源时，分别核对每个来源的各字段。仅在每个来源的同一字段关系确实相同时才用“均”；有的来源同币种、有的跨币种，或范围缺少可比依据时，首句分别注明涉及的来源。提交 finish 前检查首句中的每项关系与明细是否相符。';
@@ -268,6 +270,10 @@ export class MistPlatformTaskWorker{
               const decisionRule=proposalReadBack
                 ? '\nproposalReadBack 指向本人决定之后已取得的客户完整回执。只为核对这项变更时，按该回执报告实际状态；本人拒绝则用 outcome=stopped 结束，不重复读取同一客户。'
                 : '';
+              const customerCommandRule=!proposalReadBack&&context.task.mode==='operate'&&CUSTOMER_UPDATE
+                &&context.taskReadRefs.some(ref=>ref.kind==='customers')
+                ? `\n需要修改已引用的客户档案时，用 bambook_commands 的 prefix="${CUSTOMER_UPDATE.slice(0,CUSTOMER_UPDATE.lastIndexOf('.')+1)}" 查询 ${CUSTOMER_UPDATE} 的参数，再按原规则预演与确认。`
+                : '';
               const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),history,...(imageSources?.length?{imageSources}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead
                 ? '\n当前答复无待复核的业务来源。问题已由本人补充且只需回答时，直接用 finish。若要办理业务，必须先读取当前相关记录；补充资料不代表批准操作。'
@@ -289,7 +295,7 @@ export class MistPlatformTaskWorker{
                 catch (error) { abort.abort(); throw error; }
               };
               if(context.hasTaskHistory)await checkModelAuthority(false);
-              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+decisionRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+decisionRule+customerCommandRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
               if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
             }
           }

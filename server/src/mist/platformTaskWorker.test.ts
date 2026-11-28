@@ -928,6 +928,7 @@ it.each(['confirmed','rejected'] as const)('prefetches the explicitly referenced
  await f.drain();
  const pending=await f.current(task.id);
  expect(pending.state).toBe('waiting_human');
+ expect(complete.mock.calls[0][0].systemPrompt).toContain('prefix="customer."');
  if(outcome==='rejected')await f.command('customer.update',{id:customerId,patch:{terms:updatedTerms}});
  await f.command(outcome==='confirmed'?'agent.proposal.confirm':'agent.proposal.reject',{id:pending.waitingProposalIds[0]});
  await f.drain();
