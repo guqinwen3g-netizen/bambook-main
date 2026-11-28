@@ -18,6 +18,33 @@
  *      env 提供方始终排在最后兜底（见 platformProviders.ts）。
  */
 
+/** The earliest safe time for the next automatic attempt on a busy provider. */
+export class LlmProviderRetryError extends Error {
+  constructor(message: string, readonly retryNotBefore: number) {
+    super(message);
+  }
+}
+
+/** Every eligible provider is already waiting, so this attempt sent no request. */
+export class LlmProviderCooldownError extends LlmProviderRetryError {}
+
+const MAX_PROVIDER_COOLDOWNS = 32;
+const TASK_BUSY_RETRY_MS = 20_000;
+
+function honorRetryAfter(response: Response, missingRetryAfterMs?: number): void {
+  if (response.status !== 429 && response.status !== 503) return;
+  const now = Date.now();
+  const value = response.headers?.get('retry-after')?.trim() ?? '';
+  const at = /^\d+$/.test(value) ? Math.min(Number.MAX_SAFE_INTEGER, now + Number(value) * 1000)
+    : /^[A-Za-z]{3}/.test(value) ? Date.parse(value) : NaN;
+  const retryNotBefore = Number.isSafeInteger(at) && at > now ? at
+    : missingRetryAfterMs === undefined ? undefined : now + missingRetryAfterMs;
+  if (retryNotBefore === undefined) return;
+  // A busy response already establishes a retry time without waiting for its error body.
+  void response.body?.cancel().catch(() => {});
+  throw new LlmProviderRetryError(`Model API failed with ${response.status}`, retryNotBefore);
+}
+
 export type LlmProviderConfig = {
   id: string;
   baseUrl: string;
@@ -41,6 +68,7 @@ export type LlmCompletionInput = {
 import { codexSubscriptions, PLATFORM_SUBJECT, type CodexSubscriptionService } from './codexSubscription';
 import { platformReasoning, type PlatformAiProfile } from './platformModel';
 import { platformProviders, type PlatformApiProvider, type PlatformProviderStore } from './platformProviders';
+import { createHash } from 'node:crypto';
 import { aiFetch } from './outboundProxy';
 
 const DEFAULT_LLM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
@@ -124,6 +152,7 @@ const ARK_KIMI = 'kimi-k3.1-pro';
 const ARK_DEEPSEEK_FLASH = 'deepseek-v4.1-flash';
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
+  const cooldowns = new Map<string, number>();
   return async function complete(input: LlmCompletionInput): Promise<string> {
     const subscriptions = options.subscriptions ?? codexSubscriptions();
     const steps = [
@@ -131,19 +160,37 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       ...resolveEnvProviderChain().map(provider => ({ kind: 'api' as const, provider })),
     ];
     const profile = options.platformProfile;
+    const now = Date.now();
+    for (const [key, until] of cooldowns) if (until <= now) cooldowns.delete(key);
+    const cooldownKey = (step: typeof steps[number]) => profile === 'agent-task' && step.kind === 'api'
+      ? createHash('sha256').update(JSON.stringify([step.provider.baseUrl, input.model || step.provider.model, step.provider.apiKey])).digest('hex')
+      : undefined;
     const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
     let invalidResponse: Error | undefined;
     let attemptedProvider = false;
+    let retryNotBefore: number | undefined;
     for (const [index, step] of steps.entries()) {
       if (!available(step)) continue;
       input.signal.throwIfAborted();
-      if (attemptedProvider && input.beforeFallback) {
+      const key = cooldownKey(step);
+      const coolingUntil = key ? cooldowns.get(key) : undefined;
+      if (coolingUntil !== undefined && coolingUntil > Date.now()) {
+        retryNotBefore = Math.max(retryNotBefore ?? 0, coolingUntil);
+        continue;
+      }
+      if ((attemptedProvider || retryNotBefore !== undefined) && input.beforeFallback) {
         await input.beforeFallback();
         input.signal.throwIfAborted();
+        const refreshed = key ? cooldowns.get(key) : undefined;
+        if (refreshed !== undefined && refreshed > Date.now()) {
+          retryNotBefore = Math.max(retryNotBefore ?? 0, refreshed);
+          continue;
+        }
       }
       attemptedProvider = true;
-      const remaining = steps.slice(index + 1).filter(available);
+      const remaining = steps.slice(index + 1).filter(next =>
+        available(next) && (cooldowns.get(cooldownKey(next) ?? '') ?? 0) <= Date.now());
       const deadline = profile === 'agent-task' && !input.onDelta && remaining.length ? new AbortController() : undefined;
       const hasDeepseekBackup = remaining.some(next => next.kind === 'api'
         && next.provider.baseUrl === ARK_AGENT_PLAN_URL && next.provider.model === ARK_DEEPSEEK_FLASH);
@@ -155,7 +202,7 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       const providerId = step.kind === 'subscription' ? 'chatgpt-subscription' : step.provider.id;
       try {
         const reply = step.kind === 'api'
-          ? await completeWithProvider(step.provider, attempt)
+          ? await completeWithProvider(step.provider, attempt, profile === 'agent-task' ? TASK_BUSY_RETRY_MS : undefined)
           : await subscriptions.complete(PLATFORM_SUBJECT, attempt, { reasoning: profile && platformReasoning(profile) });
         input.signal.throwIfAborted();
         try {
@@ -167,15 +214,28 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
         return reply;
       } catch (err: any) {
         if (input.signal.aborted || (!deadline?.signal.aborted && err?.name === 'AbortError')) throw err;
+        if (err instanceof LlmProviderRetryError) {
+          retryNotBefore = Math.max(retryNotBefore ?? 0, err.retryNotBefore);
+          if (key) {
+            const until = Math.max(cooldowns.get(key) ?? 0, err.retryNotBefore);
+            cooldowns.delete(key);
+            cooldowns.set(key, until);
+            const oldest = cooldowns.keys().next().value;
+            if (oldest !== undefined && cooldowns.size > MAX_PROVIDER_COOLDOWNS) cooldowns.delete(oldest);
+          }
+        }
         const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
         failures.push({ providerId, error: deadline?.signal.aborted ? 'PROVIDER_ATTEMPT_TIMEOUT' : code + String(err?.message || err) });
       } finally {
         clearTimeout(timer);
       }
     }
-    if (invalidResponse) throw invalidResponse;
-    if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
-    throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    if (!attemptedProvider && retryNotBefore !== undefined) throw new LlmProviderCooldownError('LLM_PROVIDER_COOLDOWN', retryNotBefore);
+    if (!invalidResponse && failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
+    const failure = invalidResponse ?? new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    // A successful fallback returns above. Only an exhausted chain advises the task scheduler.
+    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(failure.message, retryNotBefore);
+    throw failure;
   };
 }
 
@@ -184,7 +244,7 @@ export function testLlmProvider(provider: LlmProviderConfig, signal: AbortSignal
   return completeWithProvider(provider, { systemPrompt: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], temperature: 0, signal });
 }
 
-async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput): Promise<string> {
+async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput, missingRetryAfterMs?: number): Promise<string> {
   const model = input.model || provider.model;
   // Ark requires temperature=1.0 for Kimi K3.1 Pro on its standard API and Agent Plan.
   const arkKimi = (model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3')
@@ -201,10 +261,10 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
       return await streamChatCompletion({
         baseUrl: provider.baseUrl, apiKey: provider.apiKey, model, messages,
         temperature,
-        signal: input.signal, onDelta: input.onDelta,
+        signal: input.signal, onDelta: input.onDelta, missingRetryAfterMs,
       });
     } catch (streamErr: any) {
-      if (streamErr?.name === 'AbortError') throw streamErr;
+      if (streamErr?.name === 'AbortError' || streamErr instanceof LlmProviderRetryError) throw streamErr;
       // 流式失败，降级到非流式后仍由外层链负责转移到下一个 provider
     }
   }
@@ -235,8 +295,10 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    honorRetryAfter(res, missingRetryAfterMs);
     const data: any = await res.json().catch(() => ({}));
-    throw new Error(data?.error?.message || data?.message || `Model API failed with ${res.status}`);
+    const message = data?.error?.message || data?.message || `Model API failed with ${res.status}`;
+    throw new Error(message);
   }
   const data: any = await res.json().catch(() => ({}));
   const text = String(data?.choices?.[0]?.message?.content || '').trim();
@@ -251,13 +313,17 @@ async function streamChatCompletion(params: {
   messages: Array<{ role: string; content: string }>;
   temperature: number; signal: AbortSignal;
   onDelta: (chunk: string) => void;
+  missingRetryAfterMs?: number;
 }): Promise<string> {
   const res = await aiFetch(`${params.baseUrl}/chat/completions`, {
     method: 'POST', signal: params.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
     body: JSON.stringify({ model: params.model, temperature: params.temperature, stream: true, messages: params.messages }),
   });
-  if (!res.ok) throw new Error(`Model API stream failed with ${res.status}`);
+  if (!res.ok) {
+    honorRetryAfter(res, params.missingRetryAfterMs);
+    throw new Error(`Model API stream failed with ${res.status}`);
+  }
   if (!res.body) throw new Error('Model API stream returned no body');
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
