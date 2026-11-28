@@ -36,6 +36,7 @@ const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.ent
 import { hasScope } from '../auth/permissionService';
 import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import {renderPdfPageImage} from './agentFileText';
+import {readVisibleWorkbookSheetNames} from './agentOfficeText';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, projectShipmentReleaseGates, canReadTarget, canHandleTask, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { prepareFilePrivacy, restrictedSensitiveFiles, restrictedUploadContent, type FilePrivacyContext } from './filePrivacy';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
@@ -2232,6 +2233,23 @@ export class MistRepository {
       }
       return {files,instructions:c.instructions,questions:c.questions};
     });
+  }
+  async platformTaskWorksheetNames(prior:AgentActor,workspaceId:string,fileId:string){
+    const authorize=async()=>{
+      const current=await this.privateTaskAttachments(prior,workspaceId);
+      const scope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions);
+      if(!scope.worksheet?.needsWorksheetChoice||scope.worksheet.fileId!==fileId
+        ||scope.worksheet.rowScopeConflict||scope.excludedPdfIds?.has(fileId)||scope.allowedFiles&&!scope.allowedFiles.has(fileId))
+        fail('FILE_NOT_FOUND','附件不在当前任务内',404);
+      const file=current.files.find(item=>item.id===fileId);
+      if(!file)fail('FILE_NOT_FOUND','附件不在当前任务内',404);
+      return file;
+    };
+    const file=await authorize(),names=await readVisibleWorkbookSheetNames(await this.files.read(workspaceId,file));
+    const current=await authorize();
+    if(!this.sameTaskAttachment(file,current))fail('FILE_NOT_FOUND','附件原文件无法核验',404);
+    await this.files.read(workspaceId,current);
+    return names;
   }
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache,
     scans:readonly {fileId:string;pages:readonly number[];sha256:string}[]= [],

@@ -146,16 +146,28 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
   return { lines, rowSpans, truncated, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
-async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string, selectedRows?:readonly {from:number;to:number}[]): Promise<OfficeText & {unreadable?:boolean}> {
-  const workbook = await read('xl/workbook.xml');
-  if (!workbook) throw new Error('Missing workbook');
-  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].flatMap(([tag])=>{
+function visibleWorkbookSheets(workbook:string){
+  return [...workbook.matchAll(/<sheet\b[^>]*>/g)].flatMap(([tag])=>{
     const attrs=new Map([...tag.matchAll(/\s([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
       .map(([,name,quoted,apostrophe])=>[name,decodeXml(quoted??apostrophe)]));
     const state=attrs.get('state'),name=attrs.get('name')??'';
     const visible=state==='visible'||state===undefined&&!/\sstate\s*=/.test(tag);
-    return visible&&(worksheet===undefined||worksheet===name)?[{name,rid:attrs.get('r:id')}] : [];
+    return visible&&name&&name.length<=31&&!/[\u0000-\u001f]/.test(name)?[{name,rid:attrs.get('r:id')}] : [];
   });
+}
+
+export async function readVisibleWorkbookSheetNames(bytes:Uint8Array):Promise<string[]>{
+  try{
+    const read=reader(await JSZip.loadAsync(bytes));
+    const workbook=await read('xl/workbook.xml');
+    return workbook?[...new Set(visibleWorkbookSheets(workbook).map(sheet=>sheet.name))]:[];
+  }catch{return [];}
+}
+
+async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string, selectedRows?:readonly {from:number;to:number}[]): Promise<OfficeText & {unreadable?:boolean}> {
+  const workbook = await read('xl/workbook.xml');
+  if (!workbook) throw new Error('Missing workbook');
+  const sheets=visibleWorkbookSheets(workbook).filter(sheet=>worksheet===undefined||worksheet===sheet.name);
   if(worksheet!==undefined&&sheets.length!==1)
     return {text:'',truncated:false,unreadable:true,reason:'未找到唯一可见的指定工作表'};
   const rels = (await read('xl/_rels/workbook.xml.rels')) ?? '';

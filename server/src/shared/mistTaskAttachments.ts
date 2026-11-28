@@ -33,6 +33,10 @@ export function officeKind(file: { name: string; mimeType: string }): OfficeKind
 }
 
 export const WORKSHEET_NAME_QUESTION = '请回复要核对的工作表名称。';
+export function isWorksheetNameQuestion(question:string){
+  return question===WORKSHEET_NAME_QUESTION||question.startsWith(WORKSHEET_NAME_QUESTION+'\n');
+}
+
 
 export const WORKBOOK_SELECTION_QUESTION = '请回复要核对的工作簿完整文件名，包括名称后显示的编号。';
 

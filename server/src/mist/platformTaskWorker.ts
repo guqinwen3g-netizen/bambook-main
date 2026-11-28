@@ -1,5 +1,5 @@
 import type { FileTextWindowCache } from './agentFileWindow';
-import { isTaskImage, taskAttachmentLabels, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { isTaskImage, taskAttachmentLabels, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION, isWorksheetNameQuestion } from '../shared/mistTaskAttachments';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import{randomUUID}from'node:crypto';
 import{createLlmCompleter,LlmProviderRetryError,LlmProviderCooldownError,type LlmCompletionInput}from'../ai/llmProviders';
@@ -192,6 +192,7 @@ export class MistPlatformTaskWorker{
     try{
       actor=await this.repository.claimPlatformTask(job,this.id,this.options.makeCredential);if(!actor)return;
       const renderedImages: PlatformTaskImageCache = new Map();
+      const worksheetNames=new Map<string,string[]>();
       const fileCache: FileTextWindowCache = new Map();
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
@@ -209,7 +210,21 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const question=pdfChoice?.question??pdfVisualChoice??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:worksheetScope?.worksheetQuestion);
+        let worksheetQuestion=worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:worksheetScope?.worksheetQuestion;
+        if(!pdfChoice&&!pdfVisualChoice&&worksheetScope?.needsWorksheetChoice&&worksheetScope.fileId){
+          const names=worksheetNames.get(worksheetScope.fileId)
+            ??await this.repository.platformTaskWorksheetNames(actor,job.workspaceId,worksheetScope.fileId);
+          worksheetNames.set(worksheetScope.fileId,names);
+          if(!names.length){
+            await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
+              requestId:'platform-worksheet-names-unavailable-'+job.taskId,outcome:'failed',result:'未能读取可见工作表名称，请核对 Excel 原件。',
+            });
+            return;
+          }
+          if(!names.includes(worksheetScope.worksheet))
+            worksheetQuestion=WORKSHEET_NAME_QUESTION+'\n'+names.slice(0,20).join('\n');
+        }
+        const question=pdfChoice?.question??pdfVisualChoice??worksheetQuestion;
         if(question){
           const attempts=pdfChoice?(context.task.questions?.length??0):(context.task.questions?.filter(q=>q.question===question).length??0);
           const prefix=pdfChoice?'platform-pdf-choice-':pdfVisualChoice?'platform-pdf-visual-choice-':'platform-workbook-choice-';
@@ -320,6 +335,11 @@ export class MistPlatformTaskWorker{
                 : '';
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
+              if(worksheetScope?.needsWorksheetChoice&&modelTask.questions?.length){
+                const selected=[...modelTask.questions].reverse().find(question=>isWorksheetNameQuestion(question.question)&&question.answeredAt);
+                modelTask.questions=modelTask.questions.flatMap(question=>!isWorksheetNameQuestion(question.question)?[question]
+                  :question===selected?[{...question,question:WORKSHEET_NAME_QUESTION,answer:worksheetScope.worksheet}]:[]);
+              }
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
               if(allowedFiles||excludedPdfIds||pdfRanges.size||worksheetScope?.rows)modelTask.instructions=splitTaskRequest(modelTask.instructions);
               const history=platformTaskHistory(readableSteps);

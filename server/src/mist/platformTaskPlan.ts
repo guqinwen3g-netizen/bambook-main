@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskIssueCode,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
-import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_VISUAL_PAGE_LIMIT, type PdfVisualCandidate, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION } from '../shared/mistTaskAttachments';
+import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_VISUAL_PAGE_LIMIT, type PdfVisualCandidate, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION, isWorksheetNameQuestion } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
 import { isFileTextCursor, type PdfPageRange, type PdfPageScope } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
@@ -197,7 +197,7 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
       return rows.ranges.length||rows.invalid;
     });
   if(!names.size&&!unnamed.length)return;
-  const answered=[...questions].reverse().find(q=>q.question===WORKSHEET_NAME_QUESTION&&q.answeredAt)?.answer?.trim();
+  const answered=[...questions].reverse().find(q=>isWorksheetNameQuestion(q.question)&&q.answeredAt)?.answer?.trim();
   const requestedName=answered?.replace(/^[「“"]([^」”"\n]{1,31})[」”"]$/u,'$1');
   const worksheet=[...names][0]??(requestedName&&requestedName.length<=31&&!/[\r\n]/.test(requestedName)?requestedName:'');
   const worksheetQuestion=worksheet?undefined:WORKSHEET_NAME_QUESTION;
@@ -209,7 +209,7 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
   const rowScopeConflict=rowBindings.some(binding=>binding.invalid);
   const merged=values.length&&!rowScopeConflict?mergePdfRanges(values):undefined;
   const rows=merged?(merged.windows??[{from:merged.from,to:merged.to}]):undefined;
-  const selection={worksheet,worksheetQuestion,rows,rowScopeConflict};
+  const selection={worksheet,worksheetQuestion,needsWorksheetChoice:unnamed.length>0,rows,rowScopeConflict};
 
   const workbookIds=workbooks.map(({file})=>file.id);
   const aliases=[...new Set(workbooks.flatMap(({file,label})=>[file.name,label]))].sort((a,b)=>b.length-a.length);

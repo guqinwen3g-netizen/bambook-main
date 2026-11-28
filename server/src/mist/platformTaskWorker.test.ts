@@ -1987,11 +1987,12 @@ it('asks for the worksheet before reading unnamed Excel rows',async()=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对报价第 47 行。'}));
  const f=await fixture(complete);f.worker.start(3_600_000);
  const book=XLSX.utils.book_new();
- for(const [name,value] of [['报价','SELECTED-47'],['内部','HIDDEN-FROM-MODEL']]){
+ for(const [name,value] of [['报价','SELECTED-47'],['内部','HIDDEN-FROM-MODEL'],['封存','SEALED-CELL']]){
   const sheet=XLSX.utils.aoa_to_sheet([]);
   XLSX.utils.sheet_add_aoa(sheet,[[value]],{origin:'B47'});
   XLSX.utils.book_append_sheet(book,sheet,name);
  }
+ XLSX.utils.book_set_sheet_visibility(book,'封存',1);
  const task=(await f.human.post(f.base+'/personal-agent/tasks')
   .field('task',JSON.stringify({requestId:randomUUID(),name:'核对第 47 行',instructions:'请只读取 quote.xlsx 第 47 行。'}))
   .attach('attachments',XLSX.write(book,{type:'buffer',bookType:'xlsx'}),'quote.xlsx').expect(201)).body.item;
@@ -1999,16 +2000,28 @@ it('asks for the worksheet before reading unnamed Excel rows',async()=>{
  const waiting=await f.current(task.id);
  expect(waiting.state).toBe('waiting_human');
  expect(waiting.questions.at(-1).question).toContain('工作表名称');
+ expect(waiting.questions.at(-1).question).toContain('报价');
+ expect(waiting.questions.at(-1).question).not.toContain('封存');
  expect(complete).not.toHaveBeenCalled();
- await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
-  requestId:randomUUID(),version:waiting.version,questionId:waiting.questions.at(-1).id,answer:'报价',
- }).expect(200);
- await f.drain();
+ const answer=async(current:any,value:string)=>{
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:current.version,questionId:current.questions.at(-1).id,answer:value,
+  }).expect(200);
+  await f.drain();
+  return f.current(task.id);
+ };
+ const retry=await answer(waiting,'不存在的表');
+ expect(retry.state).toBe('waiting_human');
+ expect(retry.questions.at(-1).id).not.toBe(waiting.questions.at(-1).id);
+ expect(complete).not.toHaveBeenCalled();
+ await answer(retry,'报价');
  expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded'});
  expect(complete).toHaveBeenCalledTimes(1);
  const text=complete.mock.calls[0][0].messages[0].content;
  expect(text).toContain('SELECTED-47');
  expect(text).not.toContain('HIDDEN-FROM-MODEL');
+ expect(text).not.toContain('不存在的表');
+ expect(text).not.toContain('内部');
 });
 
 it.each([false,true])('only sends explicitly requested original worksheet rows to the model (with history: %s)',async history=>{

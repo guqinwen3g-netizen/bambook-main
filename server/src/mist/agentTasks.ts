@@ -3,7 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import { AGENT_TASK_ISSUE_LABEL, activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
-import { WORKBOOK_SELECTION_QUESTION, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
+import { WORKBOOK_SELECTION_QUESTION, isWorksheetNameQuestion, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
 import { validConversationId } from './agentConversations';
@@ -489,7 +489,8 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
     const worksheetChoice=worksheetScope?.rows&&!worksheetScope.fileId
       ? WORKBOOK_SELECTION_QUESTION:worksheetScope?.worksheetQuestion;
     const choosingAttachmentScope=(attachmentScope.pdfChoice?.question??attachmentScope.pdfVisualChoice
-      ??worksheetChoice)===question.question;
+      ??worksheetChoice)===question.question
+      ||!!worksheetScope?.needsWorksheetChoice&&isWorksheetNameQuestion(question.question);
     const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
       ||c.sources.length||c.intentRefs?.length||!choosingAttachmentScope&&c.attachments?.length||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};
