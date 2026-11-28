@@ -11,7 +11,7 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
-import {attachmentScopeCorrectionRanges,compactPlatformTaskSteps,matchesAttachmentScopeCorrection,newPlatformTaskStep,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
+import {attachmentScopeCorrectionRanges,compactPlatformTaskSteps,matchesAttachmentScopeCorrection,newPlatformTaskStep,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress,type TaskAttachmentReadScope} from './platformTaskPlan';
 import{responseLocale,type ResponseLocale}from'./responseLanguage';
 import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskConditionTarget} from './agentTaskConditions';
 
@@ -82,6 +82,7 @@ export type TaskRecord = {
   scopeHash: string; sources: TaskSourceRef[]; intentRefs?:AgentTaskIntentRef[];
   attachments?: MistStoredFile[];
   attachmentOrigins?: TaskAttachmentRef[];
+  attachmentReadScopes?: TaskAttachmentReadScope[];
   mode: 'read'|'operate';
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
@@ -170,10 +171,10 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   let visibleSteps = readable ? c.platform?.steps : undefined;
   let questions=readable?c.questions??[]:[];
   if(visibleSteps?.length||questions.some(q=>!q.answeredAt)){
-    const {pdfRanges,worksheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    if(visibleSteps&&(pdfRanges.size||worksheet||allowedFiles||excludedPdfIds||pdfChoice||pdfScopeConflict||pdfVisualChoice)){
+    const {pdfRanges,worksheet,allowedFiles,excludedFileIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions,c.attachmentReadScopes);
+    if(visibleSteps&&(pdfRanges.size||worksheet||allowedFiles||excludedFileIds||pdfChoice||pdfScopeConflict||pdfVisualChoice)){
       const permitted=pdfChoice||pdfScopeConflict||pdfVisualChoice||worksheet?.rowScopeConflict?new Set<string>():allowedFiles;
-      visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdfRanges,worksheet,permitted,excludedPdfIds);
+      visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdfRanges,worksheet,permitted,excludedFileIds);
     }
     if(pdfChoice)questions=questions.map(q=>q.question===pdfChoice.question&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoice.ids}:q);
     if(pdfVisualChoice&&pdfVisualCandidates)questions=questions.map(q=>q.question===pdfVisualChoice&&!q.answeredAt?{...q,pdfVisualCandidates}:q);
@@ -207,7 +208,7 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   if (c.lastAction !== action || c.lastInputHash !== hash(JSON.stringify(input))) fail('CONFLICT', '操作编号已用于其他内容', 409);
   return true;
 }
-export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }, trustedSources:TaskSourceRef[] = [], personalHistory?:PersonalHistory) {
+export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[]; readScopes?: TaskAttachmentReadScope[] }> }, trustedSources:TaskSourceRef[] = [], personalHistory?:PersonalHistory) {
   if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||!validConversationId(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
   const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), wireInstructions = plain(input.instructions, 4000, '任务内容');
   const instructions = personalHistory && personalHistory.requestedIds === undefined ? splitTaskRequest(wireInstructions) : wireInstructions;
@@ -228,9 +229,10 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   // concurrent transaction retries against the committed receipt.
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: request, actorId: actor.userId, inputHash, expectedRevision: 0, result: { revision: 0, id: taskId }, createdAt: new Date(now) } });
   if(attachments){
-    const {files,origins}=await attachments.save();
+    const {files,origins,readScopes}=await attachments.save();
     c.attachments=files;
     if(origins?.length)c.attachmentOrigins=origins;
+    if(readScopes?.length)c.attachmentReadScopes=readScopes;
   }
   if(intentRefs.length)c.intentRefs=intentRefs.map(ref=>({...ref}));
   if(personalHistory)c.conversationHistory=await personalHistory.prepare(instructions);
@@ -514,7 +516,7 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
   if(c.expiresAt<=now||c.stepsUsed>=STEP_LIMIT||usedRuntime(c,now)>=RUNTIME_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到执行限额',409);
   const question=c.questions?.find(q=>q.id===questionId&&!q.answeredAt);if(!question)fail('AGENT_TASK_CHANGED','问题已处理，请刷新核对',409);
   const attachmentScope=question.attachmentScopeCorrection||c.platform
-    ? requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions):undefined;
+    ? requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions,c.attachmentReadScopes):undefined;
   if(question.attachmentScopeCorrection){
     const correction=attachmentScope?.scopeCorrection;
     if(attachments||!correction||!matchesAttachmentScopeCorrection(question.attachmentScopeCorrection,correction)

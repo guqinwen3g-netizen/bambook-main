@@ -54,7 +54,7 @@ import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTask
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
-import {requestedTaskAttachmentScope,explicitPdfVisualPages,requestsProvidedMaterialsOnly,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
+import {requestedTaskAttachmentScope,explicitPdfVisualPages,requestsProvidedMaterialsOnly,retryAttachmentReadScope,type PlatformTaskContext,type PlatformTaskPlan,type TaskAttachmentReadScope} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {ensurePersonalIdentity,personalIdentityId,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
@@ -274,11 +274,12 @@ function taskAttachmentRefs(value: unknown): TaskAttachmentRef[] {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const files = new Set<string>();
   return value.map(ref => {
-    if (!ref || typeof ref !== 'object' || Object.keys(ref).length !== 2
+    if (!ref || typeof ref !== 'object' || Object.keys(ref).some(key=>!['taskId','fileId','preserveScope'].includes(key))
+      || ref.preserveScope !== undefined && ref.preserveScope !== true
       || typeof ref.taskId !== 'string' || !uuid.test(ref.taskId) || typeof ref.fileId !== 'string' || !uuid.test(ref.fileId)
       || files.has(ref.fileId)) fail('INVALID_UPLOAD', '引用附件无效或重复', 400);
     files.add(ref.fileId);
-    return { taskId: ref.taskId, fileId: ref.fileId };
+    return { taskId: ref.taskId, fileId: ref.fileId, ...(ref.preserveScope===true?{preserveScope:true as const}:{}) };
   });
 }
 
@@ -328,10 +329,10 @@ export class MistRepository {
   async platformTaskContext(prior:AgentActor):Promise<PlatformTaskContext>{
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
     return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;
-      const task=taskView(c,actor,Date.now());
+      const task=taskView(c,actor,Date.now()),attachmentReadScopes=c.attachmentReadScopes;
       const steps=structuredClone(c.platform?.steps??[]),requiresRead=platformTaskRequiresRead(c),locale=c.locale??'zh-CN';
       if(requestsProvidedMaterialsOnly(c.instructions))return {
-        task,steps,requiresRead,locale,providedMaterialsOnly:true,hasTaskHistory:!!c.conversationHistory?.taskIds.length,
+        task,attachmentReadScopes,steps,requiresRead,locale,providedMaterialsOnly:true,hasTaskHistory:!!c.conversationHistory?.taskIds.length,
         taskReadRefs:[],decisions:[],
       };
       const visible=(await this.preparedView(db,row,actor)).state;
@@ -358,7 +359,7 @@ export class MistRepository {
           : undefined;
       const proposalReadBack=ref&&decision&&typeof decision.stepOffset==='number'&&!c.requiredRead
         ? {proposalId:decision.proposalId,outcome:decision.outcome,ref,stepOffset:decision.stepOffset}:undefined;
-      return{task,taskReadRefs,locale,businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead,...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),proposalReadBack,steps,decisions:proposals.map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+      return{task,attachmentReadScopes,taskReadRefs,locale,businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead,...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),proposalReadBack,steps,decisions:proposals.map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
   }
   async platformTaskReadRequirements(prior:AgentActor){
     const lease=prior.agentTaskLease;
@@ -1029,7 +1030,7 @@ export class MistRepository {
     if (!file?.sha256 || !/^[a-f0-9]{64}$/.test(file.sha256) || file.storageKey !== `${row.id}/${file.id}`) {
       fail('FILE_NOT_FOUND', '原附件无法核验', 404);
     }
-    return { file, origin: source.attachmentOrigins?.find(origin => origin.fileId === ref.fileId) ?? ref };
+    return { file, task:source, origin: source.attachmentOrigins?.find(origin => origin.fileId === ref.fileId) ?? {taskId:ref.taskId,fileId:ref.fileId} };
   }
   private sameTaskAttachment(saved: MistStoredFile, file: MistStoredFile) {
     return saved.id === file.id && saved.sha256 === file.sha256
@@ -1144,12 +1145,17 @@ export class MistRepository {
       const attachments=files.length||attachmentRefs.length?{
         fingerprint:attachmentRefs.length?{uploads:metadata,refs:attachmentRefs}:metadata,
         save:async()=>{
-          const reused: MistStoredFile[] = [], origins: TaskAttachmentRef[] = [];
+          const reused: MistStoredFile[] = [], origins: TaskAttachmentRef[] = [], readScopes: TaskAttachmentReadScope[] = [];
           for (const ref of attachmentRefs) {
             const source = await this.resolveTaskAttachment(db, row, actor, taskInput.conversationId as string, ref);
             const original = source.origin.taskId === ref.taskId ? source
               : await this.resolveTaskAttachment(db, row, actor, taskInput.conversationId as string, source.origin);
             if (source.file.sha256 !== original.file.sha256) fail('FILE_NOT_FOUND', '原附件无法核验', 404);
+            if(ref.preserveScope){
+              const basis=source.task;
+              const scope=retryAttachmentReadScope(source.file,basis.attachments,basis.instructions,basis.questions,basis.attachmentReadScopes);
+              if(scope)readScopes.push(scope);
+            }
             reused.push(original.file);
             origins.push(source.origin);
           }
@@ -1176,7 +1182,7 @@ export class MistRepository {
               throw error;
             }
           })());
-          return { files: [...uploaded, ...reused], origins };
+          return { files: [...uploaded, ...reused], origins, readScopes };
         },
       }:undefined;
       const history=personalHistory ? {
@@ -2300,7 +2306,7 @@ export class MistRepository {
     if (!this.sameTaskAttachment(file, current)) fail('FILE_NOT_FOUND', '附件原文件无法核验', 404);
     return { file: current, bytes };
   }
-  private async privateTaskAttachments(prior:TokenPayload,workspaceId:string):Promise<{files:MistStoredFile[];instructions:string;questions?:readonly AgentTaskQuestion[]}>{
+  private async privateTaskAttachments(prior:TokenPayload,workspaceId:string):Promise<{files:MistStoredFile[];instructions:string;questions?:readonly AgentTaskQuestion[];readScopes?:readonly TaskAttachmentReadScope[]}>{
     if(!isAgentActor(prior)||prior.agentExecutor!=='platform'||prior.agentTaskLease?.workspaceId!==workspaceId)return {files:[],instructions:''};
     const taskId=prior.agentTaskLease.taskId;
     return this.transact(async db=>{
@@ -2312,15 +2318,15 @@ export class MistRepository {
         const privacy=await prepareFilePrivacy(this.files,row.id,row.state);
         if(files.some(file=>file.sha256&&restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256,file.size)))fail('FORBIDDEN','附件的原件权限已变化',403);
       }
-      return {files,instructions:c.instructions,questions:c.questions};
+      return {files,instructions:c.instructions,questions:c.questions,readScopes:c.attachmentReadScopes};
     });
   }
   async platformTaskWorksheetNames(prior:AgentActor,workspaceId:string,fileId:string){
     const authorize=async()=>{
       const current=await this.privateTaskAttachments(prior,workspaceId);
-      const scope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions);
+      const scope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions,current.readScopes);
       if(!scope.worksheet?.needsWorksheetChoice||scope.worksheet.fileId!==fileId
-        ||scope.worksheet.rowScopeConflict||scope.excludedPdfIds?.has(fileId)||scope.allowedFiles&&!scope.allowedFiles.has(fileId))
+        ||scope.worksheet.rowScopeConflict||scope.excludedFileIds?.has(fileId)||scope.allowedFiles&&!scope.allowedFiles.has(fileId))
         fail('FILE_NOT_FOUND','附件不在当前任务内',404);
       const file=current.files.find(item=>item.id===fileId);
       if(!file)fail('FILE_NOT_FOUND','附件不在当前任务内',404);
@@ -2335,8 +2341,8 @@ export class MistRepository {
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache,
     scans:readonly {fileId:string;pages:readonly number[];sha256:string}[]= [],
   ):Promise<Array<{name:string;url:string;pdfPage?:{file:string;page:number}}>> {
-    const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
-    const {allowedFiles,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
+    const {files,instructions,questions,readScopes}=await this.privateTaskAttachments(prior,workspaceId);
+    const {allowedFiles,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions,readScopes),labels=taskAttachmentLabels(files);
     const images=files.flatMap((file,index)=>(!allowedFiles||allowedFiles.has(file.id))&&isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
     const prepared=await Promise.all(images.map(async ({file,name}) => {
       // Check the live original even when a previous model turn rendered the same image.
@@ -2355,7 +2361,7 @@ export class MistRepository {
       return { name, url };
     }));
     if(!scans.length||pdfChoice||pdfScopeConflict||pdfVisualChoice)return prepared;
-    const selected=explicitPdfVisualPages(instructions,pdfRanges,pdfVisualRanges);
+    const selected=explicitPdfVisualPages(instructions,pdfRanges,pdfVisualRanges,readScopes);
     const scanned:Array<{file:MistStoredFile;label:string;page:number;cacheId:string;url:string}>=[];
     for(const scan of scans){
       const target=selected.find(item=>item.fileId===scan.fileId);
@@ -2379,8 +2385,8 @@ export class MistRepository {
     }
     if(!scanned.length)return prepared;
     const current=await this.privateTaskAttachments(prior,workspaceId);
-    const currentScope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions);
-    const currentPages=explicitPdfVisualPages(current.instructions,currentScope.pdfRanges,currentScope.pdfVisualRanges);
+    const currentScope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions,current.readScopes);
+    const currentPages=explicitPdfVisualPages(current.instructions,currentScope.pdfRanges,currentScope.pdfVisualRanges,current.readScopes);
     const verified=new Set<string>();
     for(const {file,page} of scanned){
       const stillVisible=current.files.find(item=>item.id===file.id);
@@ -2401,10 +2407,10 @@ export class MistRepository {
   }
   /** 复用附件下载的同一授权（canReadFile）后提取有界正文摘录；不返回字节。 */
   async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {
-    const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
+    const {files,instructions,questions,readScopes}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
-    const {pdfRanges,worksheet:sheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions);
-    if(pdfChoice||pdfScopeConflict||pdfVisualChoice||sheet?.rowScopeConflict||sheet?.worksheetQuestion||excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
+    const {pdfRanges,worksheet:sheet,allowedFiles,excludedFileIds,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions,readScopes);
+    if(pdfChoice||pdfScopeConflict||pdfVisualChoice||sheet?.rowScopeConflict||sheet?.worksheetQuestion||excludedFileIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
     if(sheet?.workbookIds.includes(fileId)&&sheet.fileId!==fileId)
       fail('FILE_TEXT_WORKBOOK_SCOPE','该工作簿未被选中，本任务不读取它的正文',422);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);

@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{attachmentScopeCorrectionRanges,compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{attachmentScopeCorrectionRanges,compactPlatformTaskSteps,explicitPdfVisualPages,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,retryAttachmentReadScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 import {composeTaskInstructions} from '../shared/mistTaskHistoryText';
 
@@ -67,7 +67,7 @@ it('narrows a multi-file visual choice without altering a separately requested t
  expect(selected.pdfVisualChoice).toBeUndefined();
  expect([...selected.pdfVisualRanges]).toEqual([['beta',{from:2,to:2}]]);
  expect([...selected.pdfRanges]).toEqual([['beta',{from:2,to:2}],['note',{from:1,to:1}]]);
- expect([...selected.excludedPdfIds!]).toEqual(['alpha']);
+ expect([...selected.excludedFileIds!]).toEqual(['alpha']);
 });
 
 it('binds shorthand worksheet rows and rejects invalid row ranges rather than widening them',()=>{
@@ -253,6 +253,19 @@ it('intersects an Excel row scope from the answer with the original scope',()=>{
  expect(requestedTaskAttachmentScope([file],'请只读取 quote.xlsx 的工作表「报价」第 23 至第 46 行。',[answered]).worksheet)
   .toMatchObject({fileId:file.id,worksheet:'报价',rows:[{from:45,to:46}]});
 });
+it('preserves omitted originals and does not widen inherited visual pages via fallback',()=>{
+ const scan={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200};
+ const other={...scan,id:'other',name:'other.pdf'};
+ const source='请只读取 scan.pdf 第 2 至第 4 页。请目视核对 scan.pdf 第 3 页。不要读取其他附件。';
+ const inherited=[retryAttachmentReadScope(scan,[scan,other],source),retryAttachmentReadScope(other,[scan,other],source)]
+  .filter(scope=>scope!==undefined);
+ expect(inherited).toEqual([{fileId:'scan',pages:{from:2,to:4},visual:{from:3,to:3}},{fileId:'other',excluded:true}]);
+ const text='请只目视核对 scan.pdf 第 2 页。';
+ const scope=requestedTaskAttachmentScope([scan,other],text,[],inherited);
+ expect(scope.pdfRanges.get(scan.id)).toEqual({from:2,to:2});
+ expect(scope.excludedFileIds?.has(other.id)).toBe(true);
+ expect(explicitPdfVisualPages(text,scope.pdfRanges,scope.pdfVisualRanges,inherited)).toEqual([]);
+});
 it('accepts common page and row phrasing within the matching bounded range',()=>{
  const prompt={sourceQuestionId:'answer',fileId:'file',kind:'pdf' as const,allowed:[{from:2,to:4},{from:6,to:6}]};
  expect(attachmentScopeCorrectionRanges('第 2 页至第 4 页、 第 6 页',prompt))
@@ -287,8 +300,8 @@ it('binds a PDF page limit to an exact name or numbered original in its own clau
  expect(requestedPdfRange(files,'请只读取 quote.pdf 的第 22 页。')).toBeUndefined();
  expect(requestedPdfRange(files,'请只读取第 22 页。之后看 terms.pdf。')).toBeUndefined();
  const scoped=requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 terms.pdf。');
- expect(scoped.excludedPdfIds).toEqual(new Set(['pdf1']));
- expect(requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 quote.pdf（1）。').excludedPdfIds).toBeUndefined();
+ expect(scoped.excludedFileIds).toEqual(new Set(['pdf1']));
+ expect(requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 quote.pdf（1）。').excludedFileIds).toBeUndefined();
 });
 
 it('keeps different page limits per original and gives each unresolved range its own question',()=>{
