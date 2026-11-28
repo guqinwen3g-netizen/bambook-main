@@ -194,6 +194,11 @@ it('replays the same automation creation without duplicating the rule or resetti
   const requestId = randomUUID();
   const fields = { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' };
   const intent = { requestId, ...fields };
+  const receipts = c.base + '/agent-automations/receipt/';
+  const missing = await c.human.get(receipts + requestId).expect(404);
+  expect(missing.body.error.code).toBe('AGENT_AUTOMATION_RECEIPT_NOT_FOUND');
+  await c.human.get(receipts + '%20').expect(400);
+  await c.human.get(receipts + requestId).query({ owner: 'someone-else' }).expect(400);
   const [first, replay] = await Promise.all([
     automation(c, intent),
     automation(c, { ...intent, name: ' 每日汇总 ', enabled: true }),
@@ -209,10 +214,16 @@ it('replays the same automation creation without duplicating the rule or resetti
     .send({ ...fields, enabled: false }).expect(200)).body.item;
   expect(paused).toMatchObject({ enabled: false, runs });
   expect(await automation(c, intent)).toEqual(paused);
+  const storePath = path.join(directory, 'store.json');
+  const beforeLookup = await fs.readFile(storePath);
+  await c.human.get(receipts + requestId).expect(200, { item: paused }).expect('Cache-Control', 'private, no-store');
+  expect(await fs.readFile(storePath)).toEqual(beforeLookup);
 
   await c.human.delete(c.base + '/agent-automations/' + first.id).expect(204);
   const gone = await c.human.post(c.base + '/agent-automations').send(intent).expect(404);
   expect(gone.body.error.code).toBe('AGENT_AUTOMATION_CREATED_RULE_GONE');
+  const removed = await c.human.get(receipts + requestId).expect(404);
+  expect(removed.body.error.code).toBe('AGENT_AUTOMATION_CREATED_RULE_GONE');
   expect(await rules(c)).toEqual([]);
 });
 
@@ -256,16 +267,25 @@ it('isolates an automation creation key by owner and workspace', async () => {
   await db.mistWorkspace.update({ where: { id: c.workspace.id },
     data: { state: { ...source, memberIds: [...(source.memberIds ?? []), 'local-reviewer'] } } });
   await c.human.post('/api/mist/session').send({ profileId: 'local-reviewer' }).expect(200);
+  const receiptPath = '/agent-automations/receipt/' + intent.requestId;
+  const foreign = await c.human.get(c.base + receiptPath).expect(404);
+  expect(foreign.body.error.code).toBe('AGENT_AUTOMATION_RECEIPT_NOT_FOUND');
   const second = await automation(c, { ...intent, name: '审批员的规则' });
   expect(second.id).not.toBe(first.id);
   expect(await rules(c)).toEqual([second]);
+  await c.human.get(c.base + receiptPath).expect(200, {item: second});
   await c.human.post('/api/mist/session').send({ profileId: 'local-operator' }).expect(200);
   expect(await rules(c)).toEqual([first]);
 
   const other = (await c.human.post('/api/mist/workspaces')
     .send({ name: '另一个测试业务空间', slug: 'automation-other', seed: 'empty' }).expect(201)).body.workspace;
-  const third = await automation({ ...c, base: '/api/mist/workspaces/' + other.id }, intent);
+  const otherBase = '/api/mist/workspaces/' + other.id;
+  const outside = await c.human.get(otherBase + receiptPath).expect(404);
+  expect(outside.body.error.code).toBe('AGENT_AUTOMATION_RECEIPT_NOT_FOUND');
+  const third = await automation({ ...c, base: otherBase }, intent);
   expect(third.id).not.toBe(first.id);
+  await c.human.get(otherBase + receiptPath).expect(200, {item: third});
+  await c.human.get(c.base + receiptPath).expect(200, {item: first});
   expect(await rules(c)).toEqual([first]);
   await c.human.post(c.base + '/agent-automations').send({ ...intent, requestId: '' }).expect(400);
 });
