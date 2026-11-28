@@ -60,6 +60,53 @@ it('answers an application heartbeat without involving the voice provider or tas
   expect(b.control).not.toHaveBeenCalled();
 });
 
+it('ends voice when the provider stalls during audio output while the browser link is alive', async () => {
+  const b = binding();
+  const { socket, messages } = await connect(await service.issue(b, 'http://127.0.0.1'));
+  provider.send(JSON.stringify({ type: 'response.output_audio.started', response_id: 'response-a' }));
+  provider.send(JSON.stringify({ type: 'response.output_audio.delta', response_id: 'response-a', audio: 'AAAAAA==' }));
+  await wait(() => messages.some(message => message.type === 'audio'));
+  socket.send(JSON.stringify({ type: 'ping' }));
+  await wait(() => messages.some(message => message.type === 'pong'));
+  now += 15_100;
+  await wait(() => messages.some(message => message.code === 'VOICE_AUDIO_STALLED'));
+  expect(b.control).not.toHaveBeenCalled();
+  expect(b.submit).not.toHaveBeenCalled();
+});
+
+it('lets a quiet call wait and extends only current audio output until it completes', async () => {
+  const { socket, messages } = await connect(await service.issue(binding(), 'http://127.0.0.1'));
+  now += 16_000;
+  socket.send(JSON.stringify({ type: 'ping' }));
+  await wait(() => messages.some(message => message.type === 'pong'));
+  provider.send(JSON.stringify({ type: 'response.output_audio.started', response_id: 'response-a' }));
+  provider.send(JSON.stringify({ type: 'response.output_audio.delta', response_id: 'response-a', audio: 'AAAAAA==' }));
+  await wait(() => messages.filter(message => message.type === 'audio').length === 1);
+  now += 13_000;
+  provider.send(JSON.stringify({ type: 'response.output_audio.delta', response_id: 'response-a', audio: 'AAAAAA==' }));
+  await wait(() => messages.filter(message => message.type === 'audio').length === 2);
+  now += 2_200;
+  provider.send(JSON.stringify({ type: 'response.output_audio.done', response_id: 'response-a' }));
+  await wait(() => messages.some(message => message.type === 'audio_done'));
+  now += 13_000;
+  socket.send(JSON.stringify({ type: 'ping' }));
+  await wait(() => messages.filter(message => message.type === 'pong').length === 2);
+  expect(messages.some(message => message.type === 'error')).toBe(false);
+});
+
+it('stops timing audio when the user interrupts the current response', async () => {
+  const { socket, messages } = await connect(await service.issue(binding(), 'http://127.0.0.1'));
+  provider.send(JSON.stringify({ type: 'response.output_audio.started', response_id: 'response-a' }));
+  provider.send(JSON.stringify({ type: 'response.output_audio.delta', response_id: 'response-a', audio: 'AAAAAA==' }));
+  await wait(() => messages.some(message => message.type === 'audio'));
+  socket.send(JSON.stringify({ type: 'interrupt' }));
+  await wait(() => received.some(message => message.type === 'response.cancel'));
+  now += 16_000;
+  socket.send(JSON.stringify({ type: 'ping' }));
+  await wait(() => messages.some(message => message.type === 'pong'));
+  expect(messages.some(message => message.type === 'error')).toBe(false);
+});
+
 it('lets the same owner replace an unused ticket and keeps an active call exclusive', async () => {
   const b = binding();
   const old = await service.issue(b, 'http://127.0.0.1');
