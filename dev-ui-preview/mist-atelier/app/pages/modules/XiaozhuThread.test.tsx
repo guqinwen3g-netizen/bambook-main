@@ -259,6 +259,21 @@ it('offers the server-selected PDF originals and answers with the task-wide labe
  expect(f.onAnswer).toHaveBeenCalledExactlyOnceWith(waiting,'pdf-question','报价.pdf（3）');
 });
 
+it('selects up to three authorized PDF pages and submits the answer for the existing question',async()=>{
+ const f=fns();
+ const file={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:123};
+ const question={id:'q1',question:'请选页',askedAt:'',pdfVisualCandidates:[{fileId:'scan',from:2,to:5}]};
+ await paint([task({state:'waiting_human',attachments:[file],questions:[question]})],f);
+ const checkbox=(number:number)=>getByRole(host,'checkbox',{name:'第 '+number+' 页',exact:true}) as HTMLInputElement;
+ for(const number of [2,3,5])await act(async()=>checkbox(number).click());
+ expect(checkbox(4).disabled).toBe(true);
+ expect(f.onAnswer).not.toHaveBeenCalled();
+ await act(async()=>checkbox(2).click());
+ expect(checkbox(4).disabled).toBe(false);
+ await act(async()=>getByRole(host,'button',{name:'回答',exact:true}).click());
+ expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','scan.pdf 第 3 页\nscan.pdf 第 5 页');
+});
+
 it('shows numbered options on distinct lines both before and after the reply',async()=>{
  const question='请确认要移除哪一条： 1. 模拟面料外套，10 件，12.00 USD 2. 模拟量产外套，24 件，14.00 USD';
  const expected='请确认要移除哪一条：\n1. 模拟面料外套，10 件，12.00 USD\n2. 模拟量产外套，24 件，14.00 USD';

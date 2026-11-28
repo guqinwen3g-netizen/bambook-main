@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskIssueCode,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
-import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_VISUAL_PAGE_LIMIT, type PdfVisualCandidate, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
 import { isFileTextCursor, type PdfPageRange, type PdfPageScope } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
@@ -206,8 +206,6 @@ const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|nev
  * Explicit negatives apply to the entire task attachment set. A page or worksheet limit on
  * its own still allows the task to check other requested sources.
  */
-const PDF_VISUAL_PAGE_LIMIT=3;
-
 function requestedPdfVisualRanges(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>,pdfVisualRanges:ReadonlyMap<string,PdfPageScope>){
   const request=splitTaskRequest(instructions);
   if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
@@ -222,7 +220,7 @@ function visualPageCount(ranges:ReadonlyMap<string,PdfPageScope>){
 
 function selectVisualPdfPages(attachments:AgentTaskView['attachments'],instructions:string,questions:readonly AgentTaskQuestion[],
   pdfRanges:Map<string,PdfPageScope>,pdfVisualRanges:Map<string,PdfPageScope>,
-):{question?:string;excluded:Set<string>}{
+):{question?:string;candidates?:PdfVisualCandidate[];excluded:Set<string>}{
   const requested=requestedPdfVisualRanges(instructions,pdfRanges,pdfVisualRanges),excluded=new Set<string>();
   if(visualPageCount(requested)<=PDF_VISUAL_PAGE_LIMIT)return {excluded};
   const labels=taskAttachmentLabels(attachments??[]);
@@ -232,29 +230,31 @@ function selectVisualPdfPages(attachments:AgentTaskView['attachments'],instructi
   });
   const listing=entries.map(entry=>entry.label+' '+entry.windows.map(({from,to})=>from===to?'第 '+from+' 页':'第 '+from+' 至 '+to+' 页').join('、')).join('\n');
   const question='本轮目视核对最多 3 页。请从下列页码中选择。'+(entries.length===1?'可回复“3、5”。':'请在页码前写文件名，每个文件一行。')+'\n'+listing;
+  const candidates=entries.flatMap(entry=>entry.windows.map(({from,to})=>({fileId:entry.id,from,to})));
+  const pending={question,candidates,excluded};
   const answer=[...questions].reverse().find(item=>item.question===question&&item.answeredAt)?.answer?.trim();
-  if(!answer)return {question,excluded};
+  if(!answer)return pending;
   const chosen=new Map<string,Set<number>>();
   for(const part of answer.split(/[；;\n]+/).map(value=>value.trim()).filter(Boolean)){
     const named=entries.find(entry=>part.startsWith(entry.label)&&/^[ \t:：第]/u.test(part.slice(entry.label.length)));
     const source=named??(entries.length===1?entries[0]:undefined);
-    if(!source)return {question,excluded};
+    if(!source)return pending;
     const text=named?part.slice(named.label.length).replace(/^[ \t:：]+/,''):part;
     const pages=chosen.get(source.id)??new Set<number>();
     for(const piece of text.split(/[、,，和及]+/u).map(value=>value.trim())){
       const match=/^(?:第[ \t]*)?([1-9]\d{0,6})[ \t]*(?:页)?(?:[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d{0,6})[ \t]*(?:页)?)?$/u.exec(piece);
-      if(!match)return {question,excluded};
+      if(!match)return pending;
       const first=Number(match[1]),last=Number(match[2]??match[1]);
-      if(last<first||last-first+1>PDF_VISUAL_PAGE_LIMIT)return {question,excluded};
+      if(last<first||last-first+1>PDF_VISUAL_PAGE_LIMIT)return pending;
       for(let page=first;page<=last;page++){
-        if(!source.windows.some(range=>page>=range.from&&page<=range.to))return {question,excluded};
+        if(!source.windows.some(range=>page>=range.from&&page<=range.to))return pending;
         pages.add(page);
       }
     }
     chosen.set(source.id,pages);
   }
   const count=[...chosen.values()].reduce((sum,pages)=>sum+pages.size,0);
-  if(!count||count>PDF_VISUAL_PAGE_LIMIT)return {question,excluded};
+  if(!count||count>PDF_VISUAL_PAGE_LIMIT)return pending;
   pdfVisualRanges.clear();
   for(const source of entries){
     const previous=pdfRanges.get(source.id)!;
@@ -284,12 +284,13 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
   const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
-  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>(),pdfVisualChoice:undefined};
+  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>(),pdfVisualChoice:undefined,pdfVisualCandidates:undefined};
   const visualSelection=pdfChoice||pdfScopeConflict?undefined:selectVisualPdfPages(attachments,instructions,questions,pdfRanges,pdfVisualRanges);
   const pdfVisualChoice=visualSelection?.question;
+  const pdfVisualCandidates=visualSelection?.candidates;
   const scopedNames=new Set(attachments.filter(file=>pdfRanges.has(file.id)).map(file=>file.name));
   const siblings=attachments.filter(file=>!pdfRanges.has(file.id)&&(scopedNames.has(file.name)||confirmedPdfChoices.has(file.id)));
-  if(!othersExcluded&&!siblings.length&&!visualSelection?.excluded.size)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice};
+  if(!othersExcluded&&!siblings.length&&!visualSelection?.excluded.size)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates};
 
   const allowed=new Set(pdfRanges.keys());
   if(worksheet?.fileId)allowed.add(worksheet.fileId);
@@ -302,10 +303,10 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   }
   if(!othersExcluded){
     const excludedSiblings=[...siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id),...(visualSelection?.excluded??[])];
-    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
+    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
   }
   for(const id of visualSelection?.excluded??[])allowed.delete(id);
-  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,allowedFiles:allowed};
+  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,allowedFiles:allowed};
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */

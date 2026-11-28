@@ -2,12 +2,12 @@ import { agentQuestionCopy } from './agentQuestionCopy';
 import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
-import {XiaozhuAttachmentChoices} from './modules/XiaozhuAttachmentChoices';
+import {XiaozhuAttachmentChoices,XiaozhuVisualPageChoices} from './modules/XiaozhuAttachmentChoices';
 import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import { AGENT_TASK_ISSUE_LABEL, type AgentTaskEvent, type AgentTaskPage, type AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
-import { taskAttachmentChoicesForQuestion, taskAttachmentLabels, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentChoicesForQuestion, taskAttachmentLabels, taskVisualPdfPageChoices, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
@@ -299,6 +299,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
  const answerQuestion=answer?.row.questions?.find(q=>q.id===answer.questionId);
  const answerPicker=taskAttachmentChoicesForQuestion(answerQuestion,answer?.row.attachments);
+ const visualPages=taskVisualPdfPageChoices(answerQuestion,answer?.row.attachments,answer?.answer);
  const detailOrigin=detail&&!contentRestricted(detail)&&detail.state!=='access_changed'&&detail.executor==='platform'
   ? detail.automationId?{id:detail.id,section:'automations',automationId:detail.automationId,label:'打开原规则',icon:Zap}
    :detail.conversationId?{id:detail.id,section:'task-origin',label:'打开原对话',icon:MessageSquare}
@@ -355,8 +356,9 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     {answerPicker?.choices.length ? <>
      <p className="mist-sub">{uiText(answerPicker.prompt)}</p>
      <XiaozhuAttachmentChoices {...answerPicker} selected={answer.answer} disabled={busy||uncertain} onChoose={label=>setPlan({...answer,answer:label})} />
-    </> : <>
-     <p className="mist-sub">{answerQuestion?.question}</p>
+    </> : visualPages.length ? <XiaozhuVisualPageChoices choices={visualPages} value={answer.answer}
+      disabled={busy||uncertain} onChange={value=>setPlan({...answer,answer:value})}/> : <>
+     <p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(answerQuestion?.question??'')}</p>
      <Field label={uiText('答复')} required><TextArea value={answer.answer} disabled={uncertain} onChange={e=>setPlan({...answer,answer:e.target.value})} maxLength={4000} rows={5}/></Field>
     </>}
    </>:plan&&'row'in plan?<><KeyValue items={[{label:uiText('任务'),value:plan.row.name},{label:uiText('当前状态'),value:uiText(statusLabel(plan.row))}]} />{plan.kind==='cancel'&&<p className="mist-sub">{uiText('停止后不再续办，已办理的业务保留。')}</p>}{plan.kind==='issue'&&plan.row.state==='running'&&<p className="mist-sub">{uiText('重新连接将中断当前执行器。')}</p>}</>:null}

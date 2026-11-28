@@ -3,7 +3,7 @@ import React from 'react';
 import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import { activeAgentTaskStep, agentTaskActivityText, type AgentTaskTrailItem, type AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
-import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, taskVisualPdfPageChoices, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../../runtime/xiaozhuActivity';
@@ -13,7 +13,7 @@ import { commandRequiresSignature } from '../../runtime/signatureRules';
 import { XiaozhuPhaseTimer } from './XiaozhuPhaseTimer';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 import { agentQuestionCopy } from '../agentQuestionCopy';
-import { XiaozhuAttachmentChoices } from './XiaozhuAttachmentChoices';
+import { XiaozhuAttachmentChoices, XiaozhuVisualPageChoices } from './XiaozhuAttachmentChoices';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
@@ -110,6 +110,7 @@ function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnsw
   if (!open || !task.canControl) return null;
   const picker = taskAttachmentChoicesForQuestion(open, task.attachments);
   const text = draft?.read(task.id,open.id) ?? localText;
+  const visualPages=taskVisualPdfPageChoices(open,task.attachments,text);
   const change=(value:string)=>draft?draft.write(task.id,open.id,value):setLocalText(value);
   const send = () => { if (text.trim()&&!busy) onAnswer(task, open.id, text); };
   return <div className="mist-xz-card" data-tone="ask"><div className="mist-xz-card-h"><Icon icon={HelpCircle} size="sm" /><b>{uiText('小竹想先确认')}</b></div>
@@ -117,9 +118,11 @@ function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnsw
       <p>{uiText(picker.prompt)}</p>
       <XiaozhuAttachmentChoices {...picker} disabled={busy} onChoose={label => onAnswer(task, open.id, label)} />
     </> : <>
-      <p className="mist-xz-question-copy">{agentQuestionCopy(open.question)}</p>
-      <div className="mist-xz-answer">
-        <input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+      {visualPages.length
+        ? <XiaozhuVisualPageChoices choices={visualPages} value={text} disabled={busy} onChange={change} />
+        : <p className="mist-xz-question-copy">{agentQuestionCopy(open.question)}</p>}
+      <div className={visualPages.length?"mist-row":"mist-xz-answer"}>
+        {!visualPages.length&&<input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />}
         <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button>
       </div>
     </>}

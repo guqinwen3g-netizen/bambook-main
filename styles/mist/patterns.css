@@ -1314,6 +1314,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-question-copy { white-space: pre-wrap; overflow-wrap: anywhere; }
 .mist-xz-card ul { margin: 0; padding-left: 18px; list-style: disc; color: var(--mist-ink-2); font-size: var(--mist-text-sm); line-height: 1.6; }
 .mist-xz-attachment-choices { display: grid; gap: var(--mist-space-1); }
+.mist-xz-page-options { display: grid; grid-template-columns: repeat(auto-fit,minmax(88px,1fr)); gap: var(--mist-space-1) var(--mist-space-2); }
 .mist-xz-attachment-choices .mist-btn { min-width: 0; height: auto; min-height: 32px; padding-block: 6px; justify-content: flex-start; text-align: start; white-space: normal; }
 .mist-xz-attachment-choices .mist-btn > span { min-width: 0; overflow-wrap: anywhere; }
 .mist-xz-attachment-choices .mist-btn > svg { flex: none; }

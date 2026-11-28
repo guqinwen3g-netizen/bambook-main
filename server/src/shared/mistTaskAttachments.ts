@@ -1,5 +1,7 @@
 /** Limits for a single personal Agent message. */
 export const TASK_ATTACHMENT_COUNT = 6;
+export const PDF_VISUAL_PAGE_LIMIT = 3;
+export type PdfVisualCandidate = {fileId:string;from:number;to:number};
 export type TaskAttachmentRef = { taskId: string; fileId: string };
 export const TASK_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const TASK_ATTACHMENT_TOTAL_BYTES = 24 * 1024 * 1024;
@@ -59,4 +61,22 @@ export function taskAttachmentChoicesForQuestion(
   if (question?.attachmentChoiceIds?.length) return {
     prompt: question.question===PDF_SELECTION_QUESTION?'选择要读取的 PDF':question.question, choices: taskPdfChoices(files, question.attachmentChoiceIds),
   };
+}
+
+/** Small ranges fit the inline picker. Larger ranges keep the free-form page reply. */
+export function taskVisualPdfPageChoices(question:{pdfVisualCandidates?:readonly PdfVisualCandidate[]}|undefined,
+  files:readonly TaskAttachment[]=[],answer='',
+){
+  const ranges=question?.pdfVisualCandidates;
+  if(!ranges?.length||ranges.some(range=>!Number.isSafeInteger(range.from)||!Number.isSafeInteger(range.to)
+    ||range.from<1||range.to<range.from)||ranges.reduce((sum,range)=>sum+range.to-range.from+1,0)>12)return [];
+  const choices=taskPdfChoices(files);
+  if(ranges.some(range=>!choices.some(choice=>choice.file.id===range.fileId)))return [];
+  const groups=choices.flatMap(({file,label})=>{
+    const pages=[...new Set(ranges.filter(range=>range.fileId===file.id)
+      .flatMap(range=>Array.from({length:range.to-range.from+1},(_,index)=>range.from+index)))].sort((a,b)=>a-b);
+    return pages.length?[{fileId:file.id,label,pages}]:[];
+  });
+  if(answer&&answer.split('\n').some(line=>!groups.some(group=>group.pages.some(page=>line===group.label+' 第 '+page+' 页'))))return [];
+  return groups;
 }

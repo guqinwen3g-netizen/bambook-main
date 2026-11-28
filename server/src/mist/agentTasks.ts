@@ -167,12 +167,13 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   let visibleSteps = readable ? c.platform?.steps : undefined;
   let questions=readable?c.questions??[]:[];
   if(visibleSteps?.length||questions.some(q=>!q.answeredAt)){
-    const {pdfRanges,worksheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    if(visibleSteps&&(pdfRanges.size||allowedFiles||excludedPdfIds||pdfChoice||pdfScopeConflict)){
-      const permitted=pdfChoice||pdfScopeConflict?new Set<string>():allowedFiles;
+    const {pdfRanges,worksheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
+    if(visibleSteps&&(pdfRanges.size||allowedFiles||excludedPdfIds||pdfChoice||pdfScopeConflict||pdfVisualChoice)){
+      const permitted=pdfChoice||pdfScopeConflict||pdfVisualChoice?new Set<string>():allowedFiles;
       visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdfRanges,worksheet,permitted,excludedPdfIds);
     }
     if(pdfChoice)questions=questions.map(q=>q.question===pdfChoice.question&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoice.ids}:q);
+    if(pdfVisualChoice&&pdfVisualCandidates)questions=questions.map(q=>q.question===pdfVisualChoice&&!q.answeredAt?{...q,pdfVisualCandidates}:q);
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),

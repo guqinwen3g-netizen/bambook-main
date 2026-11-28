@@ -1256,6 +1256,7 @@ it('asks for a bounded visual PDF selection and keeps the same task after a vali
  const pending=await f.current(task.id);
  expect(pending.state).toBe('waiting_human');
  expect(pending.questions.at(-1).question).toContain('最多 3 页');
+ expect(pending.questions.at(-1).pdfVisualCandidates).toEqual([{fileId:task.attachments[0].id,from:2,to:5}]);
  expect(complete).not.toHaveBeenCalled();
  const answer=async(current:any,value:string)=>{
   await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
