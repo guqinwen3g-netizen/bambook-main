@@ -2262,14 +2262,19 @@ it.each(['PDF','Excel'])('keeps the prior %s read scope only when the original i
  const disjoint=isPdf?'请只读取 scope.pdf 第 1 页。':'请只读取 scope.xlsx 的工作表「报价」第 1 行。';
  const outside=(await create({attachmentRefs:[preserve],instructions:'只用我提供的资料。'+disjoint}).expect(201)).body.item;
  await f.drain();
- expect(await f.current(outside.id)).toMatchObject({state:'failed'});
+ expect(await f.current(outside.id)).toMatchObject({state:'failed',result:expect.stringContaining('重新引用原附件')});
+ expect((await f.current(outside.id)).result).toContain(isPdf?'第 3 页':'第 3 行');
  expect(complete).toHaveBeenCalledTimes(3);
  const repeated=(await create({attachmentRefs:[{...preserve,taskId:retry.id}]}).expect(201)).body.item;
  await f.drain();
  expect(await f.current(repeated.id)).toMatchObject({state:'succeeded',attachments:[{id:fileId}]});
- const manual=(await create({attachmentRefs:[{taskId:original.id,fileId}]}).expect(201)).body.item;
+ const manualRef={taskId:original.id,fileId};
+ const manual=(await create({attachmentRefs:[manualRef]}).expect(201)).body.item;
  await f.drain();
  expect(await f.current(manual.id)).toMatchObject({state:'succeeded'});
+ const changed=(await create({attachmentRefs:[manualRef],instructions:'只用我提供的资料。'+disjoint}).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(changed.id)).toMatchObject({state:'succeeded',attachments:[{id:fileId}]});
  const source=(call:number)=>{
   const content=complete.mock.calls[call][0].messages[0].content;
   return JSON.parse(content.slice(content.indexOf('{'))).history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
@@ -2279,6 +2284,7 @@ it.each(['PDF','Excel'])('keeps the prior %s read scope only when the original i
   expect(source(2).range).toMatchObject({pageFrom:3,pageTo:3});
   expect(source(3).range).toMatchObject({pageFrom:3,pageTo:3});
   expect(source(4).range).toMatchObject({pageFrom:1,pageTo:5});
+  expect(source(5).range).toMatchObject({pageFrom:1,pageTo:1});
  }else{
   expect(source(1).worksheetRowScope).toEqual([{from:3,to:3}]);
   expect(source(2).worksheetRowScope).toEqual([{from:3,to:3}]);
@@ -2286,6 +2292,7 @@ it.each(['PDF','Excel'])('keeps the prior %s read scope only when the original i
   expect(source(2).text).not.toMatch(/OUTSIDE|OTHER-SHEET/);
   expect(source(3).worksheetRowScope).toEqual([{from:3,to:3}]);
   expect(source(4).text).toContain('OTHER-SHEET');
+  expect(source(5).worksheetRowScope).toEqual([{from:1,to:1}]);
  }
 });
 

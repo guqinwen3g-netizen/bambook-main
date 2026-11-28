@@ -213,7 +213,7 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedFileIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,scopeCorrection}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions,context.attachmentReadScopes);
+        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedFileIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,scopeCorrection,retryScopeConflict}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions,context.attachmentReadScopes);
         if(scopeCorrection){
           const {allowed,...correction}=scopeCorrection;
           const files=context.task.attachments??[];
@@ -227,6 +227,26 @@ export class MistPlatformTaskWorker{
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
             requestId:'platform-scope-correction-'+job.taskId+'-'+(context.task.questions?.length??0),question,
           },correction);
+          return;
+        }
+        if(retryScopeConflict){
+          const files=context.task.attachments??[];
+          const index=files.findIndex(file=>file.id===retryScopeConflict.fileId);
+          const isSheet='sheet' in retryScopeConflict;
+          const name=taskAttachmentLabels(files)[index]??(isSheet?'Excel':'PDF');
+          const pages=isSheet?undefined:retryScopeConflict.pages;
+          const bounds=isSheet?retryScopeConflict.rows:pages?.windows??(pages?[pages]:undefined);
+          const firstRanges=bounds?.slice(0,8).map(({from,to})=>from===to?String(from):from+'–'+to).join('、');
+          const range=firstRanges&&(bounds&&bounds.length>8?firstRanges+'…':firstRanges);
+          const previous=context.locale==='en-US'
+            ? isSheet?`worksheet “${retryScopeConflict.sheet}”${range?', rows '+range:''}`:'pages '+range
+            : isSheet?`「${retryScopeConflict.sheet}」${range?'第 '+range+' 行':''}`:'第 '+range+' 页';
+          const result=context.locale==='en-US'
+            ? `${name} was limited to ${previous}. To change the range, remove and reattach the original in the draft.`
+            : `${name} 原读取范围为${previous}。如需更改范围，请在草稿中移除并重新引用原附件。`;
+          await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
+            requestId:'platform-retry-scope-conflict-'+job.taskId,outcome:'failed',result,
+          });
           return;
         }
         if(pdfScopeConflict){
