@@ -14,6 +14,34 @@ const loaded=async(url:string)=>url.includes('/agent-identities')?{items:[{id:'i
 function View({workspace='workspace',conversationId}:{workspace?:string;conversationId?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true,conversationId);return <div>{channel.tasks.length}</div>}
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();api.mockReset();});
 
+it('keeps the other progress read in flight when a concurrent task finishes',async()=>{
+ const first={...task,id:'first',conversationId:'c_first',state:'running',version:2,executionStage:'model'};
+ const second={...first,id:'second',conversationId:'c_second'};
+ const reads=new Map<string,{resolve:(value:unknown)=>void;signal:AbortSignal}[]>();
+ api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-tasks'))return {items:[first,second],nextCursor:null};
+  const id=url.split('/').at(-1)!;
+  if(id==='first'||id==='second'){
+   return new Promise(resolve=>{
+    const calls=reads.get(id)??[];
+    calls.push({resolve,signal:init!.signal!});
+    reads.set(id,calls);
+   });
+  }
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId="c_first"/>));
+ const waiting=reads.get('second')![0];
+ await act(async()=>reads.get('first')![0].resolve({item:{...first,version:3,state:'succeeded',result:'第一份报告'}}));
+ expect(channel.tasks.find(item=>item.id==='first')?.result).toBe('第一份报告');
+ expect(waiting.signal.aborted).toBe(false);
+ expect(reads.get('second')).toHaveLength(1);
+ await act(async()=>waiting.resolve({item:{...second,version:3,state:'succeeded',result:'第二份报告'}}));
+ expect(channel.tasks.find(item=>item.id==='second')?.result).toBe('第二份报告');
+ expect(channel.staleProgressIds?.has('second')).toBeFalsy();
+});
+
 it('rechecks a stale task directly and coalesces concurrent progress reads',async()=>{
  const waiting={...task,state:'running',executionStage:'model',version:2,canControl:true};
  const finished={...waiting,state:'succeeded',version:3,result:'已恢复原报告'};

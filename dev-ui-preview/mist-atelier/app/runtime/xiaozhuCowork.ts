@@ -367,12 +367,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
   const staleProgressIds = staleProgress?.scope === scope ? staleProgress.ids : undefined;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
+  const hasProgressTargets = activeTasks.length > 0;
+  const progressTargets = React.useRef({ foregroundId, background: [] as string[], available });
+  progressTargets.current = { foregroundId, background: backgroundIds ? backgroundIds.split(',') : [], available };
+  const syncProgressTargets = React.useRef<(() => void) | undefined>(undefined);
   const manualProgressRead = React.useRef<((taskId:string)=>Promise<void>|undefined)|undefined>(undefined);
   const recheckProgress = React.useCallback(async(taskId:string)=>{ await manualProgressRead.current?.(taskId); },[]);
 
   React.useEffect(() => {
-    if ((!foregroundId && !backgroundIds) || !base || !enabled) return;
-    const background = backgroundIds ? backgroundIds.split(',') : [];
+    if (!hasProgressTargets || !base || !enabled) return;
     const inFlight = new Map<string, {controller:AbortController;promise:Promise<void>}>();
     const retry = new Map<string, { delay: number; at: number }>();
     let lastBackground = 0;
@@ -404,6 +407,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       return promise;
     };
     const manual=(id:string)=>{
+      const {foregroundId,background}=progressTargets.current;
       if(live.current!==scope||!navigator.onLine||(id!==foregroundId&&!background.includes(id)))return;
       return readProgress(id);
     };
@@ -411,15 +415,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       for(const {controller} of inFlight.values())controller.abort();
       inFlight.clear();
     };
-    const releaseReaders=()=>{
-      if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
-      abortReads();
-    };
     manualProgressRead.current=manual;
-    // Model availability gates automatic polling, not reads of an existing task.
-    if(!available)return releaseReaders;
     const poll = () => {
-      if (live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
+      const {foregroundId,background,available}=progressTargets.current;
+      // Model availability gates automatic polling, not reads of an existing task.
+      if (!available || live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
       const ids = foregroundId ? [foregroundId] : [];
       const now = Date.now();
       if (background.length && now - lastBackground >= 3000) {
@@ -431,23 +431,44 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         void readProgress(id);
       }
     };
-    const offline = () => { abortReads(); markStale(foregroundId ? [foregroundId, ...background] : background); };
-    const refreshVisible = () => { lastBackground = 0; void poll(); };
+    const offline = () => {
+      abortReads();
+      const {foregroundId,background}=progressTargets.current;
+      markStale(foregroundId ? [foregroundId,...background] : background);
+    };
+    const sync = () => {
+      const {foregroundId,background}=progressTargets.current;
+      const active=new Set(background);
+      if(foregroundId)active.add(foregroundId);
+      // One finished task must not cancel reads or clear the backoff for other active tasks.
+      for(const [id,pending] of inFlight)if(!active.has(id)){
+        pending.controller.abort();
+        inFlight.delete(id);
+      }
+      for(const id of retry.keys())if(!active.has(id))retry.delete(id);
+      if(navigator.onLine)poll();
+      else offline();
+    };
+    syncProgressTargets.current=sync;
+    const refreshVisible = () => { lastBackground = 0; poll(); };
     const reconnect = () => { retry.clear(); refreshVisible(); };
-    const timer = window.setInterval(poll, foregroundId ? 1000 : 3000);
+    const timer = window.setInterval(poll, 1000);
     document.addEventListener('visibilitychange', refreshVisible);
     window.addEventListener('offline', offline);
     window.addEventListener('online', reconnect);
-    if (navigator.onLine) poll();
-    else offline();
     return () => {
-      releaseReaders();
+      if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
+      if(syncProgressTargets.current===sync)syncProgressTargets.current=undefined;
+      abortReads();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', reconnect);
     };
-  }, [foregroundId, backgroundIds, base, available, enabled, scope, clearStaleProgress]);
+  }, [hasProgressTargets, base, enabled, scope, clearStaleProgress]);
+  React.useEffect(() => {
+    syncProgressTargets.current?.();
+  }, [foregroundId, backgroundIds, available, base, enabled, scope]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
