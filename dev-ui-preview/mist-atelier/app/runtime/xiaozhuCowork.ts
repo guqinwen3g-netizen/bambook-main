@@ -89,6 +89,7 @@ function restrictReport(task: AgentTaskView): AgentTaskView {
     canControl: false, attachments: undefined, intentRefs: undefined, trail: undefined, questions: [],
     waitingProposalIds: [], resumeAt: null, waitingFor: null, nextCheckAt: null, requiredRead: null };
 }
+const restrictedTask=(task:AgentTaskView)=>task.contentRestricted||task.state==='access_changed';
 
 async function readSubmissionReceipt(base: string, entry: PendingSubmission, signal: AbortSignal): Promise<AgentTaskView> {
   const {item} = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
@@ -194,6 +195,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const tasks = React.useMemo(() => cachedTasks.map(task => reportAccess?.scope === scope && reportAccess.restricted.has(task.id)
     ? restrictReport(task) : task), [cachedTasks, reportAccess, scope]);
   const restrictedReports = React.useRef(new Set<string>());
+  const maskReports=React.useCallback((ids:readonly string[])=>{
+    const before=restrictedReports.current,restricted=new Set([...before,...ids]);
+    if(restricted.size===before.size)return;
+    restrictedReports.current=restricted;
+    setReportAccess({scope,restricted});
+    setTasks(old=>old.map(task=>restricted.has(task.id)&&!task.contentRestricted?restrictReport(task):task));
+  },[scope]);
   const currentTasks = React.useRef(tasks);
   currentTasks.current = tasks;
   const [checkingAvailability, setCheckingAvailability] = React.useState(true);
@@ -246,6 +254,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     let changed=false;
     for(const task of tasks){
       const pending=controlKeys.get(task.id);
+      if(pending?.action==='cancel'&&restrictedTask(task))continue;
       const awaitingAttachmentReceipt=pending?.action==='answer'&&pending.hasAttachments
         &&(pending.restoredFromStorage||task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt));
       if(pending&&(task.contentRestricted||!awaitingAttachmentReceipt&&(task.version>pending.version||task.canControl===false))) {
@@ -602,14 +611,6 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const readable = new Set<string>();
       let offset = 0;
       let denied = false;
-      const maskReports = (ids: readonly string[]) => {
-        const before = restrictedReports.current;
-        const restricted = new Set([...before, ...ids]);
-        if (restricted.size === before.size) return;
-        restrictedReports.current = restricted;
-        setReportAccess({ scope, restricted });
-        setTasks(old => old.map(task => restricted.has(task.id) && !task.contentRestricted ? restrictReport(task) : task));
-      };
       const checkBatches = async () => {
         while (authorized() && !denied && offset < ids.length) {
           const batch = ids.slice(offset, offset + TASK_ACCESS_BATCH_LIMIT);
@@ -682,7 +683,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.removeEventListener('online', wake);
       window.removeEventListener('offline', suspend);
     };
-  }, [base, enabled, openReportIds, scope]);
+  }, [base, enabled, openReportIds, scope, maskReports]);
   const visiblePausedIds = visibleConversationId ? tasks.filter(task => task.state === 'paused'
     && (task.conversationId || 'legacy_' + task.id) === visibleConversationId)
     .slice(-BACKGROUND_PROGRESS_MAX_IN_FLIGHT).map(task => task.id).join(',') : '';
@@ -1029,7 +1030,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
     const {action}=intent;
     const checkOnly='requestId' in intent;
-    if(checkOnly&&(intent.version!==task.version||task.contentRestricted||!task.canControl))return;
+    if(checkOnly&&(intent.version!==task.version||restrictedTask(task)||!task.canControl))return;
     const failure = CONTROL_FAILURE[action];
     let controller = new AbortController();
     const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
@@ -1062,6 +1063,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         }
       }
       const latest = await readCoworkTask(base,task.id,controller.signal);
+      if(request.action==='cancel'&&restrictedTask(latest)){
+        // An access mask does not tell the owner whether the earlier stop was applied.
+        if(isCurrent()&&deniedHistory.current===denial){
+          applyTaskUpdate(restrictReport(latest));
+          maskReports([latest.id]);
+        }
+        return;
+      }
       const answer=request.action==='answer'
         ? latest.questions?.find(question=>question.id===request.questionId&&question.answeredAt)?.answer : undefined;
       const confirmed = request.action==='answer'
@@ -1148,7 +1157,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const visibleControls={...controls};
   for(const task of tasks){
     const pending=controlKeys.get(task.id),previous=controls[task.id];
-    const matching=pending&&pending.version===task.version&&!task.contentRestricted&&task.canControl!==false;
+    const matching=pending&&pending.version===task.version&&!restrictedTask(task)&&task.canControl!==false;
     if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
     if(previous?.attachmentReceiptPending&&(
       task.contentRestricted||pending?.action!=='answer'||!pending.hasAttachments||pending.requestId!==previous.attachmentReceiptRequestId

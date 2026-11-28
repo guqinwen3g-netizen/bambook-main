@@ -530,6 +530,41 @@ it('recovers a lost stop receipt from the one task without rereading history',as
  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
 });
 
+it('retains a lost stop request when the receipt read loses access and checks it after access returns',async()=>{
+ const pending=new Map<string,import('./xiaozhuControlRequests').TaskControlRequest>();
+ const storage='stop-access-regrant';sessionStorage.removeItem('mist.xiaozhu.controls:'+storage);
+ const waiting={...task,state:'waiting_time',version:2,conversationId:'c_stop_regrant',canControl:true};
+ const stopped={...waiting,state:'cancelled',version:3,canControl:false};
+ let restricted=false,settled=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/cancel')){restricted=true;throw Object.assign(new Error('停止回执未送达'),{status:0});}
+  if(url.includes('/personal-agent/task-access?'))return {restrictedIds:restricted?['task']:[]};
+  if(url.endsWith('/task'))return {item:restricted?{...waiting,state:'access_changed',contentRestricted:true,canControl:false,instructions:'',result:''}:settled?stopped:waiting};
+  if(url.endsWith('/agent-tasks'))return {items:[waiting],nextCursor:null};
+  return loaded(url);
+ });
+ function Scenario(){channel=useXiaozhuCowork('workspace','account:workspace',true,waiting.conversationId,undefined,pending,storage);return <div/>;}
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ try{
+  await act(async()=>root!.render(<Scenario/>));
+  await act(async()=>{await channel.cancel(channel.tasks[0]);});
+  expect(channel.tasks[0]).toMatchObject({state:'access_changed',contentRestricted:true});
+  expect(channel.controls.task?.canCheckStop).toBeFalsy();
+  const [url,options]=api.mock.calls.find(([path])=>path.endsWith('/task/cancel'))!;
+  expect(url).toContain('/agent-tasks/task/cancel');
+  expect(readTaskControls(storage).get('task')).toMatchObject({action:'cancel',...JSON.parse(options.body)});
+  restricted=false;
+  await act(async()=>window.dispatchEvent(new Event('focus')));
+  expect(channel.tasks[0]).toMatchObject({state:'waiting_time',version:2});
+  expect(channel.controls.task).toMatchObject({canCheckStop:true,error:'停止结果未确认，可重试'});
+  settled=true;
+  await act(async()=>{await channel.checkStop(channel.tasks[0]);});
+  expect(channel.tasks[0]).toMatchObject({state:'cancelled',version:3});
+  expect(readTaskControls(storage).has('task')).toBe(false);
+  expect(api.mock.calls.filter(([path])=>path.endsWith('/task/cancel'))).toHaveLength(1);
+ }finally{sessionStorage.removeItem('mist.xiaozhu.controls:'+storage);}
+});
+
 it('checks an unconfirmed stop by reading the same task without sending another stop',async()=>{
  const waiting={...task,state:'waiting_time',version:2,canControl:true};
  const stopped={...waiting,state:'cancelled',version:3,canControl:false};
