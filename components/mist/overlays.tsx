@@ -32,7 +32,17 @@ function ownedMenu(node: HTMLElement, target: Node | null) {
     .find(menu => menu.dataset.mistOwner === node.id && !!target && menu.contains(target));
 }
 
-/** 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 */
+function setModalCovered(node: HTMLElement, covered: boolean) {
+  node.toggleAttribute('inert', covered);
+  const scrim = node.previousElementSibling;
+  if (scrim?.classList.contains('mist-scrim')) scrim.toggleAttribute('inert', covered);
+  if (!node.id) return;
+  for (const menu of document.querySelectorAll<HTMLElement>('[data-mist-owner]')) {
+    if (menu.dataset.mistOwner === node.id) menu.toggleAttribute('inert', covered);
+  }
+}
+
+/** 顶层浮层独占交互，关闭后回到触发器；允许自身的 portal 菜单。 */
 export function useModalFocus(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>) {
   const target = useMistPortalTarget();
   const cb = React.useRef(onClose);
@@ -41,6 +51,8 @@ export function useModalFocus(open: boolean, onClose: () => void, ref: React.Ref
     const node = ref.current;
     if (!open || !node) return;
     const prev = document.activeElement as HTMLElement | null;
+    const previousTop = modalStack.at(-1);
+    if (previousTop) setModalCovered(previousTop, true);
     modalStack.push(node);
     const isTop = () => modalStack.at(-1) === node;
     const focusFirst = () => (focusableIn(node)[0] ?? node).focus();
@@ -61,7 +73,12 @@ export function useModalFocus(open: boolean, onClose: () => void, ref: React.Ref
     return () => {
       document.removeEventListener('keydown', h, true);
       document.removeEventListener('focusin', onFocus);
+      const wasTop = isTop();
       const i = modalStack.indexOf(node); if (i >= 0) modalStack.splice(i, 1);
+      setModalCovered(node, false);
+      if (!wasTop) return;
+      const nextTop = modalStack.at(-1);
+      if (nextTop) setModalCovered(nextTop, false);
       if (prev?.isConnected) prev.focus();
       // React's close commit may subsequently restore its old BODY selection.
       // Retry only while focus is unclaimed; never override a new page or modal.
@@ -82,12 +99,13 @@ export function Portal({ children }: { children: React.ReactNode }) {
 export type DialogProps = { open: boolean; onClose: () => void; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon; tone?: 'accent' | 'bad' | 'warn' | 'ok'; children?: React.ReactNode; footer?: React.ReactNode; width?: number };
 /** 居中弹窗：只用于需要打断的确认（删除、提交不可撤回操作）。普通编辑用 Drawer 或页内表单。 */
 export function Dialog({ open, onClose, title, description, icon, tone = 'accent', children, footer, width }: DialogProps) {
+  const nested = useInModal();
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   useModalFocus(open, onClose, ref);
   if (!open) return null;
   return <Portal><div className="mist-scrim" onClick={onClose} />
-    <div ref={ref} id={id} tabIndex={-1} className="mist-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined} style={width ? { width: `min(${width}px, 92vw)` } : undefined}>
+    <div ref={ref} id={id} tabIndex={-1} className="mist-dialog" data-nested={nested || undefined} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined} style={width ? { width: `min(${width}px, 92vw)` } : undefined}>
       <div className="mist-dialog-h">{icon && <Tile icon={icon} tone={tone} />}<div style={{ flex: 1 }}><div id={`${id}-title`} className="mist-h2">{uiText(title)}</div>{description && <p id={`${id}-description`}>{uiText(description)}</p>}</div><IconButton icon={X} label={uiText("关闭")} size="sm" onClick={onClose} /></div>
       {children && <div className="mist-dialog-body"><InModalContext.Provider value={true}>{uiText(children)}</InModalContext.Provider></div>}
       {footer && <div className="mist-dialog-foot">{footer}</div>}
@@ -98,12 +116,13 @@ export function Dialog({ open, onClose, title, description, icon, tone = 'accent
 export type DrawerProps = { open: boolean; onClose: () => void; title: React.ReactNode; sub?: React.ReactNode; leading?: React.ReactNode; tone?: 'ai'; size?: 'md' | 'lg'; children: React.ReactNode; footer?: React.ReactNode; bodyless?: boolean };
 /** 右侧抽屉：快速查看/编辑记录、AI 助手。不离开当前列表。 */
 export function Drawer({ open, onClose, title, sub, leading, tone, size, children, footer, bodyless }: DrawerProps) {
+  const nested = useInModal();
   const ref = React.useRef<HTMLElement>(null);
   const id = React.useId();
   useModalFocus(open, onClose, ref);
   if (!open) return null;
   return <Portal><div className="mist-scrim" onClick={onClose} />
-    <aside ref={ref} id={id} tabIndex={-1} className="mist-drawer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={sub ? `${id}-description` : undefined} data-size={size === 'lg' ? 'lg' : undefined}>
+    <aside ref={ref} id={id} tabIndex={-1} className="mist-drawer" data-nested={nested || undefined} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={sub ? `${id}-description` : undefined} data-size={size === 'lg' ? 'lg' : undefined}>
       <div className="mist-drawer-h" data-tone={tone}>{leading}<div><b id={`${id}-title`}>{uiText(title)}</b>{sub && <small id={`${id}-description`}>{uiText(sub)}</small>}</div><IconButton icon={X} label={uiText("关闭")} onClick={onClose} /></div>
       <InModalContext.Provider value={true}>{bodyless ? children : <div className="mist-drawer-body">{uiText(children)}</div>}
       {footer && <div className="mist-drawer-foot">{footer}</div>}</InModalContext.Provider>
@@ -130,7 +149,7 @@ export function CommandPalette({ open, onClose, items, query, onQueryChange, pla
   const exec = (it?: CommandItem) => { if (!it) return; onClose(); it.run(); };
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <div ref={ref} id={id} tabIndex={-1} className="mist-palette" role="dialog" aria-modal="true" aria-label={uiText("搜索")}>
-      <div className="mist-palette-q"><Icon icon={Search} /><input autoFocus value={q} placeholder={uiText(placeholder)} aria-label={uiText(placeholder)}
+      <div className="mist-palette-q"><Icon icon={Search} /><input value={q} placeholder={uiText(placeholder)} aria-label={uiText(placeholder)}
         onChange={e => { setQ(e.target.value); setActive(0); }}
         onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(flat.length - 1, a + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(0, a - 1)); } else if (e.key === 'Enter') exec(flat[active]); }} /><Kbd>ESC</Kbd></div>
       <div className="mist-palette-list">
