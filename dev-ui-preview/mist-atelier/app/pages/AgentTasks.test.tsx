@@ -805,11 +805,47 @@ it.each(['xlsx','pdf'])('submits the numbered %s selected in task details', asyn
  expect(JSON.parse(writes[0][1].body)).toMatchObject({version:3,questionId:'question',answer:choice});
 });
 
-it('freezes an uncertain owner answer and retries the same question and request',async()=>{
- const question={id:'question',question:'请补充书面确认依据。',askedAt:'2026-11-01T00:10:00Z'},waiting={...row(),state:'waiting_human',questions:[question]};let first:any=null;
- seam.api.mockImplementation((url:string,init:any)=>{if(init?.method==='POST'){if(!first){first=JSON.parse(init.body);return Promise.reject(new Error('网络中断'));}return Promise.resolve({item:{...waiting,state:'queued'}});}return Promise.resolve(url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:waiting}:{items:[waiting],nextCursor:null});});
- act(paint);await flush();await click(getByText(host,'核对邮件'));await click(getByRole(document.body,'button',{name:'补充资料',exact:true}));await act(async()=>fireEvent.input(getByLabelText(document.body,/答复/,{selector:'textarea'}),{target:{value:'保留原值，等待书面依据。'}}));await click(getByRole(document.body,'button',{name:'提交答复'}));
- expect((getByLabelText(document.body,/答复/,{selector:'textarea'}) as HTMLTextAreaElement).disabled).toBe(true);await click(getByRole(document.body,'button',{name:'核对原操作'}));const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(2);expect(JSON.parse(writes[1][1].body)).toEqual(first);
+it.each(['committed','missing','different','denied'])('reads the current answer before any retry (%s)',async outcome=>{
+ const answer='保留原值，等待书面依据。';
+ const question={id:'question',question:'请补充书面确认依据。',askedAt:'2026-11-01T00:10:00Z'};
+ const waiting={...row(),state:'waiting_human',questions:[question]};
+ const answered={...waiting,state:'queued',version:4,questions:[{...question,answer:outcome==='different'?'同事已确认新交期。':answer,answeredAt:'2026-11-01T00:20:00Z'}]};
+ const writes:string[]=[];let current=waiting,checking=false,reads=0;
+ seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(init?.method==='POST'){
+   writes.push(String(init.body));
+   if(writes.length===1)throw new Error('网络中断');
+   current=answered;
+   return {item:current};
+  }
+  if(url.includes('agent-identities'))return {items:[identity()],nextCursor:null};
+  if(url.includes('/history'))return {items:[],nextCursor:null};
+  if(url.endsWith('/task')){
+   if(checking){reads++;if(outcome==='denied')throw Object.assign(new Error('权限变化'),{status:403});}
+   return {item:current};
+  }
+  return {items:[current],nextCursor:null};
+ });
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ const openAnswer=()=>click(getByRole(document.body,'button',{name:'补充资料',exact:true}));
+ const answerDialog=()=>getByRole(document.body,'dialog',{name:'补充资料'});
+ await openAnswer();
+ await act(async()=>fireEvent.input(getByLabelText(answerDialog(),/答复/,{selector:'textarea'}),{target:{value:' '+answer+' '}}));
+ await click(getByRole(answerDialog(),'button',{name:'提交答复'}));
+ await click(getByText(answerDialog(),'关闭',{exact:true}));await openAnswer();
+ const input=()=>getByLabelText(answerDialog(),/答复/,{selector:'textarea'}) as HTMLTextAreaElement;
+ expect(input().value).toBe(' '+answer+' ');expect(input().disabled).toBe(true);
+ if(outcome==='committed'||outcome==='different')current=answered;
+ checking=true;await click(getByRole(answerDialog(),'button',{name:'核对原操作'}));
+ expect(writes).toHaveLength(1);expect(reads).toBeGreaterThanOrEqual(1);
+ if(outcome==='missing'){
+  expect(input().disabled).toBe(true);
+  await click(getByRole(answerDialog(),'button',{name:'重发原答复'}));
+  expect(writes).toHaveLength(2);expect(writes[1]).toBe(writes[0]);
+ }
+ expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();
+ if(outcome==='denied')expect(document.body.textContent).not.toContain(question.question);
+ else expect(getByText(document.body,answered.questions[0].answer)).toBeTruthy();
 });
 it.each([false,true])('checks the exact receipt for an attachment answer and retries only an absent receipt (%s)',async missing=>{
  const question={id:'question',question:'请补交书面确认依据。',askedAt:'2026-11-01T00:10:00Z'};
