@@ -944,11 +944,18 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
  const current=outcome==='confirmed'?proposed:'T/T 30% 定金，收到商业发票后核对';
  let orderId:string,contract:Record<string,unknown>;
  const complete=vi.fn(async(input:LlmCompletionInput):Promise<string>=>{
-  if(complete.mock.calls.length===1)return tool('bambook_execute',{
-   command:{type:'order.governance.saveDraft',payload:{orderId,input:{...contract,paymentNote:proposed}}},
-  });
   const prompt=input.messages[0].content;
   const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
+  if(complete.mock.calls.length===1){
+   expect(facts.orderDraftCommand).toMatchObject({type:'order.governance.saveDraft',orderId,via:'confirm',
+    payload:expect.stringContaining('OrderGovernanceInput'),
+    types:{OrderGovernanceInput:expect.any(String),OrderGovernanceLine:expect.any(String)}});
+   expect(input.systemPrompt).toContain('服务端完整预演');
+   return tool('bambook_execute',{
+    command:{type:'order.governance.saveDraft',payload:{orderId,input:{...contract,paymentNote:proposed}}},
+   });
+  }
+  expect(facts).not.toHaveProperty('orderDraftCommand');
   const reviewed=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.proposalReadBack?.operationId);
   expect(facts.proposalReadBack?.outcome).toBe(outcome);
   expect(reviewed).toMatchObject({name:'bambook_get',result:{object:{id:orderId,type:'order',truncated:false,
@@ -964,6 +971,7 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
  });
  orderId=created.body.receipt.result.orderId;
  contract=created.body.workspace.state.orders.find((order:{id:string})=>order.id===orderId).governance.contract;
+ const preview=vi.spyOn(f.repository,'preview');
  f.worker.start(3_600_000);
  const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks').send({
   requestId:randomUUID(),name:'核对订单草稿付款说明',instructions:'拟修改引用订单草稿的付款说明。',intentRefs:[{kind:'orders',id:orderId}],
@@ -971,6 +979,9 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
  await f.drain();
  const pending=await f.current(task.id);
  expect(pending.state).toBe('waiting_human');
+ expect(preview).toHaveBeenCalledTimes(1);
+ const before=(await f.human.get(f.base).expect(200)).body.workspace.state.orders.find((order:{id:string})=>order.id===orderId);
+ expect(before.governance.contract).toEqual(contract);
  if(outcome==='rejected')await f.command('order.governance.saveDraft',{orderId,input:{...contract,paymentNote:current}});
  await f.command(outcome==='confirmed'?'agent.proposal.confirm':'agent.proposal.reject',{id:pending.waitingProposalIds[0]});
  await f.drain();
