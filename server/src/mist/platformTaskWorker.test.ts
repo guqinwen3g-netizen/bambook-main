@@ -1155,7 +1155,7 @@ it('rechecks authority before saving a late model decision and retains owner cle
  await f.worker.tick();await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(1));ceiling.value=[];resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.messages[0].id,flag:'starred',value:true}}}));await f.worker.settled();const masked=await f.current(task.id);expect(masked).toMatchObject({state:'access_changed',instructions:'',questions:[]});
  await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:masked.version}).expect(200);ceiling.value=null;expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(before);
 });
-it('loads the full workspace projection for planning but not for individual tool gates',async()=>{
+it('keeps checkpoint and finish on the task path without building a workspace page response',async()=>{
  let turn=0;
  const f=await fixture(async()=>++turn===1
   ?tool('bambook_task',{action:'checkpoint',summary:'已核对任务。'})
@@ -1165,7 +1165,7 @@ it('loads the full workspace projection for planning but not for individual tool
  const prepared=vi.spyOn(f.repository as any,'preparedView');
  await f.drain();
  expect(turn).toBe(2);
- expect(prepared).toHaveBeenCalledTimes(2);
+ expect(prepared).not.toHaveBeenCalled();
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'核对结束。'});
 });
 it('rechecks live source access after persisting a tool plan and leaves the tool unexecuted on revocation',async()=>{
@@ -2317,6 +2317,30 @@ it('keeps excluded images out of a retry that renders an allowed PDF page',async
  expect(await f.current(retry.id)).toMatchObject({state:'succeeded'});
  expect(complete).toHaveBeenCalledTimes(2);
  for(const [input] of complete.mock.calls)expect(input.images?.map(image=>image.name)).toEqual(['scan.pdf 第 3 页']);
+});
+
+it('does not build the workspace page response while a mixed-file task has no history or proposals',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对三份原件。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const workbook=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['QUOTE-220','USD',26]]),'报价');
+ const image=await sharp({create:{width:4,height:4,channels:3,background:'#eecc00'}}).png().toBuffer();
+ const created=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对三份原件',instructions:'核对 PDF、报价表和图片。'}))
+  .attach('attachments',pdf('PDF ORIGINAL ID',3),'scan.pdf')
+  .attach('attachments',XLSX.write(workbook,{type:'buffer',bookType:'xlsx'}),'quote.xlsx')
+  .attach('attachments',image,'tag.png').expect(201)).body.item;
+ const pageView=vi.spyOn(f.repository as unknown as {preparedView:(...args:unknown[])=>Promise<unknown>},'preparedView');
+ const context=vi.spyOn(f.repository,'platformTaskContext');
+ await f.drain();
+ expect(await f.current(created.id)).toMatchObject({state:'succeeded',result:'已核对三份原件。'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ expect(complete.mock.calls[0][0].images?.map(item=>item.name)).toEqual(['tag.png']);
+ expect(complete.mock.calls[0][0].messages[0].content).toContain('QUOTE-220');
+ expect(context.mock.calls.length).toBeGreaterThan(2);
+ expect(pageView).not.toHaveBeenCalled();
 });
 
 it('explicitly reopens a prior attachment in the same conversation without creating another original', async () => {

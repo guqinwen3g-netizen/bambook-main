@@ -335,10 +335,13 @@ export class MistRepository {
         task,attachmentReadScopes,steps,requiresRead,locale,providedMaterialsOnly:true,hasTaskHistory:!!c.conversationHistory?.taskIds.length,
         taskReadRefs:[],decisions:[],
       };
-      const visible=(await this.preparedView(db,row,actor)).state;
+      const historyIds=c.conversationHistory?.taskIds??[];
+      const hasTaskProposals=row.state.agentProposals?.some(proposal=>proposal.taskId===c.id&&proposal.ownerId===actor.userId);
+      // own() has already prepared access; the worker does not need page response bindings.
+      const visible=historyIds.length||hasTaskProposals?this.view(row,actor).state:undefined;
       let taskReadRefs = c.intentRefs ?? [];
-      if (c.conversationHistory?.taskIds.length) {
-        const history = await Promise.all(c.conversationHistory.taskIds.map(async id => (await taskRecord(db,row.id,id)).value));
+      if (visible&&historyIds.length) {
+        const history = await Promise.all(historyIds.map(async id => (await taskRecord(db,row.id,id)).value));
         const retained: TaskRecord[] = [];
         for (const turn of history.reverse()) {
           const refs = this.taskHistoryRefsInFocus(turn, taskReadRefs, actor, visible);
@@ -348,7 +351,7 @@ export class MistRepository {
         }
         task.instructions = composeTaskInstructions(retained, task.instructions);
       }
-      const proposals=(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId);
+      const proposals=(visible?.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId);
       const decision=c.lastProposalDecision;
       const decided=decision&&proposals.find(p=>p.id===decision.proposalId&&p.state===decision.outcome);
       const command=decided?.command;
