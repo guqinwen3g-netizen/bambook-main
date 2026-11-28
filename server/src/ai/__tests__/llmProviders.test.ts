@@ -8,6 +8,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveLlmProviderChain, createLlmCompleter, testLlmProvider } from '../llmProviders';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createProviderCooldownStore } from '../providerCooldownStore';
 
 const ENV_KEYS = [
   'ARK_API_KEY', 'VOLCENGINE_API_KEY', 'TENCENT_API_KEY', 'ZHIPU_API_KEY',
@@ -59,6 +63,73 @@ it('only exposes the longest observed retry delay when the provider chain is exh
   await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore:clock+75_000});
   expect(fetchMock).toHaveBeenCalledTimes(4);
  }finally{time.mockRestore();}
+});
+
+it('uses the saved cooldown when an independent task completer starts', async () => {
+  process.env.ARK_API_KEY = 'fixture-key';
+  const directory = await mkdtemp(path.join(tmpdir(), 'task-provider-cooldown-'));
+  const worker = () => createLlmCompleter({ platformProfile: 'agent-task', cooldownStore: createProviderCooldownStore(directory),
+    platformProviders: { chain: () => [] } });
+  const upstream = vi.fn()
+    .mockResolvedValueOnce(new Response('{}', { status: 429, headers: { 'Retry-After': '60' } }))
+    .mockResolvedValueOnce(okCompletion('fresh response'));
+  vi.stubGlobal('fetch', upstream);
+  try {
+    const clock = Date.now();
+    const time = vi.spyOn(Date, 'now').mockReturnValue(clock);
+    try {
+      await expect(worker()(BASE_INPUT)).rejects.toHaveProperty('retryNotBefore', clock + 60_000);
+      await expect(worker()(BASE_INPUT)).rejects.toHaveProperty('retryNotBefore', clock + 60_000);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      process.env.ARK_API_KEY = 'rotated-key';
+      await expect(worker()(BASE_INPUT)).resolves.toBe('fresh response');
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      time.mockRestore();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('defers without sending when a persisted cooldown cannot be checked', async () => {
+  process.env.ARK_API_KEY = 'fixture-key';
+  const active = vi.fn().mockRejectedValueOnce(new Error('private data unavailable')).mockResolvedValue(new Map());
+  const upstream = vi.fn().mockResolvedValue(okCompletion('resumed'));
+  vi.stubGlobal('fetch', upstream);
+  const complete = createLlmCompleter({ platformProfile: 'agent-task', cooldownStore: { active, remember: vi.fn() },
+    platformProviders: { chain: () => [] } });
+  const clock = Date.now();
+  const time = vi.spyOn(Date, 'now').mockReturnValue(clock);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await expect(complete(BASE_INPUT)).rejects.toMatchObject({ message: 'LLM_PROVIDER_COOLDOWN', retryNotBefore: clock + 20_000 });
+    expect(upstream).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[platform-agent] PROVIDER_COOLDOWN_STORE_UNAVAILABLE');
+    await expect(complete(BASE_INPUT)).resolves.toBe('resumed');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  } finally {
+    time.mockRestore();
+    warn.mockRestore();
+  }
+});
+
+it('continues to honor a known cooldown when it cannot be persisted', async () => {
+  process.env.ARK_API_KEY = 'fixture-key';
+  const upstream = vi.fn().mockResolvedValueOnce(new Response('{}', { status: 429, headers: { 'Retry-After': '60' } }));
+  vi.stubGlobal('fetch', upstream);
+  const complete = createLlmCompleter({ platformProfile: 'agent-task', cooldownStore: {
+    active: async () => new Map(), remember: vi.fn().mockRejectedValue(new Error('private data unavailable')),
+  }, platformProviders: { chain: () => [] } });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await expect(complete(BASE_INPUT)).rejects.toHaveProperty('retryNotBefore');
+    await expect(complete(BASE_INPUT)).rejects.toThrow('LLM_PROVIDER_COOLDOWN');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 it('skips a cooling provider across agent turns and isolates a replaced credential',async()=>{

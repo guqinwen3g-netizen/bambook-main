@@ -3,6 +3,7 @@ import { isTaskImage, isTaskPdf, officeKind, taskAttachmentLabels, WORKBOOK_SELE
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import{randomUUID}from'node:crypto';
 import{createLlmCompleter,LlmProviderRetryError,LlmProviderCooldownError,type LlmCompletionInput}from'../ai/llmProviders';
+import type { LlmProviderCooldownStore } from '../ai/providerCooldownStore';
 import{getMistAssistantStatus}from'./assistant';
 import{agentCommandSensitivity,handleMcpMessage,MCP_SOURCE_RULES,platformTaskModelToolCatalog,type McpRepository}from'./agentMcp';
 import type{AgentActor}from'./agentDelegation';
@@ -16,7 +17,7 @@ import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 
 class PlatformModelTimeout extends Error {}
 
-export type PlatformTaskWorkerOptions={complete?:(input:LlmCompletionInput)=>Promise<string>;makeCredential:MakeTaskCredential;configured?:()=>boolean;tickMs?:number;pulseMs?:number;modelTimeoutMs?:number;concurrency?:number;onError?:(code:string)=>void};
+export type PlatformTaskWorkerOptions={cooldownStore?:LlmProviderCooldownStore;complete?:(input:LlmCompletionInput)=>Promise<string>;makeCredential:MakeTaskCredential;configured?:()=>boolean;tickMs?:number;pulseMs?:number;modelTimeoutMs?:number;concurrency?:number;onError?:(code:string)=>void};
 /** Keep the current Shanghai business clock explicit; never relabel UTC digits with +08:00. */
 export function platformTaskClock(now:number){return{now:new Date(now+8*60*60_000).toISOString().replace(/Z$/,'+08:00'),utc:new Date(now).toISOString(),timeZone:'Asia/Shanghai'};}
 const CUSTOMER_UPDATE = MIST_COMMAND_CATALOG.find(command => command.type === 'customer.update')?.type;
@@ -122,7 +123,7 @@ export class MistPlatformTaskWorker{
   private wakeTimer?:ReturnType<typeof setTimeout>;
   private wakeRequested=false;
   private conditionCursor?:{createdAt:string;id:string};
-  constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task',validateResponse:parsePlatformTaskPlan});}
+  constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task',validateResponse:parsePlatformTaskPlan,cooldownStore:options.cooldownStore});}
   get running(){return this.enabled;}
   get available(){return this.enabled&&(this.options.configured?.()??(this.options.complete?true:getMistAssistantStatus().configured));}
   start(delayMs=1000){
