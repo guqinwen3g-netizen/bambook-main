@@ -8,7 +8,7 @@ import{tmpdir}from'node:os';import path from'node:path';import{randomUUID}from'n
 import{createMistLocalRuntime}from'./local';import{createMistServer}from'./server';
 import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
-import {namedDraftOrderLine,platformTaskClock}from'./platformTaskWorker';
+import {namedDraftOrderLines,platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
 import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
@@ -990,34 +990,42 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
-it('uses a complete order index only for one explicitly named unique style',()=>{
+it('returns exact matches of one explicitly named style from a complete order index',()=>{
  const row={type:'order_line',id:'line-a',style:'SIM-A'};
  const other={type:'order_line',id:'line-b',style:'SIM-AB'};
  const object={id:'order-a',total:2,truncated:false,related:[row,other]};
  const source={object};
- expect(namedDraftOrderLine('请移除款号「SIM-A」的条目。','order-a',2,source)).toBe('line-a');
- expect(namedDraftOrderLine('Change style SIM-AB for the order draft.','order-a',2,source)).toBe('line-b');
- expect(namedDraftOrderLine('请移除款号 SIM 的条目。','order-a',2,source)).toBeUndefined();
- expect(namedDraftOrderLine('请修改款号 SIM-AB 并保留款号 SIM-A。','order-a',2,source)).toBeUndefined();
- expect(namedDraftOrderLine('请移除款号 SIM-A。','order-a',3,source)).toBeUndefined();
- expect(namedDraftOrderLine('请移除款号 SIM-A。','order-b',2,source)).toBeUndefined();
- expect(namedDraftOrderLine('请移除款号 SIM-A。','order-a',2,{object:{...object,truncated:true}})).toBeUndefined();
- expect(namedDraftOrderLine('请移除款号 SIM-A。','order-a',2,{object:{...object,related:[row,{...other,style:'sim-a'}]}})).toBeUndefined();
+ expect(namedDraftOrderLines('请移除款号「SIM-A」的条目。','order-a',2,source)).toEqual(['line-a']);
+ expect(namedDraftOrderLines('Change style SIM-AB for the order draft.','order-a',2,source)).toEqual(['line-b']);
+ expect(namedDraftOrderLines('请移除款号 SIM 的条目。','order-a',2,source)).toEqual([]);
+ expect(namedDraftOrderLines('请修改款号 SIM-AB 并保留款号 SIM-A。','order-a',2,source)).toEqual([]);
+ expect(namedDraftOrderLines('请移除款号 SIM-A。','order-a',3,source)).toEqual([]);
+ expect(namedDraftOrderLines('请移除款号 SIM-A。','order-b',2,source)).toEqual([]);
+ expect(namedDraftOrderLines('请移除款号 SIM-A。','order-a',2,{object:{...object,truncated:true}})).toEqual([]);
+ expect(namedDraftOrderLines('请移除款号 SIM-A。','order-a',2,{object:{...object,related:[row,{...other,style:'sim-a'}]}})).toEqual(['line-a','line-b']);
 });
 
-it('reads back a confirmed draft removal even after reading the removed line',async()=>{
- let orderId:string,removedId:string,kept:Record<string,unknown>,contract:Record<string,unknown>;
+it.each(['unique','duplicate'] as const)('reads back a confirmed draft removal with a %s style',async styleCase=>{
+ const duplicate=styleCase==='duplicate';
+ let orderId:string,removedId:string,retainedId:string,kept:Record<string,unknown>,contract:Record<string,unknown>;
  let calls=0;
  const complete=vi.fn(async(input:LlmCompletionInput)=>{
   calls++;
-  if(calls===1){
+  if(duplicate&&calls===2)return tool('bambook_get',{type:'order',id:orderId});
+  if(calls<=(duplicate?3:1)){
    const content=input.messages[0].content;
    const facts=JSON.parse(content.slice(content.indexOf('{"task":')));
    const index=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.orderLineIndex?.operationId);
    expect(index).toMatchObject({name:'bambook_related',arguments:{type:'order',id:orderId,relatedType:'order_line'},
     result:{object:{id:orderId,truncated:false,related:expect.arrayContaining([{id:removedId,style:'SIM-REMOVE',type:'order_line',label:expect.any(String),link:expect.any(String),relation:'referenced_by'}])}}});
-   const line=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.namedOrderLineRead?.operationId);
+   const target=duplicate?facts.ambiguousOrderLineReads?.find((read:{lineId:string})=>read.lineId===removedId):facts.namedOrderLineRead;
+   const line=facts.history.recent.find((step:{operationId:string})=>step.operationId===target?.operationId);
    expect(line).toMatchObject({name:'bambook_get',result:{object:{id:removedId,truncated:false,data:{orderId,qty:24,price:14}}}});
+   if(duplicate){
+    expect(facts.ambiguousOrderLineReads.map((read:{lineId:string})=>read.lineId)).toEqual([retainedId,removedId]);
+    if(calls===1)return tool('bambook_task',{action:'question',question:'同款条目有 10 件和 24 件，请确认移除哪一条？'});
+    expect(facts.task.questions.at(-1).answer).toBe('移除 24 件的条目，保留 10 件。');
+   }
    return JSON.stringify({name:'bambook_execute',requestId:'untrusted-envelope-id',arguments:{
    requestId:'untrusted-argument-id',command:{type:'order.governance.saveDraft',payload:{orderId,input:contract,lines:[kept]}},
   }});
@@ -1033,20 +1041,30 @@ it('reads back a confirmed draft removal even after reading the removed line',as
   type:'garment',customerId:f.workspace.state.customers[0].id,season:'AW26',currency:'USD',due:'2027-01-28',ownerId:'local-operator',
   governance:{kind:'external',poNumber:'SIM-REMOVE-READBACK',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'TT',
    depositPercent:30,preShipmentPercent:30,paymentNote:'见提单副本',incoterm:'FOB',deliveryPlace:'上海'},
-  lines:[{...line,style:'SIM-KEEP'},{...line,style:'SIM-REMOVE',qty:24,price:14}],
+  lines:[{...line,style:duplicate?'SIM-REMOVE':'SIM-KEEP'},{...line,style:'SIM-REMOVE',qty:24,price:14}],
  });
  orderId=created.body.receipt.result.orderId;
  const state=created.body.workspace.state;
  contract=state.orders.find((order:{id:string})=>order.id===orderId).governance.contract;
- const retained=state.orderLines.find((item:{style:string})=>item.style==='SIM-KEEP');
- removedId=state.orderLines.find((item:{style:string})=>item.style==='SIM-REMOVE').id;
- kept={...line,id:retained.id,style:'SIM-KEEP'};
+ const orderLines=state.orderLines.filter((item:{orderId:string})=>item.orderId===orderId);
+ const retained=orderLines.find((item:{qty:number})=>item.qty===10);
+ retainedId=retained.id;
+ removedId=orderLines.find((item:{qty:number})=>item.qty===24).id;
+ kept={...line,id:retained.id,style:retained.style};
  delete kept.img;
  f.worker.start(3_600_000);
  const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks').send({
   requestId:randomUUID(),name:'复核模拟草稿条目',instructions:'请从引用的订单草稿中移除款号 SIM-REMOVE 的条目。',intentRefs:[{kind:'orders',id:orderId}],
  }).expect(201);
  await f.drain();
+ if(duplicate){
+  const asking=await f.current(task.id);
+  expect(asking).toMatchObject({state:'waiting_human',waitingProposalIds:[],questions:[{question:expect.stringContaining('24 件')}]});
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:asking.version,questionId:asking.questions[0].id,answer:'移除 24 件的条目，保留 10 件。',
+  }).expect(200);
+  await f.drain();
+ }
  const pending=await f.current(task.id);
  expect(pending.state).toBe('waiting_human');
  const stored=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
@@ -1060,7 +1078,7 @@ it('reads back a confirmed draft removal even after reading the removed line',as
  expect.soft(confirmation.body.workspace.state.orderLines.filter((item:{orderId:string})=>item.orderId===orderId)).toEqual([retained]);
  await f.drain();
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已移除 SIM-REMOVE，保留 SIM-KEEP。'});
- expect(complete).toHaveBeenCalledTimes(2);
+ expect(complete).toHaveBeenCalledTimes(duplicate?4:2);
  await f.command('order.governance.saveDraft',{orderId,input:contract,lines:[{...kept,img:'clay'}]});
  const {body:{workspace}}=await f.human.get(f.base).expect(200);
  expect(workspace.state.orderLines.find((item:{id:string})=>item.id===retained.id).img).toBe('clay');

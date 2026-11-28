@@ -98,11 +98,13 @@ function orderSourceMissing(command:AgentProposal['command'],state?:MistState|nu
   if(!state)return true;
   const p=command.payload,contract=(contractDraft?p.input:p.governance) as Partial<OrderGovernanceInput>|undefined,missing=(id:unknown,rows:Array<{id:string}>)=>typeof id==='string'&&!!id&&!rows.some(row=>row.id===id);
   const patch=p.orderPatch as {ownerId?:unknown}|undefined;
-  if(contractDraft&&!state.orders.some(order=>order.id===p.orderId))return true;
+  const order=contractDraft?state.orders.find(row=>row.id===p.orderId):undefined;
+  if(contractDraft&&!order)return true;
+  const newOwnerId=contractDraft?(patch?.ownerId===order?.ownerId?undefined:patch?.ownerId):p.ownerId;
   const memberMissing=(id:unknown)=>typeof id==='string'&&!!id&&!state.members?.some(m=>m.userId===id);
   // Governance proposals can introduce new line IDs. Missing from the active
   // order is therefore not enough to reject one; known cross-order IDs are invalid.
-  return missing(p.customerId,state.customers)||memberMissing(contractDraft?patch?.ownerId:p.ownerId)||memberMissing(contract?.internalSupply?.receiverId)
+  return missing(p.customerId,state.customers)||memberMissing(newOwnerId)||memberMissing(contract?.internalSupply?.receiverId)
     ||Array.isArray(contract?.confirmationFileIds)&&contract.confirmationFileIds.some(id=>missing(id,state.files))
     ||Array.isArray(p.lines)&&p.lines.some(line=>line&&typeof line==='object'&&((contractDraft&&typeof line.id==='string'&&state.orderLines.some(row=>row.id===line.id&&row.orderId!==p.orderId))||missing(line.sourceProductId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)||missing(line.sourceQuotationId,state.market.quotations)
       ||typeof line.sourceQuotationLineId==='string'&&!!line.sourceQuotationLineId&&!state.market.quotations.find(q=>q.id===line.sourceQuotationId)?.lines.some(l=>l.id===line.sourceQuotationLineId)));
@@ -180,6 +182,7 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
   }
   const walk = (value: unknown, path: string) => {
     if(creditChange&&['id','patch.creditLimit','patch.currency'].includes(path))return;
+    if(orderContract&&path==='orderPatch.ownerId'&&currentOrder?.ownerId===value)return;
     if(customer&&path==='patch.terms'&&typeof value==='string'){
       if(rows.length+2>limit){omitted+=2;return;}
       rows.push(

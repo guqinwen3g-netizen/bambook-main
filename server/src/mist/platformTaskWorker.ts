@@ -42,17 +42,16 @@ function isOrderLineIndex(name:string,args:unknown,orderId:string){
   return name==='bambook_related'&&target?.type==='order'&&target.id===orderId&&target.relatedType==='order_line';
 }
 
-export function namedDraftOrderLine(request:string,orderId:string,lineCount:number|undefined,result:unknown){
+export function namedDraftOrderLines(request:string,orderId:string,lineCount:number|undefined,result:unknown):string[]{
   const index=result as {error?:boolean;object?:{id?:string;total?:number;truncated?:boolean;related?:Array<{type?:string;id?:string;style?:string}>}}|undefined;
   const order=index?.object,lines=order?.related;
   if(index?.error||order?.id!==orderId||order.truncated!==false||lineCount!==order.total
     ||!Array.isArray(lines)||lines.length!==lineCount
-    ||lines.some(line=>line?.type!=='order_line'||typeof line.id!=='string'||typeof line.style!=='string'))return undefined;
+    ||lines.some(line=>line?.type!=='order_line'||typeof line.id!=='string'||typeof line.style!=='string'))return [];
   const named=new Set([...request.matchAll(/(?:款号|品号|货号|\bstyle(?:\s+(?:no\.?|code))?)(?:\s*[为是])?[\s:：「“"'‘]*([a-z0-9][a-z0-9_./-]{0,78}[a-z0-9])(?=$|[\s，。,.；;、）)」”"'’])/gi)]
     .map(match=>match[1].toUpperCase()));
-  if(named.size!==1)return undefined;
-  const matches=lines.filter(line=>named.has(line.style!.toUpperCase()));
-  return matches.length===1?matches[0].id:undefined;
+  if(named.size!==1)return [];
+  return lines.filter(line=>named.has(line.style!.toUpperCase())).map(line=>line.id!);
 }
 
 const ORDER_BATCH_RULES='只读核对多个订单且已有查询返回的准确编号时，优先用 bambook_get_orders 一次读取 2 至 6 张订单，再汇总实际状态和交期。需要超过 6 张时按已确定的范围分批。批量读取只供报告。写入预演或任务明确要求重新核对原件时，仍用 bambook_get 逐条回源。';
@@ -261,11 +260,15 @@ export class MistPlatformTaskWorker{
             ? {name:'bambook_related',arguments:{type:'order',id:selectedDraft.id,relatedType:'order_line'}} : undefined;
           const indexStep=selectedDraft?.needsLines&&[...context.steps].reverse().find(item=>!item.compacted
             &&isOrderLineIndex(item.plan.name,item.plan.arguments,selectedDraft.id));
-          const namedLineId=selectedDraft&&indexStep?namedDraftOrderLine(selectedDraft.request,selectedDraft.id,selectedDraft.lineCount,indexStep.result):undefined;
-          const namedLineStep=namedLineId&&[...context.steps].reverse().find(item=>item.plan.name==='bambook_get'
-            &&item.plan.arguments.type==='order_line'&&item.plan.arguments.id===namedLineId);
-          const namedLinePlan:PlatformTaskPlan|undefined=namedLineId&&!namedLineStep
-            ? {name:'bambook_get',arguments:{type:'order_line',id:namedLineId}}:undefined;
+          const matchingLines=selectedDraft&&indexStep
+            ? namedDraftOrderLines(selectedDraft.request,selectedDraft.id,selectedDraft.lineCount,indexStep.result):[];
+          const namedLines=(matchingLines.length<=4?matchingLines:[]).map(id=>({
+            id,step:[...context.steps].reverse().find(item=>item.plan.name==='bambook_get'
+              &&item.plan.arguments.type==='order_line'&&item.plan.arguments.id===id),
+          }));
+          const unreadLine=namedLines.find(line=>!line.step);
+          const namedLinePlan:PlatformTaskPlan|undefined=unreadLine
+            ? {name:'bambook_get',arguments:{type:'order_line',id:unreadLine.id}}:undefined;
           const prefetch=intentRead.plan??lineIndexPlan??namedLinePlan;
           if(prefetch){step=await this.repository.savePlatformTaskPlan(actor,prefetch);}
           else{
@@ -336,14 +339,21 @@ export class MistPlatformTaskWorker{
               const lineIndexRule=orderLineIndex
                 ? '\norderLineIndex 指向原订单已取得的条目索引。先用索引核对款号与条目 ID，再用 bambook_get 读取实际要处理的订单行。索引有截断或缺少目标时，在同一订单范围内继续核对；索引不提供数量、单价或其他完整事实。'
                 : '';
-              const lineResult=(namedLineStep||undefined)?.result as {error?:boolean;object?:{id?:string;type?:string;truncated?:boolean;data?:{orderId?:string}}}|undefined;
-              const namedOrderLineRead=selectedDraft&&namedLineStep&&!namedLineStep.compacted&&!lineResult?.error
-                &&lineResult?.object?.id===namedLineId&&lineResult?.object?.type==='order_line'&&lineResult.object.truncated===false
-                &&lineResult.object.data?.orderId===selectedDraft.id&&history.recent.some(item=>item.operationId===namedLineStep.id)
-                ? {operationId:namedLineStep.id,orderId:selectedDraft.id,lineId:namedLineId}:undefined;
+              const namedLineReads=selectedDraft?namedLines.flatMap(({id,step:lineStep})=>{
+                const result=lineStep?.result as {error?:boolean;object?:{id?:string;type?:string;truncated?:boolean;data?:{orderId?:string}}}|undefined;
+                return lineStep&&!lineStep.compacted&&!result?.error
+                  &&result?.object?.id===id&&result.object.type==='order_line'&&result.object.truncated===false
+                  &&result.object.data?.orderId===selectedDraft.id&&history.recent.some(item=>item.operationId===lineStep.id)
+                    ? [{operationId:lineStep.id,orderId:selectedDraft.id,lineId:id}]:[];
+              }):[];
+              const namedOrderLineRead=matchingLines.length===1?namedLineReads[0]:undefined;
+              const ambiguousOrderLineReads=matchingLines.length>1&&matchingLines.length===namedLineReads.length?namedLineReads:undefined;
               const namedLineRule=namedOrderLineRead
-                ? '\nnamedOrderLineRead 指向本人明确指定款号对应的订单行完整回执。当前记录可直接用于核对，按需读取其他仍未取得的条目。发现变更或冲突时再按工具提示回源。' : '';
-              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),...(namedOrderLineRead?{namedOrderLineRead}:{}),history,...(imageSources?.length?{imageSources}:{})};
+                ? '\nnamedOrderLineRead 指向本人明确指定款号对应的订单行完整回执。当前记录可直接用于核对，按需读取其他仍未取得的条目。发现变更或冲突时再按工具提示回源。'
+                : ambiguousOrderLineReads
+                  ? '\nambiguousOrderLineReads 是同一款号的全部候选订单行完整回执。本人明确要求处理该款号的全部条目时按其范围核对。只处理其中一条且本人没有用数量、品名、颜色等区分到唯一时，先用 bambook_task 的 question 询问。列出可区分各候选的品名、数量及单位，必要时加单价或规格；不要只重复款号，也不要显示内部 ID。本人答复后继续原任务。身份仍不明确时继续询问，明确后才按正常预演与确认提交。'
+                  : '';
+              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),...(namedOrderLineRead?{namedOrderLineRead}:{}),...(ambiguousOrderLineReads?{ambiguousOrderLineReads}:{}),history,...(imageSources?.length?{imageSources}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead
                 ? '\n当前答复无待复核的业务来源。问题已由本人补充且只需回答时，直接用 finish。若要办理业务，必须先读取当前相关记录；补充资料不代表批准操作。'
                 : '';

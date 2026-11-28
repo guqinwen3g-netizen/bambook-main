@@ -89,6 +89,26 @@ it('identifies the assigned owner and priced line, permits new proposed lines, a
   state.orderLines=[{id:'line-private',orderId:'another-order',style:'OTHER'} as any];render();expect(getConfirm(host).disabled).toBe(true);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it('lets the proposal retain the current owner without requiring a new directory assignment',()=>{
+ const{state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.ownerId='retained-owner';
+ order.owner='现任负责人';
+ proposal.command.payload.orderPatch={ownerId:order.ownerId};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host);
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  expect(getConfirm(host).disabled).toBe(false);
+  expect(host.textContent).not.toContain('负责人已不可见');
+  proposal.command.payload.orderPatch.ownerId='missing-new-owner';
+  render();
+  expect(getConfirm(host).disabled).toBe(true);
+  expect(host.textContent).toContain('负责人已不可见');
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it.each(['line','currency'] as const)('disables stale order draft confirmation when its %s basis changes',kind=>{
  const {state,proposal}=contractProposalFixture(),order=state.orders[0];
  order.currency='USD';
