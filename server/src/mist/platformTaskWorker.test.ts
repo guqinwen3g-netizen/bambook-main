@@ -1180,6 +1180,31 @@ it.each([true,false])('only supplies an explicitly requested scanned PDF page as
  expect(text).not.toContain('OUTSIDE-PAGE-5');
 });
 
+it.each([
+ ['visual request', '请目视核对 layered.pdf 第 3 页的盖章。', true],
+ ['text only', '请只核对 layered.pdf 第 3 页的可提取文字。不要按图片核对。', false],
+] as const)('uses the page image alongside its text layer only for a %s',async (_case,instructions,visual)=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对带文字层的 PDF',instructions}))
+  .attach('attachments',pdf('OUTSIDE-PAGE-5',5),'layered.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input=complete.mock.calls[0][0],text=input.messages[0].content;
+ expect(text).toContain('Page 3: general terms');
+ expect(text).not.toContain('OUTSIDE-PAGE-5');
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ if(visual){
+  expect(input.images?.map(image=>image.name)).toEqual(['layered.pdf 第 3 页']);
+  expect(facts.pdfPageImages).toEqual([{file:'layered.pdf',page:3}]);
+ }else{
+  expect(input.images).toBeUndefined();
+  expect(facts).not.toHaveProperty('pdfPageImages');
+ }
+});
+
 it('sends selected scanned pages without the intervening pages or other attachments',async()=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对指定两页。'}));
  const f=await fixture(complete);f.worker.start(3_600_000);

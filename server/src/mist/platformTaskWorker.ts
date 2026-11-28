@@ -287,16 +287,13 @@ export class MistPlatformTaskWorker{
               const visual=explicitPdfVisualPages(context.task.instructions,pdfRanges);
               const candidates=visual?[...readableSteps].reverse().flatMap(step=>{
                 if(step.plan.name!=='bambook_file_text'||step.plan.arguments.fileId!==visual.fileId||step.compacted)return [];
-                const read=step.result as {kind?:string;sha256?:string;pagesWithoutText?:number[];range?:{pageFrom?:number;pageTo?:number}}|undefined;
+                const read=step.result as {kind?:string;sha256?:string;range?:{pageFrom?:number;pageTo?:number}}|undefined;
                 if(read?.kind!=='pdf'||!read.sha256||!read.range)return [];
-                return [{sha256:read.sha256,range:read.range,pagesWithoutText:read.pagesWithoutText??[]}];
+                return [{sha256:read.sha256,range:read.range}];
               }):[];
               const sha256=candidates[0]?.sha256;
-              const pages=visual?.pages.filter(page=>{
-                const read=candidates.find(item=>item.sha256===sha256
-                  &&page>=(item.range.pageFrom??Infinity)&&page<=(item.range.pageTo??-Infinity));
-                return read?.pagesWithoutText.includes(page);
-              })??[];
+              const pages=visual?.pages.filter(page=>candidates.some(item=>item.sha256===sha256
+                &&page>=(item.range.pageFrom??Infinity)&&page<=(item.range.pageTo??-Infinity)))??[];
               const scan=visual&&sha256&&pages.length?{fileId:visual.fileId,pages,sha256}:undefined;
               const images=scan||readableAttachments?.some(file=>isTaskImage(file.name))
                 ? await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages,scan):undefined;
@@ -380,7 +377,7 @@ export class MistPlatformTaskWorker{
                 ? '\n本轮消息附有 imageSources 所列图片。编号、颜色或图片文字直接从随附图片核对，并注明图片名称。bambook_file_text 不提取图片文字，请勿对这些图片调用它。仅报告实际看清的内容，看不清则说明。'
                 : '';
               const pdfVisualRule=pdfPageImages.length
-                ? '\npdfPageImages 列出本人指定 PDF 页面中已提供的图像，与原 PDF 页码绑定。只报告能目视辨认的内容，注明来自该 PDF 第几页。没有可提取文字仍可报告该页图片中实际看清的内容；看不清时明确说明。不要将图片内容归给其他页或附件。'
+                ? '\npdfPageImages 列出本人指定 PDF 页面中已提供的图像，与原 PDF 页码绑定。只报告能目视辨认的内容，注明来自该 PDF 第几页。区分同页文字层与图像所得，印章、签字、标签等须看清才可按图像报告。看不清时明确说明；两种来源冲突时分别列出实值。不要将图片内容归给其他页或附件。'
                 : '';
               const attachmentAttributionRule = imageSources?.length && attachments?.some(file => !isTaskImage(file.name))
                 ? '\n摘要、明细和未核实项都沿用事实的实际出处。跨附件关系无法核对时，分别写明在哪份附件看到什么、哪份附件缺少依据。不要把只在图片上看到的编号归给 PDF 或表格。'

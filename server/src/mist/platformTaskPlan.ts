@@ -234,7 +234,7 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
 export function explicitPdfVisualPages(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>){
   const request=splitTaskRequest(instructions);
   if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
-    ||/(?:不要|禁止|无需|不用)\s*(?:目视|看图|用?\s*OCR)|\b(?:do not|without)\s+(?:use\s+)?OCR\b/i.test(request)
+    ||/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request)
     ||pdfRanges.size!==1)return undefined;
   const [entry]=pdfRanges;
   const [fileId,range]=entry,windows=range.windows??[range];
