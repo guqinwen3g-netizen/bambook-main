@@ -97,18 +97,24 @@ it('keeps a modal-owned portal menu focused, closes only the menu on Escape and 
   expect(document.activeElement).toBe(host.querySelector('[aria-label="下一字段"]')); expect(host.querySelector('[role="menu"]')).toBeNull();
 });
 
-it('dismisses only the top nested modal and restores focus to its parent trigger', () => {
+it.each(['drawer','dialog'] as const)('marks the nested %s surface and restores focus to its parent trigger', (kind) => {
   const parentClose = vi.fn();
   function Example() {
     const [child, setChild] = React.useState(false);
-    return <MistRoot><Dialog open onClose={parentClose} title="父任务"><button onClick={() => setChild(true)}>查看子任务</button>
-      <Dialog open={child} onClose={() => setChild(false)} title="子任务"><input aria-label="子字段" /></Dialog>
-    </Dialog></MistRoot>;
+    const Child = kind === 'drawer' ? Drawer : Dialog;
+    return <MistRoot><Drawer open onClose={parentClose} title="父任务"><button onClick={() => setChild(true)}>查看子任务</button>
+      <Child open={child} onClose={() => setChild(false)} title="子任务"><input aria-label="子字段" /></Child>
+    </Drawer></MistRoot>;
   }
   const host = render(<Example />), trigger = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === '查看子任务')!;
   act(() => trigger.focus()); click(trigger);
-  expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+  const [parent, child] = host.querySelectorAll('[role="dialog"]');
+  expect([parent, child].map(panel => panel.hasAttribute('data-nested'))).toEqual([false,true]);
+  expect([parent, child].map(panel => panel.hasAttribute('inert'))).toEqual([true,false]);
+  expect([parent, child].map(panel => panel.previousElementSibling?.hasAttribute('inert'))).toEqual([true,false]);
   key(document.activeElement!, 'Escape'); expect(parentClose).not.toHaveBeenCalled(); expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  expect(parent.hasAttribute('inert')).toBe(false);
+  expect(parent.previousElementSibling?.hasAttribute('inert')).toBe(false);
   expect(document.activeElement).toBe(trigger);
 });
 
