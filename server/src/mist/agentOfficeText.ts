@@ -5,6 +5,9 @@
  */
 import JSZip from 'jszip';
 import { posix } from 'node:path';
+import { officeKind, type OfficeKind } from '../shared/mistTaskAttachments';
+
+export { officeKind, type OfficeKind } from '../shared/mistTaskAttachments';
 
 const ENTRY_MAX = 30 * 1024 * 1024;
 const TOTAL_MAX = 60 * 1024 * 1024;
@@ -12,18 +15,10 @@ const SHEETS_MAX = 20;
 const COLUMNS_MAX = 60;
 const SLIDES_MAX = 200;
 
-export type OfficeKind = 'docx' | 'xlsx' | 'pptx';
-export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; pages?: number; reason?: string };
+export type SheetRowSpan = {sheet:string;row:number;start:number;end:number};
+type SheetBlock = {name:string;start:number;bodyStart:number;end:number;observed:boolean};
+export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; sheetRowSpans?:SheetRowSpan[]; attributedValues?:true; pages?: number; reason?: string };
 
-const OFFICE_MIME: Record<OfficeKind, RegExp> = {
-  docx: /wordprocessingml\.document/i,
-  xlsx: /spreadsheetml\.sheet/i,
-  pptx: /presentationml\.presentation/i,
-};
-export function officeKind(file: { name: string; mimeType: string }): OfficeKind | undefined {
-  const ext = /\.(docx|xlsx|pptx)$/i.exec(file.name)?.[1]?.toLowerCase() as OfficeKind | undefined;
-  return ext ?? (Object.keys(OFFICE_MIME) as OfficeKind[]).find(k => OFFICE_MIME[k].test(file.mimeType));
-}
 export const LEGACY_OFFICE = /\.(doc|xls|ppt)$/i;
 
 class OfficeLimit extends Error {}
@@ -104,22 +99,38 @@ const columnIndex = (ref: string | undefined, fallback: number) => {
 };
 const cellText = (s: string) => s.replace(/[\t\r\n]+/g, ' ').trim();
 
-export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number): { lines: string[]; truncated: boolean } {
-  const lines: string[] = []; let used = 0, truncated = false;
-  for (const row of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
-    const cells: string[] = []; let next = 0;
-    for (const c of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-      const head = c[1], body = c[2] ?? '', col = columnIndex(attr(' ' + head, 'r'), next); next = col + 1;
-      if (col >= COLUMNS_MAX) { truncated = true; continue; }
+export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number, selectedRows?:readonly {from:number;to:number}[]): { lines: string[]; rowSpans:Omit<SheetRowSpan,'sheet'>[]; truncated: boolean; attributedValues?:true } {
+  const lines:string[]=[],rowSpans:Omit<SheetRowSpan,'sheet'>[]=[];
+  let used=0,truncated=false,attributedValues=false;
+  for(const row of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)){
+    const declared=attr(row[1],'r');
+    let rowNumber=declared===undefined?undefined:Number(declared);
+    let conflictingCoordinates=false,next=0,columnLimit=false;
+    const cells:string[]=[];
+    for(const c of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+      const head=c[1],body=c[2]??'',coordinate=attr(' '+head,'r');
+      const physicalRow=/^[A-Z]+([1-9]\d*)$/.exec(coordinate??'')?.[1];
+      if(physicalRow){
+        const n=Number(physicalRow);
+        if(rowNumber===undefined)rowNumber=n;
+        else if(rowNumber!==n)conflictingCoordinates=true;
+      }
+      const col=columnIndex(coordinate,next);
+      next=col+1;
+      if(col>=COLUMNS_MAX){columnLimit=true;continue;}
       const type = attr(' ' + head, 't'), style = Number(attr(' ' + head, 's') ?? -1);
-      const raw = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+      const valueTag = /<v(\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body);
+      const raw = valueTag?.[2];
       let value = '';
       if (type === 's') value = shared[Number(raw)] ?? '';
       else if (type === 'inlineStr') value = [...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join('');
       else if (type === 'b') value = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : '';
       else if (raw !== undefined) { const v = decodeXml(raw); const n = Number(v); value = (!type || type === 'n') && dates.has(style) && Number.isFinite(n) ? serialDate(n, date1904) : v; }
       cells[col] = cellText(value);
+      if(valueTag?.[1]&&type!=='inlineStr'&&cells[col])attributedValues=true;
     }
+    if(selectedRows&&(conflictingCoordinates||!rowNumber||!selectedRows.some(range=>rowNumber!>=range.from&&rowNumber!<=range.to)))continue;
+    truncated ||= columnLimit;
     while (cells.length && !cells[cells.length - 1]) cells.pop();
     if (!cells.length) continue;
     const line = Array.from(cells, v => v ?? '').join('\t');
@@ -128,34 +139,52 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
       if(remaining)lines.push(line.slice(0,remaining));
       truncated = true; break;
     }
+    if(!conflictingCoordinates&&!columnLimit&&rowNumber!==undefined&&Number.isSafeInteger(rowNumber)&&rowNumber>0&&rowNumber<=1_048_576)
+      rowSpans.push({row:rowNumber,start:used,end:used+line.length});
     lines.push(line); used += line.length + 1;
   }
-  return { lines, truncated };
+  return { lines, rowSpans, truncated, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
-async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number): Promise<OfficeText> {
+async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string, selectedRows?:readonly {from:number;to:number}[]): Promise<OfficeText & {unreadable?:boolean}> {
   const workbook = await read('xl/workbook.xml');
   if (!workbook) throw new Error('Missing workbook');
+  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].flatMap(([tag])=>{
+    const attrs=new Map([...tag.matchAll(/\s([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
+      .map(([,name,quoted,apostrophe])=>[name,decodeXml(quoted??apostrophe)]));
+    const state=attrs.get('state'),name=attrs.get('name')??'';
+    const visible=state==='visible'||state===undefined&&!/\sstate\s*=/.test(tag);
+    return visible&&(worksheet===undefined||worksheet===name)?[{name,rid:attrs.get('r:id')}] : [];
+  });
+  if(worksheet!==undefined&&sheets.length!==1)
+    return {text:'',truncated:false,unreadable:true,reason:'未找到唯一可见的指定工作表'};
   const rels = (await read('xl/_rels/workbook.xml.rels')) ?? '';
   const target = partTargets(rels,'xl');
   const sharedXml = (await read('xl/sharedStrings.xml')) ?? '';
   const shared = [...sharedXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(si => [...si[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join(''));
   const dates = dateStyles(await read('xl/styles.xml'));
   const date1904 = /<workbookPr\b[^>]*\sdate1904="(1|true)"/.test(workbook);
-  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].map(m => ({ name: attr(m[0], 'name') ?? '', rid: attr(m[0], 'r:id'), hidden: /state="(hidden|veryHidden)"/.test(m[0]) })).filter(s => !s.hidden);
-  const parts: string[] = []; let truncated = sheets.length > SHEETS_MAX, used = 0;
+  const parts: string[] = [], sheetBlocks: SheetBlock[] = [], sheetRowSpans:SheetRowSpan[]=[];
+  let truncated = sheets.length > SHEETS_MAX, used = 0, attributedValues = false;
   for (const sheet of sheets.slice(0, SHEETS_MAX)) {
     const path = sheet.rid && target.get(sheet.rid);
     const xml = path ? await read(path) : undefined;
     if (!xml) throw new Error('Missing worksheet');
     const head = `## 工作表：${sheet.name}`;
-    const { lines, truncated: cut } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
+    const { lines, rowSpans, truncated: cut, attributedValues: restoredValues } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2), selectedRows);
     truncated ||= cut;
+    attributedValues ||= !!restoredValues;
     const block = [head, ...(lines.length ? lines : [cut?'（正文超出本次摘录范围）':'（空）'])].join('\n');
-    parts.push(block); used += block.length + 2;
+    parts.push(block);
+    sheetBlocks.push({name:sheet.name,start:used,bodyStart:used+head.length+1,end:used+block.length,observed:lines.length>0||!cut});
+    for(const span of rowSpans){
+      const offset=used+head.length+1;
+      sheetRowSpans.push({sheet:sheet.name,row:span.row,start:offset+span.start,end:offset+span.end});
+    }
+    used += block.length + 2;
     if (used >= limit) { truncated = true; break; }
   }
-  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name) };
+  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name), sheetBlocks, sheetRowSpans, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
 async function pptxText(read: (p: string) => Promise<string | undefined>): Promise<OfficeText> {
@@ -175,7 +204,7 @@ async function pptxText(read: (p: string) => Promise<string | undefined>): Promi
 }
 
 /** 返回未截断的正文（由调用方统一按 limit 截取）；无法解析时给出原因。 */
-export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, limit: number): Promise<OfficeText & { unreadable?: boolean }> {
+export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, limit: number, worksheet?:string, selectedRows?:readonly {from:number;to:number}[]): Promise<OfficeText & { unreadable?: boolean }> {
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return { text: '', truncated: false, unreadable: true, reason: '文件不是有效的 Office 文档（可能是旧版格式或已加密）' };
   let zip: JSZip;
   try { zip = await JSZip.loadAsync(bytes); } catch { return { text: '', truncated: false, unreadable: true, reason: 'Office 文档无法解压（可能已损坏或加密）' }; }
@@ -186,7 +215,7 @@ export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, lim
       if (!xml) return { text: '', truncated: false, unreadable: true, reason: '不是有效的 Word 文档' };
       return { text: docxText(xml), truncated: false };
     }
-    if (kind === 'xlsx') return await xlsxText(read, limit);
+    if (kind === 'xlsx') return await xlsxText(read, limit, worksheet, selectedRows);
     return await pptxText(read);
   } catch (error) {
     if (error instanceof OfficeLimit) return { text: '', truncated: false, unreadable: true, reason: '文档解压后过大，不提取正文' };

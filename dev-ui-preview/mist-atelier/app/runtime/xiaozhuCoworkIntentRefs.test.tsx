@@ -21,6 +21,41 @@ it('keeps legacy no-reference request bodies unchanged',async()=>{
  await act(async()=>{await cowork.send('旧客户端请求',[],'conversation_1');});expect(posts).toHaveLength(1);expect(posts[0]).not.toHaveProperty('intentRefs');
 });
 
+it.each(['confirmed', 'missing', 'unavailable'] as const)('checks an attachment retry receipt before sending bytes (%s)', async receipt => {
+  const file = new File(['fixture'], 'evidence.pdf', { type:'application/pdf' });
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new Uint8Array([1,2,3]).buffer });
+  vi.stubGlobal('crypto', { randomUUID: crypto.randomUUID.bind(crypto), subtle: { digest: async () => new Uint8Array(32).buffer } });
+  const existing = { id:'saved', executor:'platform', conversationId:'conversation_1', state:'queued' };
+  const original = api.getMockImplementation()!;
+  const reads: string[] = [];
+  api.mockImplementation(async (url:string, init?:RequestInit) => {
+    if (init?.method === 'POST') {
+      posts.push(JSON.parse(String((init.body as FormData).get('task'))));
+      if (posts.length === 1) throw Object.assign(new Error('lost response'), { status:503 });
+      return { item:existing };
+    }
+    if (url.includes('/personal-agent/tasks/receipt/')) {
+      reads.push(url);
+      expect(init?.cache).toBe('no-store');
+      if (receipt === 'confirmed') return { item:existing };
+      throw Object.assign(new Error('receipt unavailable'), { status:receipt === 'missing' ? 404 : 503 });
+    }
+    return original(url,init);
+  });
+  try {
+    await act(async () => { await cowork.send('核对附件', [], 'conversation_1', [], [file]); });
+    expect(reads).toEqual([]);
+    await act(async () => { await cowork.send('核对附件', [], 'conversation_1', [], [file]); });
+    expect(reads).toEqual(['/api/mist/workspaces/workspace/personal-agent/tasks/receipt/'+posts[0].requestId]);
+    expect(posts).toHaveLength(receipt === 'missing' ? 2 : 1);
+    if (receipt === 'missing') expect(posts[1]).toEqual(posts[0]);
+    if (receipt === 'unavailable') expect(cowork.sendError).toBe('提交结果待核对');
+    else expect(cowork.tasks).toContainEqual(existing);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('releases a hung submission and replays the original request after history has changed', async () => {
   vi.useFakeTimers();
   try {
@@ -107,13 +142,13 @@ it('recovers the same running task after a hung status read and ignores its late
     expect(statusSignals).toHaveLength(1);
     expect(statusSignals[0].aborted).toBe(true);
     expect(cowork.tasks[0].state).toBe('running');
-    expect(cowork.progressStale).toBe(true);
+    expect(cowork.staleProgressIds?.has('task')).toBe(true);
     expect(cowork.error).toBe('');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(statusSignals).toHaveLength(2);
     expect(cowork.tasks).toEqual([completed]);
-    expect(cowork.progressStale).toBe(false);
+    expect(cowork.staleProgressIds?.has('task') ?? false).toBe(false);
 
     await act(async () => {
       lateResponse({ item: { ...running, updatedAt: '2026-11-23T00:00:11Z' } });
