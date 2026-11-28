@@ -20,7 +20,7 @@ import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
 import { activeModelFallbackSince, isWaitingForModelQuota, xiaozhuModelWaitLabel } from '../runtime/xiaozhuActivity';
 import { useAssistantConversation } from '../runtime/assistantConversation';
-import { answerFingerprint, answerRequestBody, saveTaskControls } from '../runtime/xiaozhuControlRequests';
+import { answerFingerprint, answerRequestBody, saveTaskControls, type TaskStateAction } from '../runtime/xiaozhuControlRequests';
 
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
@@ -43,7 +43,11 @@ const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
 type AnswerPlan={kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string;files?:readonly File[];receiptOnly?:true};
-type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|AnswerPlan|{kind:'pause'|'resume'|'cancel'|'issue';requestId:string;row:AgentTaskView};
+type StatePlan={kind:TaskStateAction;requestId:string;row:AgentTaskView};
+type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|AnswerPlan|StatePlan|{kind:'issue';requestId:string;row:AgentTaskView};
+const isStatePlan=(plan:Plan):plan is StatePlan=>plan.kind==='pause'||plan.kind==='resume'||plan.kind==='cancel';
+const STATE_CONTROL_PENDING={pause:'暂停结果未确认，可重试',resume:'继续结果未确认，可重试',cancel:'停止结果未确认，可重试'};
+const TASK_STATE_UNCHANGED={pause:'任务尚未暂停',resume:'任务尚未继续',cancel:'任务尚未停止'};
 const answerPlanKey=(plan:AnswerPlan)=>JSON.stringify([plan.row.id,plan.questionId]);
 function confirmsAttachedAnswer(item:AgentTaskView|undefined,plan:AnswerPlan,receiptIds?:readonly string[]){
  if(item?.id!==plan.row.id||contentRestricted(item))return false;
@@ -335,15 +339,15 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
  const begin=(next:Plan)=>{
   const saved=next.kind==='answer'?answerPlans.current.get(answerPlanKey(next)):undefined;
   const retained=next.kind==='answer'&&saved&&saved.plan.row.version===next.row.version&&next.row.canSupplementAttachments===true?saved:undefined;
-  const pending=next.kind==='answer'||next.kind==='cancel'?taskControlRequests.get(next.row.id):undefined;
-  const originalStop=next.kind==='cancel'&&pending?.action==='cancel'&&pending.version===next.row.version
+  const pending=next.kind==='answer'||isStatePlan(next)?taskControlRequests.get(next.row.id):undefined;
+  const originalControl=isStatePlan(next)&&pending?.action===next.kind&&pending.version===next.row.version
    ?{...next,requestId:pending.requestId}:undefined;
   const restored:AnswerPlan|undefined=next.kind==='answer'&&!retained&&next.row.canSupplementAttachments===true
    &&pending?.action==='answer'&&pending.hasAttachments&&pending.version===next.row.version&&pending.questionId===next.questionId
    ?{...next,requestId:pending.requestId,receiptOnly:true}:undefined;
   if(next.kind==='answer'&&!retained)answerPlans.current.delete(answerPlanKey(next));
-  setFailure('');setUncertain(!!originalStop||!!restored||(retained?.uncertain??false));setCredential(null);
-  setPlan(retained&&next.kind==='answer'?{...retained.plan,row:next.row}:restored??originalStop??next);
+  setFailure('');setUncertain(!!originalControl||!!restored||(retained?.uncertain??false));setCredential(null);
+  setPlan(retained&&next.kind==='answer'?{...retained.plan,row:next.row}:restored??originalControl??next);
  };
  const closePlan=()=>{
   if(busy)return;
@@ -365,7 +369,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
   const current=()=>alive.current&&epoch===writeGeneration.current;
   const attached=plan.kind==='answer'&&(!!plan.files?.length||plan.receiptOnly===true);
   const checkingAttachmentReceipt=attached&&(uncertain||plan.receiptOnly===true);
-  const checkingStop=plan.kind==='cancel'&&uncertain;
+  const checkingState=isStatePlan(plan)&&uncertain;
   try{
    let requestId=plan.requestId;
    if(attached&&!checkingAttachmentReceipt&&controlStorageScope){
@@ -380,13 +384,13 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     taskControlRequests.set(plan.row.id,{action:'answer',requestId,version:plan.row.version,questionId:plan.questionId,fingerprint,hasAttachments:true});
     saveTaskControls(controlStorageScope,taskControlRequests);
    }
-   if(plan.kind==='cancel'&&!checkingStop){
-    taskControlRequests.set(plan.row.id,{action:'cancel',requestId,version:plan.row.version});
+   if(isStatePlan(plan)&&!checkingState){
+    taskControlRequests.set(plan.row.id,{action:plan.kind,requestId,version:plan.row.version});
     if(controlStorageScope)saveTaskControls(controlStorageScope,taskControlRequests);
    }
    const body=plan.kind==='answer'?answerRequestBody({requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer},plan.files)
     :JSON.stringify(plan.kind==='create'?{requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:{requestId,version:plan.row.version});
-   const result=checkingStop
+   const result=checkingState
     ? await withRequestDeadline(abort,8000,'任务暂时无法核对',signal=>
       mistApiRequest(base+'/'+encodeURIComponent(plan.row.id),{signal,cache:'no-store'}))
     : checkingAttachmentReceipt
@@ -395,21 +399,21 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     : attached
       ? await withRequestDeadline(abort,45_000+Math.ceil(plan.files!.reduce((bytes,file)=>bytes+file.size,0)/65_536)*1000,'提交结果待核对',
        signal=>mistApiRequest(url,{method:'POST',body,signal}))
-      : plan.kind==='cancel'
-        ? await withRequestDeadline(abort,8000,'停止结果未确认，可重试',signal=>mistApiRequest(url,{method:'POST',body,signal}))
+      : isStatePlan(plan)
+        ? await withRequestDeadline(abort,8000,STATE_CONTROL_PENDING[plan.kind],signal=>mistApiRequest(url,{method:'POST',body,signal}))
         : await mistApiRequest(url,{method:'POST',body,signal:abort.signal});
    if(!current())return;
-   if(plan.kind==='cancel'){
+   if(isStatePlan(plan)){
     const item:AgentTaskView|undefined=result.item;
-    if(item?.id!==plan.row.id||checkingStop&&(contentRestricted(item)||item.state==='access_changed'))
+    if(item?.id!==plan.row.id||checkingState&&(contentRestricted(item)||item.state==='access_changed'))
      throw new Error('任务暂时无法核对');
-    if(checkingStop&&item.version===plan.row.version&&item.canControl
+    if(checkingState&&item.version===plan.row.version&&item.canControl
      &&!['cancelled','succeeded','failed','expired','budget_exhausted'].includes(item.state)){
-     setPlan({...plan,row:item});setUncertain(false);setFailure('任务尚未停止');
+     setPlan({...plan,row:item});setUncertain(false);setFailure(TASK_STATE_UNCHANGED[plan.kind]);
      return;
     }
     const saved=taskControlRequests.get(plan.row.id);
-    if(saved?.action==='cancel'&&saved.requestId===requestId){
+    if(saved?.action===plan.kind&&saved.requestId===requestId){
      taskControlRequests.delete(plan.row.id);
      if(controlStorageScope)saveTaskControls(controlStorageScope,taskControlRequests);
     }
@@ -445,7 +449,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     return;
    }
    setFailure(e instanceof Error?e.message:'操作未完成，请重试');
-   setUncertain(checkingStop||checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
+   setUncertain(checkingState||checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
   }
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };

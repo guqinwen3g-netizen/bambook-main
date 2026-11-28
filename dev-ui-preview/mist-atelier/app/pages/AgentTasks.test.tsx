@@ -630,6 +630,36 @@ it('checks an uncertain stop from task details without posting again, including 
  expect(getByRole(document.body,'dialog',{name:active.name}).textContent).toContain('已停止');
 });
 
+it.each([
+ {kind:'pause',button:'暂停任务',before:'waiting_time',after:'paused',unchanged:'任务尚未暂停',done:'已暂停'},
+ {kind:'resume',button:'继续任务',before:'paused',after:'queued',unchanged:'任务尚未继续',done:'待执行'},
+])('reads back a lost $kind response without resending after the dialog is closed',async scenario=>{
+ const active={...row(),executor:'platform',state:scenario.before,canControl:true};
+ const confirmed={...active,state:scenario.after,version:active.version+1};
+ let current=active;
+ seam.api.mockImplementation(async(url:string,init:any)=>{
+  if(init?.method==='POST')throw Error('任务操作回执未送达');
+  return url.endsWith('/task')?{item:current}:url.includes('agent-identities')?{items:[identity()]}:
+    url.includes('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null};
+ });
+ act(paint);await flush();await click(getByText(host,active.name));
+ const taskDialog=()=>getByRole(document.body,'dialog',{name:active.name});
+ const open=()=>click(getByRole(taskDialog(),'button',{name:scenario.button,exact:true}));
+ const operationDialog=()=>getByRole(document.body,'dialog',{name:scenario.button});
+ const requests=()=>seam.api.mock.calls.filter(([url,init])=>url.endsWith('/task/'+scenario.kind)&&init?.method==='POST');
+ await open();await click(getByRole(operationDialog(),'button',{name:'确认',exact:true}));
+ expect(requests()).toHaveLength(1);
+ await click(getByRole(operationDialog(),'button',{name:'核对原操作'}));
+ expect(requests()).toHaveLength(1);
+ expect(operationDialog().textContent).toContain(scenario.unchanged);
+ await click(getByRole(operationDialog(),'button',{name:'取消',exact:true}));
+ await open();current=confirmed;
+ await click(getByRole(operationDialog(),'button',{name:'核对原操作'}));
+ expect(requests()).toHaveLength(1);
+ expect(queryByRole(document.body,'dialog',{name:scenario.button})).toBeNull();
+ expect(taskDialog().textContent).toContain(scenario.done);
+});
+
 it('does not replace a committed task control receipt with an older focus read',async()=>{
  const active={...row(),executor:'platform',state:'running'};
  const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};

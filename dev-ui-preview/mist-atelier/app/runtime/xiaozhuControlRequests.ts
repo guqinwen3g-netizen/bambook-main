@@ -1,10 +1,11 @@
 import { submissionFileIdentity } from './xiaozhuSubmissions';
 
 export type TaskControlIntent = {action:'answer';questionId:string;answer:string;files?:readonly File[]} | {action:'cancel'|'resume'};
+export type TaskStateAction = 'pause'|'resume'|'cancel';
 type ControlRecord = {version:number;requestId:string};
 export type TaskControlRequest = ControlRecord & (
   | {action:'answer';questionId:string;answer?:string;fingerprint?:string;hasAttachments?:true;restoredFromStorage?:true}
-  | {action:'cancel'|'resume'}
+  | {action:TaskStateAction}
 );
 
 const storageKey = (scope:string) => 'mist.xiaozhu.controls:' + scope;
@@ -41,7 +42,7 @@ export function readTaskControls(scope:string): Map<string,TaskControlRequest> {
       if (!isId(id)||typeof entry?.requestId!=='string'||!uuidPattern.test(entry.requestId)
         ||!Number.isSafeInteger(entry.version)||entry.version<0) continue;
       const base={version:entry.version,requestId:entry.requestId};
-      if(entry.action==='cancel'||entry.action==='resume') entries.set(id,{...base,action:entry.action});
+      if(entry.action==='pause'||entry.action==='cancel'||entry.action==='resume') entries.set(id,{...base,action:entry.action});
       else if(entry.action==='answer'&&isId(entry.questionId)&&typeof entry.fingerprint==='string'&&fingerprintPattern.test(entry.fingerprint))
         entries.set(id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint,...(entry.hasAttachments===true?{hasAttachments:true,restoredFromStorage:true}:{})});
     }
