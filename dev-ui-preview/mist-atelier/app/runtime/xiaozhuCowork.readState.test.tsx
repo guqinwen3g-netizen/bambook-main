@@ -701,6 +701,57 @@ it.each([true,false])('recovers a settled uploaded answer by its saved request a
  }finally{saveTaskControls(store,new Map());}
 });
 
+it.each(['reconnect','denied'])('fences an in-flight restored attachment receipt on %s',async(mode)=>{
+ const store='interrupted-attachment-answer',requestId='00000000-0000-4000-8000-000000000053';
+ saveTaskControls(store,new Map([['task',{action:'answer',questionId:'q1',version:2,requestId,fingerprint:'abc123'.padEnd(64,'0'),hasAttachments:true}]]));
+ const saved=readTaskControls(store);
+ const attachment={id:'own-attachment',name:'quote.txt',mimeType:'text/plain',size:3};
+ const latest={...task,version:3,canControl:false,attachments:[attachment],questions:[
+  {id:'q1',question:'请补交原件。',answer:'已附原件。',answeredAt:task.updatedAt,attachmentIds:[attachment.id]},
+ ]};
+ const reads:{signal:AbortSignal;resolve:(value:unknown)=>void}[]=[];
+ let online=true,denied=false;
+ const network=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>online);
+ function Restored(){channel=useXiaozhuCowork('workspace','account:workspace',true,undefined,undefined,saved,store);return <div/>;}
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks')){
+    if(denied)throw Object.assign(new Error('权限不足'),{status:403});
+    return {items:[latest],nextCursor:null};
+   }
+   if(url.includes('/answer/receipt/')){
+    expect(url.endsWith(requestId)).toBe(true);
+    return new Promise(resolve=>reads.push({signal:init!.signal!,resolve}));
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<Restored/>));
+  expect(reads).toHaveLength(1);
+  if(mode==='reconnect'){
+   await act(async()=>{
+    online=false;window.dispatchEvent(new Event('offline'));
+    online=true;window.dispatchEvent(new Event('online'));window.dispatchEvent(new Event('online'));
+   });
+   expect(reads[0].signal.aborted).toBe(true);
+   expect(reads).toHaveLength(2);
+   await act(async()=>reads[1].resolve({item:latest,attachmentIds:[attachment.id]}));
+   expect(channel.controls.task?.attachmentAnswerRecovered).toBe(true);
+   expect(readTaskControls(store).size).toBe(0);
+  }else{
+   denied=true;
+   await act(async()=>channel.reload());
+   expect(reads[0].signal.aborted).toBe(true);
+   expect(reads).toHaveLength(1);
+   expect(channel.tasks).toEqual([]);
+   expect(readTaskControls(store).size).toBe(1);
+  }
+  await act(async()=>reads[0].resolve({item:{...latest,version:4,result:'迟到的回执'},attachmentIds:[attachment.id]}));
+  expect(channel.tasks.some(item=>item.result==='迟到的回执')).toBe(false);
+  expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+ }finally{network.mockRestore();saveTaskControls(store,new Map());}
+});
+
 it('keeps the exact answer request after a fresh page without storing the answer',async()=>{
  const storageScope='["test-operator","workspace"]';
  const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给交期'}]};
