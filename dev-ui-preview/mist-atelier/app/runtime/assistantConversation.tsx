@@ -7,7 +7,12 @@ export type AssistantReply = {
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
   revision?: number; truncated?: boolean; contextToken?: string;
 };
-export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
+type RetryAttachmentRef = TaskAttachmentRef & { preserveScope?: true };
+export type AssistantAttachmentRef = RetryAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
+
+export function taskAttachmentRefPayload({taskId, fileId, preserveScope}: RetryAttachmentRef): RetryAttachmentRef {
+  return {taskId, fileId, ...(preserveScope === true ? {preserveScope: true} : {})};
+}
 type TaskAnswerDraft = {taskId:string;questionId:string;text:string;files:readonly File[]};
 const emptyAnswerFiles:readonly File[]=[];
 export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
@@ -35,11 +40,11 @@ function storedAttachmentRefs(value: unknown): AssistantAttachmentRef[] {
   if (!Array.isArray(value) || value.length > TASK_ATTACHMENT_COUNT) return [];
   const fileIds = new Set<string>();
   return value.flatMap(ref => {
-    const { taskId, fileId } = ref ?? {};
+    const { taskId, fileId, preserveScope } = ref ?? {};
     if (typeof taskId !== 'string' || !attachmentId.test(taskId) || typeof fileId !== 'string' || !attachmentId.test(fileId)
       || fileIds.has(fileId)) return [];
     fileIds.add(fileId);
-    return [{ taskId, fileId, name: '', size: 0, needsVerification: true as const }];
+    return [{ ...taskAttachmentRefPayload({taskId,fileId,preserveScope}), name: '', size: 0, needsVerification: true as const }];
   });
 }
 const validConversationId = (value: unknown): value is string =>
@@ -71,7 +76,7 @@ function readDraft(value: unknown): ComposerDraft {
 }
 
 function storedDraft({question, selected, attachmentRefs}: ComposerDraft) {
-  return {question, selected, attachmentRefs: attachmentRefs.map(({taskId,fileId})=>({taskId,fileId}))};
+  return {question, selected, attachmentRefs: attachmentRefs.map(taskAttachmentRefPayload)};
 }
 
 function load(scope: string): Conversation {
