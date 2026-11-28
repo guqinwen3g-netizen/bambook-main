@@ -13,8 +13,10 @@ import { CompanyManagementLoading } from './pages/CompanyManagementLoading';
 import { ExportConfirmHost } from './runtime/ExportConfirmHost';
 import { preloadPagesWhenIdle } from './pagePreload';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
-import { useAssistantConversation } from './runtime/assistantConversation';
-import { useXiaozhuActivity, xiaozhuActivityLabel } from './runtime/xiaozhuActivity';
+import { useAssistantConversation, type AssistantReply } from './runtime/assistantConversation';
+import { useReadOnlyAssistantHistory } from './runtime/readonlyAssistantHistory';
+import { activeModelFallbackSince, useXiaozhuActivity, xiaozhuActivityLabel } from './runtime/xiaozhuActivity';
+import { XiaozhuPhaseTimer } from './pages/modules/XiaozhuPhaseTimer';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
@@ -52,6 +54,8 @@ const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单:
 const REFERENCE_PREVIEW = import.meta.env.VITE_MIST_REFERENCE === 'true';
 
 const PAGES = buildPages(REFERENCE_PREVIEW);
+type DrawerTurn = { id:symbol; question:string; reply?:AssistantReply; error?:string; retrySources?:string[] };
+const EMPTY_DRAWER_TURNS: DrawerTurn[] = [];
 const LIVE_VIEWS = new Set(['account','platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '管理与工具' };
 
@@ -177,6 +181,8 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const noticeScope = session.sessionKey + ':' + (workspace.workspace?.id || '');
   const [activeAgentTask] = useXiaozhuActivity(workspace.workspace?.id, noticeScope, canAI);
   const agentActivityLabel = activeAgentTask ? uiText(xiaozhuActivityLabel(activeAgentTask)) : '';
+  const agentModelSince = activeAgentTask?.state === 'running' && activeAgentTask.executionStage === 'model' && !activeAgentTask.runnerStatus
+    ? activeModelFallbackSince(activeAgentTask) ?? activeAgentTask.executionStageSince : undefined;
   const unreadIds = visibleNotifications.filter(n => !n.readAt).map(n => n.id).join('|');
   React.useEffect(() => {
     const unread = visibleNotifications.filter(n => !n.readAt), seen = seenNotices.current;
@@ -190,8 +196,8 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   React.useEffect(() => { if (!toastIds.length) return; const timer = window.setTimeout(() => setToastIds([]), 6000); return () => window.clearTimeout(timer); }, [toastIds]);
   React.useEffect(() => { if (notifications) setToastIds([]); }, [notifications]);
   const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt && !(route.view === 'assistant' && n.id.startsWith('agent-task:')));
-  const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
-  const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
+  const [drawer, setDrawer] = React.useState<{scope:string;turns:DrawerTurn[]}>({scope:'',turns:[]});
+  const [aiBusy,setAiBusy]=React.useState(false),[aiSource,setAiSource]=React.useState<{scope:string;id:string}>();
   const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');
   React.useEffect(() => {
     const workspaceId = workspace.workspace?.id;
@@ -211,10 +217,13 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   React.useEffect(() => () => clearPrivateImages(), [session.sessionKey, workspace.workspace?.id]);
   const aiCurrent=React.useRef(aiScope);aiCurrent.current=aiScope;
   const aiMounted=React.useRef(true),aiController=React.useRef<AbortController|null>(null),aiRun=React.useRef<symbol|null>(null);
-  const aiHistory=React.useRef<Array<{role:'user'|'assistant';content:string}>>([]);
+  const drawerTurns = drawer.scope === aiScope ? drawer.turns : EMPTY_DRAWER_TURNS;
+  const drawerExchanges = React.useMemo(() => drawerTurns.flatMap(turn => turn.reply
+    ? [{role:'user' as const,content:turn.question},turn.reply] : []), [drawerTurns]);
+  const drawerHistory = useReadOnlyAssistantHistory(drawerExchanges, aiScope, workspace.workspace?.id, workspace.workspace?.revision, ai && canAI);
+  const visibleDrawerTokens = new Set(drawerHistory.visible.flatMap(reply => reply.contextToken ? [reply.contextToken] : []));
   React.useEffect(()=>{aiMounted.current=true;return()=>{aiMounted.current=false;aiController.current?.abort();aiRun.current=null;};},[]);
-  React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;aiHistory.current=[];setAiBusy(false);setAiUseRouteSource(false);},[aiScope]);
-  React.useEffect(()=>setAiUseRouteSource(false),[route.view,route.id]);
+  React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;setAiBusy(false);setAiSource(undefined);},[aiScope]);
   const sections = useSections();
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
   const lastDevelopmentTab = React.useRef<DevelopmentListTab | null>(null);
@@ -279,7 +288,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
     };
     window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back);
   },[attemptNavigation,hasNavigationGuard]);
-  React.useEffect(() => { setPalette(false); setAI(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
+  React.useEffect(() => { setPalette(false); setAI(false); setNotifications(false); setOrganizationOpen(false); }, [session.sessionKey, workspace.workspace?.id]);
   const previousLocalActor = React.useRef<string|undefined>(undefined);
   React.useEffect(() => {
     if (!session.localMode || session.status !== 'authenticated') return;
@@ -295,47 +304,116 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const density = useDevice('density');
   const report = (failure: unknown) => toast(failure instanceof Error ? failure.message : '操作未完成', 'bad');
   const routeBase=route.view.split('/')[0];
-  const currentAiSource=route.id&&routeBase==='orders'&&canOrders&&session.hasPermission('orders:read')
-    ?state?.orders.find(row=>row.id===route.id)
-      ?{id:'orders:'+route.id,label:state.orders.find(row=>row.id===route.id)!.code,view:'orders/detail',entityId:route.id}:null
-    :route.id&&routeBase==='invoices'&&session.hasPermission('invoices:read')
-      ?state?.invoices.find(row=>row.id===route.id)
-        ?{id:'invoices:'+route.id,label:state.invoices.find(row=>row.id===route.id)!.code,view:'invoices',entityId:route.id}:null
-      :route.id&&routeBase==='risks'&&session.hasPermission('risk:read')
-        ?state?.platform?.risks.find(row=>row.id===route.id)
-          ?{id:'risks:'+route.id,label:state.platform.risks.find(row=>row.id===route.id)!.title,view:'risks',entityId:route.id}:null
-        :null;
+  const findAiSource=(kind:string,id:string|undefined)=>{
+    if(!id)return null;
+    if(kind==='orders'&&canOrders&&session.hasPermission('orders:read')){
+      const order=state?.orders.find(row=>row.id===id);
+      if(order)return {id:'orders:'+id,label:order.code};
+    }
+    if(kind==='invoices'&&session.hasPermission('invoices:read')){
+      const invoice=state?.invoices.find(row=>row.id===id);
+      if(invoice)return {id:'invoices:'+id,label:invoice.code};
+    }
+    if(kind==='risks'&&session.hasPermission('risk:read')){
+      const risk=state?.platform?.risks.find(row=>row.id===id);
+      if(risk)return {id:'risks:'+id,label:risk.title};
+    }
+    return null;
+  };
+  const currentAiSource=findAiSource(routeBase,route.id);
+  const aiSourceId=aiSource?.scope===aiScope?aiSource.id:undefined;
+  const resolveAiSource=(id:string|undefined)=>{
+    const separator=id?.indexOf(':')??-1;
+    return id&&separator>0?findAiSource(id.slice(0,separator),id.slice(separator+1)):null;
+  };
+  const selectedAiSource=resolveAiSource(aiSourceId);
+  const sourceAction=aiSourceId
+    ? <Button aria-pressed disabled={aiBusy} onClick={()=>setAiSource(undefined)}>
+        {selectedAiSource?uiText('取消引用：')+uiText(selectedAiSource.label):uiText('移除不可用引用')}
+      </Button>
+    : currentAiSource&&<Button aria-pressed={false} disabled={aiBusy} onClick={()=>setAiSource({scope:aiScope,id:currentAiSource.id})}>
+        {uiText('引用当前来源：')}{uiText(currentAiSource.label)}
+      </Button>;
   const overview = (): ChatMessage => {
     if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
     const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
-    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:<>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:null}</>};
+    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:sourceAction};
   };
-  const send = async (question:string,retrySources?:string[]) => {
-    const content=question.trim();if(!content)return;
-    const sourceIds=retrySources??(aiUseRouteSource&&currentAiSource?[currentAiSource.id]:[]);
+  const send = async (question:string,retryTurn?:DrawerTurn) => {
+    const content=question.trim();
     const available=()=>aiMounted.current&&aiCurrent.current===aiScope;
-    if(!available())return;
-    const errorMessage=(message:string):ChatMessage=>({role:'assistant',content:<p>{message}</p>,actions:<Button onClick={()=>void send(content,sourceIds)}>{uiText("重试此问题")}</Button>});
-    if(aiRun.current){setMsgs(items=>[...items,{role:'user',text:content},errorMessage('上一个问题仍在处理。内容已保留，请等待完成后重试。')]);return;}
-    if(!workspace.workspace?.id||workspace.loading){setMsgs(items=>[...items,{role:'user',text:content},errorMessage('公司数据尚未读取，请完成读取后重试。')]);return;}
-    if(!canAI)return;
-    if(content.length>4000){setMsgs(items=>[...items,{role:'user',text:content},{role:'assistant',content:'问题超过4000个字符，请缩短后重试。'}]);return;}
-    const token=Symbol('assistant-run'),controller=new AbortController();aiRun.current=token;aiController.current=controller;setAiBusy(true);setMsgs(items=>[...items,{role:'user',text:content}]);
+    if(!content||!canAI||!available())return;
+    const sourceIds=retryTurn?.retrySources??(aiSourceId?[aiSourceId]:[]);
+    const turn=retryTurn??{id:Symbol('assistant-turn'),question:content};
+    const add=(error?:string,retry=true)=>setDrawer(old=>({scope:aiScope,turns:[
+      ...(old.scope===aiScope?old.turns:[]),{...turn,...(error?{error,retrySources:retry?sourceIds:undefined}:{})},
+    ]}));
+    const finish=(change:Partial<DrawerTurn>)=>setDrawer(old=>old.scope===aiScope
+      ? {...old,turns:old.turns.map(item=>item.id===turn.id?{...item,...change}:item)} : old);
+    if(aiRun.current){
+      if(!retryTurn)add('上一个问题仍在处理。内容已保留，请等待完成后重试。');
+      return;
+    }
+    if(!workspace.workspace?.id||workspace.loading){
+      const error='公司数据尚未读取，请完成读取后重试。';
+      if(retryTurn)finish({error});else add(error);
+      return;
+    }
+    if(content.length>4000){add('问题超过4000个字符，请缩短后重试。',false);return;}
+    const token=Symbol('assistant-request'),controller=new AbortController();
+    aiRun.current=token;aiController.current=controller;setAiBusy(true);
+    if(retryTurn)finish({error:undefined,retrySources:undefined});else add();
+    const history=drawerHistory.visible.slice(-8).map(({role,content,contextToken})=>({
+      role,content:content.slice(0,2000),...(contextToken?{contextToken}:{}),
+    }));
     try{
-      const response=await fetch('/api/mist/workspaces/'+encodeURIComponent(workspace.workspace.id)+'/assistant',{method:'POST',headers:{...apiService.getAuthHeaders(),'Content-Type':'application/json','X-Bambook-Locale':interfaceLocale()},credentials:'include',signal:controller.signal,body:JSON.stringify({message:content,history:aiHistory.current.slice(-8).map(m=>({...m,content:m.content.slice(0,2000)})),sourceIds})});
+      const response=await fetch('/api/mist/workspaces/'+encodeURIComponent(workspace.workspace.id)+'/assistant',{method:'POST',headers:{...apiService.getAuthHeaders(),'Content-Type':'application/json','X-Bambook-Locale':interfaceLocale()},credentials:'include',signal:controller.signal,body:JSON.stringify({message:content,history,sourceIds})});
       const result=await response.json().catch(()=>null);
       if(!response.ok)throw new Error(result?.error?.message??'模型请求未完成，请重试');
-      if(result?.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sourceIds.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效，请重试');
+      if(result?.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)
+        ||typeof result.contextToken!=='string'||!result.contextToken.length||result.contextToken.length>8192
+        ||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sourceIds.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效，请重试');
       if(!available()||aiRun.current!==token)return;
-      aiHistory.current=[...aiHistory.current,{role:'user',content},{role:'assistant',content:result.text}];
-      setMsgs(items=>[...items,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{result.text}</p>{result.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}</>,actions:<>{result.sources.map((source:any)=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}</>}]);
-    }catch(error){if(available()&&aiRun.current===token&&!(error instanceof Error&&error.name==='AbortError'))setMsgs(items=>[...items,errorMessage(error instanceof Error?error.message:'模型服务暂不可用，请重试')]);}
+      drawerHistory.remember(result.contextToken);
+      finish({reply:{role:'assistant',content:result.text,sources:result.sources,contextToken:result.contextToken,revision:result.revision,truncated:!!result.truncated}});
+    }catch(error){if(available()&&aiRun.current===token&&!(error instanceof Error&&error.name==='AbortError'))finish({
+      error:error instanceof Error?error.message:'模型服务暂不可用，请重试',retrySources:sourceIds,
+    });}
     finally{if(available()&&aiRun.current===token){aiRun.current=null;aiController.current=null;setAiBusy(false);}}
   };
+  const drawerMessages = drawerTurns.flatMap<ChatMessage>(turn => {
+    const {reply}=turn;
+    if(reply&&(!reply.contextToken||!visibleDrawerTokens.has(reply.contextToken)))return [];
+    const question:ChatMessage={role:'user',text:turn.question};
+    if(reply)return [question,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{reply.content}</p>{reply.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}</>,
+      actions:reply.sources?.map(source=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}];
+    return turn.error?[question,{role:'assistant',content:<p>{turn.error}</p>,actions:turn.retrySources&&
+      <Button disabled={aiBusy} onClick={()=>void send(turn.question,turn)}>{uiText("重试此问题")}</Button>}]:[question];
+  });
+  if(drawerHistory.unavailable)drawerMessages.push({role:'assistant',content:uiText('历史答复暂时无法核对'),
+    actions:<Button onClick={drawerHistory.retry}>{uiText('重试核对历史答复')}</Button>});
+  else if(drawerHistory.hidden)drawerMessages.push({role:'assistant',content:uiText('部分历史答复需重新核对')});
   const conversation=useAssistantConversation(aiScope);
-  // 抽屉是小竹的快捷形态；进入完整版时把这段对话接到小竹页。
-  const expandAI=()=>{const history=aiHistory.current;if(history.length)conversation.setMessages(old=>[...old,...history]);aiHistory.current=[];setMsgs([]);setAI(false);go('assistant');};
+  const expandAI=(draft:string)=>{
+    // The full page revalidates the signed exchanges before showing or reusing them.
+    if(drawerExchanges.length)conversation.setMessages(old=>[...old,...drawerExchanges]);
+    const hasDraft=!!draft.trim();
+    const failed=drawerTurns.filter(turn=>turn.retrySources!==undefined).at(-1);
+    const question=hasDraft?draft:failed?.question;
+    const sourceId=hasDraft?aiSourceId:failed?.retrySources?.[0];
+    const source=resolveAiSource(sourceId);
+    const moved=!!question&&!conversation.readOnlyQuestion.trim()&&!conversation.readOnlySelected.length&&(!sourceId||!!source);
+    if(moved){
+      conversation.setReadOnlyQuestion(question);
+      conversation.setReadOnlySelected(source?[source]:[]);
+    }
+    setDrawer({scope:aiScope,turns:drawerTurns.filter(turn=>!turn.reply&&(!moved||hasDraft||turn.id!==failed?.id))});
+    setAI(false);
+    go('assistant',undefined,drawerExchanges.length||question?{section:'read-only'}:{});
+    if(moved&&hasDraft)setAiSource(undefined);
+    return moved&&hasDraft;
+  };
   const openAI = (prompt?: string) => {if(!canAI)return;setAI(true);setPalette(false);if(prompt)void send(prompt);};
   useHotkey('k', () => { if (session.status === 'authenticated') setPalette(value => !value); }, { meta: true });
   useHotkey('j', () => { if (session.status === 'authenticated') openAI(); }, { meta: true });
@@ -416,10 +494,13 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
           assistant={activeAgentTask ? {
             title: '小竹',
             activityLabel: [uiText('小竹'), activeAgentTask.name, agentActivityLabel].join(' · '),
-            text: <span aria-live="polite" aria-atomic="true">
+            text: <>
               <span className="mist-side-ai-task" title={activeAgentTask.name}>{activeAgentTask.name}</span>
-              <span className="mist-side-ai-stage">{agentActivityLabel}</span>
-            </span>,
+              <span className="mist-side-ai-stage">
+                <span aria-live="polite">{agentActivityLabel}</span>
+                {agentModelSince && <> <XiaozhuPhaseTimer at={agentModelSince} /></>}
+              </span>
+            </>,
             onClick: () => go('assistant', activeAgentTask.id, { section: 'task-origin' }),
           } : undefined} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
@@ -445,7 +526,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
       </MistAppShell></PageBackRegistrationContext.Provider></PageNavigationGuardContext.Provider>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
-      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
+      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...drawerMessages,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
       <NotificationCenter open={notifications} onClose={()=>setNotifications(false)} items={visibleNotifications} digest={dailyDigest} digestEnabled={!!state?.settings.notifications.digest}
         busy={workspace.saving||workspace.agentTaskNotices?.reading}
         error={workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
