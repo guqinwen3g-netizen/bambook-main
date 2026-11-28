@@ -344,6 +344,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   React.useEffect(() => {
     if (!base || !enabled || !openReportIds) return;
     const ids = openReportIds.split(',');
+    const restoreOrder = new Map<string, number>();
+    let attempt = 0;
     let request: AbortController | undefined;
     const poll = async () => {
       if (request || document.visibilityState === 'hidden') return;
@@ -377,21 +379,24 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         setReportAccess({ scope, restricted });
         setTasks(old => old.map(task => restricted.has(task.id) && !task.contentRestricted ? restrictReport(task) : task));
       }
-      // Reopen a restricted report only after a fresh full read under the new authority.
-      const toRestore = currentTasks.current.filter(task => readable.has(task.id) && task.contentRestricted).slice(0, 4);
-      const restored = await Promise.allSettled(toRestore.map(task => readCoworkTask(base, task.id, controller.signal)));
-      if (!current()) return;
-      const confirmed = new Map(restored.flatMap(reply => reply.status === 'fulfilled' && !reply.value.contentRestricted
-        ? [[reply.value.id, reply.value] as const] : []));
-      if (confirmed.size) {
-        const remaining = new Set([...restrictedReports.current].filter(id => !confirmed.has(id)));
+      // Restore each report only after its own fresh, authorized full read.
+      const authority = deniedHistory.current;
+      const toRestore = currentTasks.current.filter(task => readable.has(task.id) && task.contentRestricted)
+        .sort((left,right) => (restoreOrder.get(left.id) ?? 0) - (restoreOrder.get(right.id) ?? 0))
+        .slice(0, 4);
+      await Promise.allSettled(toRestore.map(async task => {
+        restoreOrder.set(task.id, ++attempt);
+        const next = await readCoworkTask(base, task.id, controller.signal);
+        if (!current() || deniedHistory.current !== authority || next.contentRestricted) return;
+        const previous = currentTasks.current.find(item => item.id === task.id);
+        if (!previous?.contentRestricted || mergeTaskUpdate(previous, next) === previous) return;
+        const remaining = new Set(restrictedReports.current);
+        if (!remaining.delete(task.id)) return;
         restrictedReports.current = remaining;
-        setTasks(old => old.map(item => {
-          const next = confirmed.get(item.id);
-          return next ? mergeTaskUpdate(item, next) : item;
-        }));
+        setTasks(old => old.map(item => mergeTaskUpdate(item, next)));
         setReportAccess({ scope, restricted: remaining });
-      }
+      }));
+      if (!current()) return;
       request = undefined;
     };
     const wake = () => void poll();

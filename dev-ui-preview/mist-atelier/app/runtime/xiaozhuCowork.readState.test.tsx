@@ -183,6 +183,34 @@ it('rechecks opened completed reports on focus and restores access from a fresh 
  expect(channel.tasks.find(item=>item.id==='task')?.result).toBe('已重新读取原件');
 });
 
+it('restores each authorized report immediately and rotates reports not yet rechecked',async()=>{
+ const conversationId='c_restore_many';
+ const reports=Array.from({length:6},(_,index)=>({...task,id:'report-'+index,conversationId,result:'原报告 '+index}));
+ const requests=new Map<string,(value:unknown)=>void>(),order:string[]=[];
+ let restricted=true;
+ api.mockImplementation(async(url:string)=>{
+  if(url.includes('/personal-agent/task-access?'))return {restrictedIds:restricted?reports.map(item=>item.id):[]};
+  if(url.endsWith('/agent-tasks'))return {items:reports,nextCursor:null};
+  const id=url.split('/').at(-1)!;
+  if(reports.some(item=>item.id===id))return new Promise(resolve=>{order.push(id);requests.set(id,resolve);});
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId={conversationId}/>));
+ expect(channel.tasks.every(item=>item.contentRestricted)).toBe(true);
+ restricted=false;
+ await act(async()=>window.dispatchEvent(new Event('focus')));
+ expect(order).toEqual(reports.slice(0,4).map(item=>item.id));
+ await act(async()=>requests.get(reports[0].id)!({item:reports[0]}));
+ expect(channel.tasks.find(item=>item.id===reports[0].id)?.result).toBe(reports[0].result);
+ expect(channel.tasks.find(item=>item.id===reports[1].id)?.contentRestricted).toBe(true);
+ await act(async()=>{
+  for(const item of reports.slice(1,4))requests.get(item.id)!({item:{...item,contentRestricted:true,result:''}});
+ });
+ await act(async()=>window.dispatchEvent(new Event('focus')));
+ expect(order.slice(4,6)).toEqual(reports.slice(4).map(item=>item.id));
+});
+
 it('recovers a lost stop receipt from the one task without rereading history',async()=>{
  const waiting={...task,state:'waiting_time',version:2},stopped={...waiting,state:'cancelled',version:3};
  let committed=false;
