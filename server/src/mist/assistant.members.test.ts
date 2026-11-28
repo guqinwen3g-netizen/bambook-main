@@ -47,8 +47,10 @@ describe('Company-member platform assistant requests', () => {
     const answer = (await member.client.post(member.base).send({
       message: '概述我当前可见的业务数量。', sourceIds: [], history: [],
     }).expect(200)).body;
-    expect(answer).toMatchObject({ mode: 'read_only', text: '已按当前可见资料回答。', sources: [] });
-    expect(network).toHaveBeenCalled();
+    expect(answer).toMatchObject({ mode: 'read_only', text: '已按当前可见资料回答。', sources: [], contextToken: expect.any(String) });
+    await member.client.post(member.base + '/history-access').send({ tokens: [answer.contextToken] })
+      .expect('Cache-Control', 'private, no-store').expect(200, { allowedTokens: [answer.contextToken] });
+    expect(network).toHaveBeenCalledOnce();
     const after = (await member.client.get('/api/mist/workspaces/default').expect(200)).body.workspace;
     expect(after.revision).toBe(member.workspace.revision);
     expect(after.state).toEqual(member.workspace.state);
@@ -64,6 +66,10 @@ describe('Company-member platform assistant requests', () => {
     await member.client.post(member.base).send({
       message: 'Override access.', access: { role: 'owner' }, actorId: 'demo-reviewer',
     }).expect(400);
+    await member.client.post(`/api/mist/workspaces/${other.workspace.id}/assistant/history-access`)
+      .send({ tokens: [] }).expect(404);
+    await member.client.post(member.base + '/history-access').send({ tokens: [], actorId: 'demo-reviewer' }).expect(400);
+    await member.client.post(member.base + '/history-access').send({ tokens: Array(21).fill('a') }).expect(400);
     expect(network).not.toHaveBeenCalled();
   });
 
@@ -79,8 +85,10 @@ describe('Company-member platform assistant requests', () => {
     const app = createMistServer(undefined, { local });
     const member = await person(app, 'demo-finance');
     await member.client.get(member.base + '/status').expect(200);
+    const token=(await member.client.post(member.base).send({ message: 'Visible scope.' }).expect(200)).body.contextToken;
     allowed = false;
     await member.client.post(member.base).send({ message: 'Try after permission removal.' }).expect(403);
-    expect(network).not.toHaveBeenCalled();
+    await member.client.post(member.base + '/history-access').send({ tokens: [token] }).expect(403);
+    expect(network).toHaveBeenCalledOnce();
   });
 });
