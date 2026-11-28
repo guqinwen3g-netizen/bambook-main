@@ -67,6 +67,46 @@ it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a request
   } finally { bounds.mockRestore();layout.mockRestore();canvas.mockRestore();mockWidth.mockRestore(); }
 });
 
+it('jumps from the PDF page count without reopening the original',async()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(640);
+ const canvas=vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(null);
+ const offsets=vi.spyOn(HTMLElement.prototype,'offsetTop','get').mockImplementation(function(this:HTMLElement){
+  return this.classList.contains('mist-viewer-page')?[...this.parentElement!.children].indexOf(this)*100:0;
+ });
+ try {
+  const page={getViewport:()=>({width:600,height:800}),render:()=>({promise:Promise.resolve(),cancel:vi.fn()})};
+  pdfMock.getDocument.mockReturnValue({promise:Promise.resolve({numPages:23,getPage:vi.fn(async()=>page),destroy:vi.fn(async()=>{})})});
+  const blob=new Blob(['%PDF-1.4']);(blob as any).arrayBuffer??=async()=>new ArrayBuffer(0);
+  const load=vi.fn(async()=>blob);
+  const view=mount([{id:'pdf',name:'验货报告.pdf'}],load,{initialPdfPage:22});
+  await flush();
+  const opener=btn('第 22 页，共 23 页');
+  expect(opener).toBeTruthy();
+  await act(async()=>opener.click());
+  const input=() => document.querySelector<HTMLInputElement>('input[aria-label="PDF 页码"]')!;
+  expect(document.activeElement).toBe(input());
+  const enter=async (text:string)=>act(async()=>{
+   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input(),text);
+   input().dispatchEvent(new Event('input',{bubbles:true}));
+   input().closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  });
+  await enter('24');
+  expect(input().getAttribute('aria-invalid')).toBe('true');
+  expect(document.querySelector<HTMLElement>('.mist-viewer-pages')!.scrollTop).toBe(2100);
+  await enter('5');
+  expect(input()).toBeNull();
+  expect(document.querySelector<HTMLElement>('.mist-viewer-pages')!.scrollTop).toBe(400);
+  const current=btn('第 5 页，共 23 页');
+  expect(document.activeElement).toBe(current);
+  expect(load).toHaveBeenCalledTimes(1);
+  await act(async()=>current.click());
+  await act(async()=>input().dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  expect(view.onClose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(current);
+  expect(input()).toBeNull();
+ }finally{width.mockRestore();canvas.mockRestore();offsets.mockRestore();}
+});
+
 it.each(['wheel', 'touch', 'keyboard', 'scrollbar'])('keeps the requested page aligned during lazy layout until %s navigation', async (input) => {
   const pdfPage = (height: number) => ({ getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: height * scale }) });
   const pendingFirst = Promise.withResolvers<ReturnType<typeof pdfPage>>();

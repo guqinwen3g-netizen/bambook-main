@@ -6,6 +6,10 @@ import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
   '第 {0} 页，共 {1} 页': 'Page {0} of {1}',
+  '跳转页码': 'Jump to page',
+  'PDF 页码': 'PDF page number',
+  '跳转': 'Go',
+  '请输入 1 至 {0} 的整数页码': 'Enter a whole number from 1 to {0}',
   '选择要读取的 PDF': 'Choose a PDF to read',
   '选择第 {0} 页对应的 PDF（第 {1} 处）': 'Choose the PDF for page range {0} (request {1})',
   '选择要读取的工作簿': 'Choose a workbook to read',
