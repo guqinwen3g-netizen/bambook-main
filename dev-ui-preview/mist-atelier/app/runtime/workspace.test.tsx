@@ -655,12 +655,15 @@ it('does not replay an unresolved proposal when the exact receipt-only lookup re
   await act(async()=>{await capture(api.run({type:'agent.proposal.confirm',payload:{id:'proposal-a'}}));});
   const original=clone(api.pending)!;
   expect(original.command?.type).toBe('agent.proposal.confirm');
+  const onMissingReceipt=vi.fn();
   let lookups=0;
   intercept=request=>{if(request.url.includes('/receipts/')){lookups++;return failure(404,'NOT_FOUND');}};
-  await act(async()=>{expect(await api.recover({requestId:'other-request',receiptOnly:true})).toBeUndefined();});
+  await act(async()=>{expect(await api.recover({requestId:'other-request',receiptOnly:true,onMissingReceipt})).toBeUndefined();});
   expect(lookups).toBe(0);
-  await act(async()=>{expect(await api.recover({requestId:original.requestId,receiptOnly:true})).toBeUndefined();});
+  expect(onMissingReceipt).not.toHaveBeenCalled();
+  await act(async()=>{expect(await api.recover({requestId:original.requestId,receiptOnly:true,onMissingReceipt})).toBeUndefined();});
   expect(lookups).toBe(1);
+  expect(onMissingReceipt).toHaveBeenCalledOnce();
   expect(api.pending?.requestId).toBe(original.requestId);
   expect(posts()).toHaveLength(1);
 });
