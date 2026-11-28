@@ -348,12 +348,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     let attempt = 0;
     let request: AbortController | undefined;
     const poll = async () => {
-      if (request || document.visibilityState === 'hidden') return;
+      if (request || !navigator.onLine || document.visibilityState === 'hidden') return;
       const controller = new AbortController();
       request = controller;
       const current = () => request === controller && live.current === scope;
       const authority = deniedHistory.current;
-      const authorized = () => current() && deniedHistory.current === authority;
+      const authorized = () => current() && navigator.onLine && deniedHistory.current === authority;
       const readable = new Set<string>();
       let offset = 0;
       let denied = false;
@@ -417,18 +417,25 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (!current()) return;
       request = undefined;
     };
+    const suspend = () => {
+      const previous = request;
+      request = undefined;
+      previous?.abort();
+    };
     const wake = () => void poll();
     const timer = window.setInterval(wake, REPORT_ACCESS_INTERVAL_MS);
     document.addEventListener('visibilitychange', wake);
     window.addEventListener('focus', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('offline', suspend);
     wake();
     return () => {
-      const previous = request;
-      request = undefined;
-      previous?.abort();
+      suspend();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
       window.removeEventListener('focus', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('offline', suspend);
     };
   }, [base, enabled, openReportIds, scope]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));

@@ -183,6 +183,39 @@ it('rechecks opened completed reports on focus and restores access from a fresh 
  expect(channel.tasks.find(item=>item.id==='task')?.result).toBe('已重新读取原件');
 });
 
+it('abandons a report permission check on disconnect and rechecks immediately after reconnect',async()=>{
+ const conversationId='c_reconnected_access';
+ const report={...task,conversationId,result:'原报告内容'};
+ const pending=Promise.withResolvers<{restrictedIds:string[]}>();
+ let online=true,checks=0;
+ const signals:AbortSignal[]=[];
+ const connectivity=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>online);
+ api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url.includes('/personal-agent/task-access?')){
+   signals.push(init!.signal!);
+   return ++checks===1?pending.promise:{restrictedIds:[report.id]};
+  }
+  if(url.endsWith('/agent-tasks'))return {items:[report],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ try{
+  await act(async()=>root!.render(<View conversationId={conversationId}/>));
+  expect(checks).toBe(1);
+  online=false;
+  await act(async()=>window.dispatchEvent(new Event('offline')));
+  expect(signals[0].aborted).toBe(true);
+  await act(async()=>window.dispatchEvent(new Event('focus')));
+  expect(checks).toBe(1);
+  online=true;
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(checks).toBe(2);
+  expect(channel.tasks[0]).toMatchObject({contentRestricted:true,result:''});
+  await act(async()=>pending.resolve({restrictedIds:[]}));
+  expect(channel.tasks[0]).toMatchObject({contentRestricted:true,result:''});
+ } finally { connectivity.mockRestore(); }
+});
+
 it('applies a completed permission batch while another batch is still pending',async()=>{
  const conversationId='c_long_access';
  const reports=Array.from({length:31},(_,index)=>({...task,id:'long-report-'+index,conversationId,result:'报告 '+index}));
