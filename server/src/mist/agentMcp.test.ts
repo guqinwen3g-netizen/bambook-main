@@ -573,6 +573,13 @@ it('shares repeated prompt definitions without changing any task tool schema',()
  expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(Buffer.byteLength(JSON.stringify(full))-1000);
 });
 
+it('removes mutation tools from the read-only model catalog while preserving allowed schemas',()=>{
+ const full=platformTaskModelToolCatalog();
+ const readOnly=platformTaskModelToolCatalog('read');
+ expect(readOnly.$defs).toEqual(full.$defs);
+ expect(readOnly.tools).toEqual(full.tools.filter(tool=>!['bambook_preview','bambook_execute'].includes(tool.name)));
+});
+
 it('identifies stale order lines after a real preview conflict without upgrading the revision',async()=>{
   const preview=vi.fn().mockRejectedValueOnce(new MistApiError('REVISION_CONFLICT','业务已更新',409))
     .mockResolvedValueOnce({revision:63,events:[]});
