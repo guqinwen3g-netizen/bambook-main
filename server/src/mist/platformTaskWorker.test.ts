@@ -2227,6 +2227,91 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });
 
+it.each(['PDF','Excel'])('keeps the prior %s read scope only when the original is reused for a retry',async(kind)=>{
+ const isPdf=kind==='PDF',name=isPdf?'scope.pdf':'scope.xlsx';
+ const workbook=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['OUTSIDE-A'],['OUTSIDE-B'],['ALLOWED-THREE'],['OUTSIDE-D']]),'报价');
+ XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['OTHER-SHEET']]),'成本');
+ const data=isPdf?pdf('Synthetic retry record',5):XLSX.write(workbook,{type:'buffer',bookType:'xlsx'});
+ const finish=(outcome:string)=>tool('bambook_task',{action:'finish',outcome,result:'核对完毕。'});
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>finish('succeeded'))
+  .mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请补交原件。'}))
+  .mockResolvedValueOnce(finish('failed'));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const path=f.base+'/personal-agent/tasks',conversationId='c_retry_boundaries';
+ const instructions='只用我提供的资料。请核对 '+name+'。';
+ const create=(extra:Record<string,unknown>={})=>f.human.post(path).send({
+  requestId:randomUUID(),name:'核对资料',conversationId,instructions,...extra,
+ });
+ const original=(await create().expect(201)).body.item;
+ await f.drain();
+ const waiting=await f.current(original.id);
+ const answer=isPdf?'请只读取 scope.pdf 第 3 页。':'请只读取 scope.xlsx 的工作表「报价」第 3 行。';
+ const supplied=(await f.human.post(f.base+'/agent-tasks/'+original.id+'/answer').field('answer',JSON.stringify({
+  requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer,
+ })).attach('attachments',data,name).expect(200)).body.item;
+ await f.drain();
+ expect(await f.current(original.id)).toMatchObject({state:'failed'});
+ const fileId=supplied.attachments[0].id;
+ const preserve={taskId:original.id,fileId,preserveScope:true};
+ const retry=(await create({attachmentRefs:[preserve]}).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(retry.id)).toMatchObject({state:'succeeded',attachments:[{id:fileId}]});
+ const disjoint=isPdf?'请只读取 scope.pdf 第 1 页。':'请只读取 scope.xlsx 的工作表「报价」第 1 行。';
+ const outside=(await create({attachmentRefs:[preserve],instructions:'只用我提供的资料。'+disjoint}).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(outside.id)).toMatchObject({state:'failed'});
+ expect(complete).toHaveBeenCalledTimes(3);
+ const repeated=(await create({attachmentRefs:[{...preserve,taskId:retry.id}]}).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(repeated.id)).toMatchObject({state:'succeeded',attachments:[{id:fileId}]});
+ const manual=(await create({attachmentRefs:[{taskId:original.id,fileId}]}).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(manual.id)).toMatchObject({state:'succeeded'});
+ const source=(call:number)=>{
+  const content=complete.mock.calls[call][0].messages[0].content;
+  return JSON.parse(content.slice(content.indexOf('{'))).history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
+ };
+ if(isPdf){
+  expect(source(1).range).toMatchObject({pageFrom:3,pageTo:3});
+  expect(source(2).range).toMatchObject({pageFrom:3,pageTo:3});
+  expect(source(3).range).toMatchObject({pageFrom:3,pageTo:3});
+  expect(source(4).range).toMatchObject({pageFrom:1,pageTo:5});
+ }else{
+  expect(source(1).worksheetRowScope).toEqual([{from:3,to:3}]);
+  expect(source(2).worksheetRowScope).toEqual([{from:3,to:3}]);
+  expect(source(2).text).toContain('ALLOWED-THREE');
+  expect(source(2).text).not.toMatch(/OUTSIDE|OTHER-SHEET/);
+  expect(source(3).worksheetRowScope).toEqual([{from:3,to:3}]);
+  expect(source(4).text).toContain('OTHER-SHEET');
+ }
+});
+
+it('keeps excluded images out of a retry that renders an allowed PDF page',async()=>{
+ const finish=(outcome:string)=>tool('bambook_task',{action:'finish',outcome,result:'核对完毕。'});
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>finish('succeeded')).mockResolvedValueOnce(finish('failed'));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const path=f.base+'/personal-agent/tasks',conversationId='c_retry_image_boundary';
+ const instructions='只用我提供的资料。请只目视核对 scan.pdf 第 3 页。';
+ const png=await sharp({create:{width:4,height:4,channels:3,background:'#ff0000'}}).png().toBuffer();
+ const original=(await f.human.post(path).field('task',JSON.stringify({requestId:randomUUID(),name:'核对扫描件',conversationId,
+  instructions:instructions+'不要读取其他附件。'})).attach('attachments',pdf('Scan quality details',5,false,3),'scan.pdf')
+  .attach('attachments',png,'excluded.png').expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(original.id)).toMatchObject({state:'failed'});
+ const retry=(await f.human.post(path).send({requestId:randomUUID(),name:'核对扫描件',conversationId,instructions,
+  attachmentRefs:original.attachments.map((file:{id:string})=>({taskId:original.id,fileId:file.id,preserveScope:true})),
+ }).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(retry.id)).toMatchObject({state:'succeeded'});
+ expect(complete).toHaveBeenCalledTimes(2);
+ for(const [input] of complete.mock.calls)expect(input.images?.map(image=>image.name)).toEqual(['scan.pdf 第 3 页']);
+});
+
 it('explicitly reopens a prior attachment in the same conversation without creating another original', async () => {
   const marker = 'only-in-the-original-worksheet-7319';
   const model = vi.fn(async (input: LlmCompletionInput) => {

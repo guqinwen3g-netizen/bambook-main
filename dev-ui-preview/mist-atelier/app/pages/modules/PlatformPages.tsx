@@ -20,7 +20,7 @@ export { PricingPage, validatePlatformPricingDraft } from './PricingPage';
 import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
-import { taskAnswerDraftKey, useAssistantConversation, type AssistantAttachmentRef } from '../../runtime/assistantConversation';
+import { taskAnswerDraftKey, taskAttachmentRefPayload, useAssistantConversation, type AssistantAttachmentRef } from '../../runtime/assistantConversation';
 import { useReadOnlyAssistantHistory } from '../../runtime/readonlyAssistantHistory';
 import { submissionDraftKey, submissionFingerprint } from '../../runtime/xiaozhuSubmissions';
 import { ArrowRight, ArrowUp, Calculator, Download, FileText, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2, Zap } from 'lucide-react';
@@ -282,12 +282,13 @@ export function AssistantPage(){
       const originalTasks=new Map(results.flatMap(result=>result.status==='fulfilled'?[result.value]:[]));
       const restored=new Map<string,AssistantAttachmentRef>();
       const authorizedTasks=new Set<AgentTaskView>();
-      for(const {taskId,fileId} of uncheckedAttachments){
+      for(const ref of uncheckedAttachments){
+        const {taskId,fileId}=ref;
         const task=originalTasks.get(taskId);
         if(!task||task.conversationId!==conversationId||task.executor!=='platform'||task.automationId||task.contentRestricted||task.state==='access_changed')continue;
         const file=task.attachments?.find(item=>item.id===fileId);
         if(!file?.name||!Number.isSafeInteger(file.size)||file.size<=0||file.size>TASK_ATTACHMENT_BYTES)continue;
-        restored.set(fileId,{taskId,fileId,name:file.name,size:file.size});
+        restored.set(fileId,{...taskAttachmentRefPayload(ref),name:file.name,size:file.size});
         authorizedTasks.add(task);
       }
       if(restored.size){
@@ -315,7 +316,7 @@ export function AssistantPage(){
         const candidates=unhandled.filter(entry=>entry.draftKey===draftKey);
         const hasFiles=files.length||attachmentRefs.length;
         const fingerprint=candidates.some(entry=>!entry.recoveredFromStorage||hasFiles)
-          ? await submissionFingerprint(conversationId,taskText,intentRefs,attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})),files)
+          ? await submissionFingerprint(conversationId,taskText,intentRefs,attachmentRefs.map(taskAttachmentRefPayload),files)
           : undefined;
         if(cancelled)return;
         for(const entry of unhandled)handledRecoveries.current.add(entry.requestId);
@@ -478,7 +479,7 @@ export function AssistantPage(){
       const text=taskText;
       try {
         const target=sendTarget();
-        const refs=attachmentRefs.map(({taskId,fileId})=>({taskId,fileId}));
+        const refs=attachmentRefs.map(taskAttachmentRefPayload);
         atBottomRef.current=true;
         const sent=await cowork.send(text,visibleTasks,target,selectedTaskIntentRefs(selected),files,refs);
         if(sent&&live.current===scope){
@@ -532,7 +533,7 @@ export function AssistantPage(){
       id:ref.kind+':'+ref.id,
       label:(sourceLabels?.length===refs.length?sourceLabels[i]:undefined)??index.find(record=>record.id===ref.id)?.text??ref.id,
     })));
-    setAttachmentRefs((task.attachments??[]).map(file=>({taskId:task.id,fileId:file.id,name:file.name,size:file.size})));
+    setAttachmentRefs((task.attachments??[]).map(file=>({taskId:task.id,fileId:file.id,name:file.name,size:file.size,preserveScope:true})));
     setStatusCheck(undefined);
     setError('');
     field.current?.focus();

@@ -2,7 +2,7 @@
 export const TASK_ATTACHMENT_COUNT = 6;
 export const PDF_VISUAL_PAGE_LIMIT = 3;
 export type PdfVisualCandidate = {fileId:string;from:number;to:number};
-export type TaskAttachmentRef = { taskId: string; fileId: string };
+export type TaskAttachmentRef = { taskId: string; fileId: string; preserveScope?: true };
 export const TASK_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const TASK_ATTACHMENT_TOTAL_BYTES = 24 * 1024 * 1024;
 export const TASK_ATTACHMENT_ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.pdf,.xlsx,.csv,.txt,.md,.docx,.pptx';

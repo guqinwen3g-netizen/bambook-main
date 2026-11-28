@@ -107,7 +107,7 @@ function observedWorksheetRow(file:TaskAttachment,sheet:string,row:number,reads:
 
 function sheetRowTarget(sheet:string,following:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]){
   const ref=SHEET_ROW_REFERENCE.exec(following);
-  if(!ref||/^[ \t]*(?:至|到|[-~–—、]|和|或|及|and\b|to\b)[ \t]*(?:第[ \t]*|row[ \t]+)?\d/i.test(following.slice(ref[0].length)))return;
+  if(!ref||/^[ \t]*(?:至|到|[-~–—、，,/]|和|或|及|and\b|to\b)[ \t]*(?:第[ \t]*|row[ \t]+)?\d/i.test(following.slice(ref[0].length)))return;
   const row=Number(ref[1]??ref[2]);
   if(!Number.isSafeInteger(row)||row>1_048_576)return;
   if(observedWorksheetRow(file,sheet,row,reads))
@@ -122,7 +122,10 @@ function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTr
   if(!syntax)return;
   const text=reference.slice(syntax[0].length);
   const sheet=observedWorksheet(text,file,reads,/^[ \t]*(?:[）)]|第[ \t]*[1-9]\d*[ \t]*行|row[ \t]+[1-9]\d*\b)/i);
-  if(sheet)return sheetRowTarget(sheet,text.slice(sheet.length),file,reads)?.target??sheet;
+  if(sheet){
+    const following=text.slice(sheet.length).replace(/^[ \t]*[）)][ \t]*/u,'');
+    return sheetRowTarget(sheet,following,file,reads)?.target??sheet;
+  }
 }
 
 type ReportInline = Paragraph['children'][number];

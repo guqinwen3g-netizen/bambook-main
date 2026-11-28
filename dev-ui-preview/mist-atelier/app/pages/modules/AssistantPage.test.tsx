@@ -653,18 +653,18 @@ it('restores the request, order and original attachment of a failed task for rev
       conversationId: failure.conversationId,
       instructions: failure.instructions,
       intentRefs: failure.intentRefs,
-      attachmentRefs: [{ taskId: failure.id, fileId: failure.attachments[0].id }],
+      attachmentRefs: [{ taskId: failure.id, fileId: failure.attachments[0].id, preserveScope: true }],
     });
   } finally {
     localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
   }
 });
 
-it('preserves a reused original across reload after a submission is interrupted', async () => {
+it.each(['manual', 'retry'])('preserves a %s original across reload after a submission is interrupted', async reuse => {
   const original = {
     id: '00000000-0000-4000-8000-000000000081',
     identityId: 'personal', executor: 'platform', conversationId: 'c_reload_reused_original',
-    instructions: '首次核对原始资料', state: 'succeeded', result: '原资料已核对', questions: [], waitingProposalIds: [],
+    instructions: '首次核对原始资料', state: reuse==='retry'?'failed':'succeeded', result: '原资料已核对', questions: [], waitingProposalIds: [],
     createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
     attachments:[{id:'00000000-0000-4000-8000-000000000082',name:'original.pdf',size:42}],
   };
@@ -684,13 +684,16 @@ it('preserves a reused original across reload after a submission is interrupted'
   });
   await mount();
   await click('首次核对原始资料');
-  await click('引用附件 original.pdf');
+  await click(reuse==='retry'?'重新提问':'引用附件 original.pdf');
   await question('请继续核对');
   await click('发送');
   expect(posts).toHaveLength(1);
-  expect(posts[0].attachmentRefs).toEqual([{taskId:original.id,fileId:original.attachments[0].id}]);
+  expect(posts[0].attachmentRefs).toEqual([{taskId:original.id,fileId:original.attachments[0].id,
+    ...(reuse==='retry'?{preserveScope:true}:{})}]);
   const savedDraft=JSON.parse(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace')!);
   expect(savedDraft.attachmentRefs).toEqual(posts[0].attachmentRefs);
+  const [[fingerprint]]=JSON.parse(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')!);
+  expect(JSON.parse(fingerprint)[3]).toEqual(posts[0].attachmentRefs);
   expect(host.textContent).toContain('提交结果待核对');
   await act(async()=>root!.unmount());root=undefined;host.remove();
   await mount();

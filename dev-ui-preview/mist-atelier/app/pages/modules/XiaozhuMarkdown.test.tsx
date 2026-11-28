@@ -188,6 +188,22 @@ it('links a verified worksheet row below a workbook heading later in a mixed rep
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('links a verified row immediately after the worksheet closing parenthesis',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const file={id:'quote',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const reads=[{at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:file.id,
+  taskAttachmentObservedSheets:['报价'],taskAttachmentObservedSheetRows:[{sheet:'报价',row:47}]}];
+ const text='quote.xlsx（工作表：报价）第 47 行有报价。quote.xlsx（工作表：报价）第 36 行未核对。quote.xlsx（工作表：报价）第 47 行、第 48 行存在差异。';
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[file]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button[title]')];
+  expect(buttons.map(button=>button.title)).toEqual(['工作表 报价 第 47 行','工作表 报价','工作表 报价']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[file,{sheet:'报价',row:47}],[file,'报价'],[file,'报价']]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet rows and keeps other rows at worksheet level',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

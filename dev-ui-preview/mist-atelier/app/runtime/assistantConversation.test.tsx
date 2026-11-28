@@ -58,7 +58,7 @@ it('restores an inactive retry draft in its own conversation after a reload', as
   await act(async () => {
     view.setQuestion('按复核意见处理原件');
     view.setSelected([source]);
-    view.setAttachmentRefs([attachment]);
+    view.setAttachmentRefs([{...attachment,preserveScope:true}]);
     view.setFiles([new File(['fixture content'], '未上传.pdf', { type: 'application/pdf' })]);
   });
 
@@ -77,7 +77,7 @@ it('restores an inactive retry draft in its own conversation after a reload', as
   expect(view.selected).toEqual([source]);
   expect(view.files).toEqual([]);
   expect(view.attachmentRefs).toEqual([{
-    taskId: attachment.taskId, fileId: attachment.fileId, name: '', size: 0, needsVerification: true,
+    taskId: attachment.taskId, fileId: attachment.fileId, name: '', size: 0, needsVerification: true, preserveScope: true,
   }]);
 });
 

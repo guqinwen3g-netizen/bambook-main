@@ -213,7 +213,7 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,scopeCorrection}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
+        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedFileIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,scopeCorrection}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions,context.attachmentReadScopes);
         if(scopeCorrection){
           const {allowed,...correction}=scopeCorrection;
           const files=context.task.attachments??[];
@@ -263,7 +263,7 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const outsideAttachmentScope=(fileId:string)=>excludedPdfIds?.has(fileId)||!!allowedFiles&&!allowedFiles.has(fileId)
+        const outsideAttachmentScope=(fileId:string)=>excludedFileIds?.has(fileId)||!!allowedFiles&&!allowedFiles.has(fileId)
           ||!!worksheetScope?.workbookIds.includes(fileId)&&fileId!==worksheetScope.fileId
           ||providedOnly&&!context.task.attachments?.some(file=>file.id===fileId);
         const readableAttachments=context.task.attachments?.filter(file=>!outsideAttachmentScope(file.id));
@@ -271,7 +271,7 @@ export class MistPlatformTaskWorker{
         const withinProvidedScope=(plan:PlatformTaskPlan)=>plan.name==='bambook_task'
           ? ['finish','question'].includes(String(plan.arguments.action))
           : plan.name==='bambook_file_text'&&typeof plan.arguments.fileId==='string'&&providedFileIds.has(plan.arguments.fileId);
-        const attachmentSteps=scopedAttachmentTaskSteps(context.steps,pdfRanges,worksheetScope,allowedFiles,excludedPdfIds);
+        const attachmentSteps=scopedAttachmentTaskSteps(context.steps,pdfRanges,worksheetScope,allowedFiles,excludedFileIds);
         const latestProvidedAnswer=providedOnly
           ? context.task.questions?.reduce((latest,question)=>question.answeredAt&&question.answeredAt>latest?question.answeredAt:latest,'')
           : undefined;
@@ -357,7 +357,7 @@ export class MistPlatformTaskWorker{
               phase='model';
               const now=Date.now();
               const businessAt=context.businessAt===undefined?now:Date.parse(context.businessAt);
-              const visual=explicitPdfVisualPages(context.task.instructions,pdfRanges,pdfVisualRanges);
+              const visual=explicitPdfVisualPages(context.task.instructions,pdfRanges,pdfVisualRanges,context.attachmentReadScopes);
               const scans=visual.flatMap(target=>{
                 const candidates=[...readableSteps].reverse().flatMap(step=>{
                   if(step.plan.name!=='bambook_file_text'||step.plan.arguments.fileId!==target.fileId||step.compacted)return [];
@@ -409,7 +409,7 @@ export class MistPlatformTaskWorker{
                   :question===selected?[{...question,question:WORKSHEET_NAME_QUESTION,answer:worksheetScope.worksheet}]:[]);
               }
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
-              if(allowedFiles||excludedPdfIds||pdfRanges.size||worksheetScope?.rows)modelTask.instructions=splitTaskRequest(modelTask.instructions);
+              if(allowedFiles||excludedFileIds||pdfRanges.size||worksheetScope)modelTask.instructions=splitTaskRequest(modelTask.instructions);
               const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'
