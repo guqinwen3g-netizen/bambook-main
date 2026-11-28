@@ -196,17 +196,17 @@ export class MistPlatformTaskWorker{
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
-        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
+        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
         if(pdfScopeConflict){
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
             requestId:'platform-pdf-range-conflict-'+job.taskId,outcome:'failed',result:'PDF 页码范围无效。请注明确切页码或页段后重新提交。',
           });
           return;
         }
-        const question=pdfChoice?.question??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:undefined);
+        const question=pdfChoice?.question??pdfVisualChoice??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:undefined);
         if(question){
           const attempts=pdfChoice?(context.task.questions?.length??0):(context.task.questions?.filter(q=>q.question===question).length??0);
-          const prefix=pdfChoice?'platform-pdf-choice-':'platform-workbook-choice-';
+          const prefix=pdfChoice?'platform-pdf-choice-':pdfVisualChoice?'platform-pdf-visual-choice-':'platform-workbook-choice-';
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
             requestId:prefix+job.taskId+'-'+attempts,question,
           });
@@ -378,7 +378,7 @@ export class MistPlatformTaskWorker{
                 ? '\n本轮消息附有 imageSources 所列图片。编号、颜色或图片文字直接从随附图片核对，并注明图片名称。bambook_file_text 不提取图片文字，请勿对这些图片调用它。仅报告实际看清的内容，看不清则说明。'
                 : '';
               const pdfVisualRule=pdfPageImages.length
-                ? '\npdfPageImages 列出本人指定 PDF 页面中已提供的图像，与原 PDF 页码绑定。只报告能目视辨认的内容，注明来自该 PDF 第几页。区分同页文字层与图像所得，印章、签字、标签等须看清才可按图像报告。看不清时明确说明；两种来源冲突时分别列出实值。不要将图片内容归给其他页或附件。'
+                ? '\npdfPageImages 列出本人指定 PDF 页面中已提供的图像，与原 PDF 页码绑定。本人通过追问缩小范围时，以最新已确认页码为准。只报告能目视辨认的内容，注明来自该 PDF 第几页。区分同页文字层与图像所得，印章、签字、标签等须看清才可按图像报告。看不清时明确说明；两种来源冲突时分别列出实值。不要将图片内容归给其他页或附件。'
                 : '';
               const attachmentAttributionRule = imageSources?.length && attachments?.some(file => !isTaskImage(file.name))
                 ? '\n摘要、明细和未核实项都沿用事实的实际出处。跨附件关系无法核对时，分别写明在哪份附件看到什么、哪份附件缺少依据。不要把只在图片上看到的编号归给 PDF 或表格。'

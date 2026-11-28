@@ -2237,7 +2237,7 @@ export class MistRepository {
     scans:readonly {fileId:string;pages:readonly number[];sha256:string}[]= [],
   ):Promise<Array<{name:string;url:string;pdfPage?:{file:string;page:number}}>> {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
-    const {allowedFiles,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
+    const {allowedFiles,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
     const images=files.flatMap((file,index)=>(!allowedFiles||allowedFiles.has(file.id))&&isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
     const prepared=await Promise.all(images.map(async ({file,name}) => {
       // Check the live original even when a previous model turn rendered the same image.
@@ -2255,7 +2255,7 @@ export class MistRepository {
       }
       return { name, url };
     }));
-    if(!scans.length||pdfChoice||pdfScopeConflict)return prepared;
+    if(!scans.length||pdfChoice||pdfScopeConflict||pdfVisualChoice)return prepared;
     const selected=explicitPdfVisualPages(instructions,pdfRanges,pdfVisualRanges);
     const scanned:Array<{file:MistStoredFile;label:string;page:number;cacheId:string;url:string}>=[];
     for(const scan of scans){
@@ -2286,7 +2286,7 @@ export class MistRepository {
     for(const {file,page} of scanned){
       const stillVisible=current.files.find(item=>item.id===file.id);
       const target=currentPages.find(item=>item.fileId===file.id);
-      if(!stillVisible||!this.sameTaskAttachment(file,stillVisible)||currentScope.pdfChoice||currentScope.pdfScopeConflict
+      if(!stillVisible||!this.sameTaskAttachment(file,stillVisible)||currentScope.pdfChoice||currentScope.pdfScopeConflict||currentScope.pdfVisualChoice
         ||!target?.pages.includes(page)||currentScope.allowedFiles&&!currentScope.allowedFiles.has(file.id))
         fail('FILE_NOT_FOUND','附件不在当前任务内',404);
       if(!verified.has(file.id)){
@@ -2304,8 +2304,8 @@ export class MistRepository {
   async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
-    const {pdfRanges,worksheet:sheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,instructions,questions);
-    if(pdfChoice||pdfScopeConflict||excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
+    const {pdfRanges,worksheet:sheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions);
+    if(pdfChoice||pdfScopeConflict||pdfVisualChoice||excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
     if(sheet?.workbookIds.includes(fileId)&&sheet.fileId!==fileId)
       fail('FILE_TEXT_WORKBOOK_SCOPE','该工作簿未被选中，本任务不读取它的正文',422);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);

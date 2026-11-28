@@ -206,6 +206,76 @@ const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|nev
  * Explicit negatives apply to the entire task attachment set. A page or worksheet limit on
  * its own still allows the task to check other requested sources.
  */
+const PDF_VISUAL_PAGE_LIMIT=3;
+
+function requestedPdfVisualRanges(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>,pdfVisualRanges:ReadonlyMap<string,PdfPageScope>){
+  const request=splitTaskRequest(instructions);
+  if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
+    ||/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request))
+    return new Map<string,PdfPageScope>();
+  return pdfVisualRanges.size?pdfVisualRanges:pdfRanges.size===1?pdfRanges:new Map<string,PdfPageScope>();
+}
+
+function visualPageCount(ranges:ReadonlyMap<string,PdfPageScope>){
+  return [...ranges.values()].reduce((total,scope)=>total+(scope.windows??[scope]).reduce((n,range)=>n+range.to-range.from+1,0),0);
+}
+
+function selectVisualPdfPages(attachments:AgentTaskView['attachments'],instructions:string,questions:readonly AgentTaskQuestion[],
+  pdfRanges:Map<string,PdfPageScope>,pdfVisualRanges:Map<string,PdfPageScope>,
+):{question?:string;excluded:Set<string>}{
+  const requested=requestedPdfVisualRanges(instructions,pdfRanges,pdfVisualRanges),excluded=new Set<string>();
+  if(visualPageCount(requested)<=PDF_VISUAL_PAGE_LIMIT)return {excluded};
+  const labels=taskAttachmentLabels(attachments??[]);
+  const entries=(attachments??[]).flatMap((file,index)=>{
+    const scope=requested.get(file.id);
+    return scope?[{id:file.id,label:labels[index],windows:scope.windows??[scope]}]:[];
+  });
+  const listing=entries.map(entry=>entry.label+' '+entry.windows.map(({from,to})=>from===to?'第 '+from+' 页':'第 '+from+' 至 '+to+' 页').join('、')).join('\n');
+  const question='本轮目视核对最多 3 页。请从下列页码中选择。'+(entries.length===1?'可回复“3、5”。':'请在页码前写文件名，每个文件一行。')+'\n'+listing;
+  const answer=[...questions].reverse().find(item=>item.question===question&&item.answeredAt)?.answer?.trim();
+  if(!answer)return {question,excluded};
+  const chosen=new Map<string,Set<number>>();
+  for(const part of answer.split(/[；;\n]+/).map(value=>value.trim()).filter(Boolean)){
+    const named=entries.find(entry=>part.startsWith(entry.label)&&/^[ \t:：第]/u.test(part.slice(entry.label.length)));
+    const source=named??(entries.length===1?entries[0]:undefined);
+    if(!source)return {question,excluded};
+    const text=named?part.slice(named.label.length).replace(/^[ \t:：]+/,''):part;
+    const pages=chosen.get(source.id)??new Set<number>();
+    for(const piece of text.split(/[、,，和及]+/u).map(value=>value.trim())){
+      const match=/^(?:第[ \t]*)?([1-9]\d{0,6})[ \t]*(?:页)?(?:[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d{0,6})[ \t]*(?:页)?)?$/u.exec(piece);
+      if(!match)return {question,excluded};
+      const first=Number(match[1]),last=Number(match[2]??match[1]);
+      if(last<first||last-first+1>PDF_VISUAL_PAGE_LIMIT)return {question,excluded};
+      for(let page=first;page<=last;page++){
+        if(!source.windows.some(range=>page>=range.from&&page<=range.to))return {question,excluded};
+        pages.add(page);
+      }
+    }
+    chosen.set(source.id,pages);
+  }
+  const count=[...chosen.values()].reduce((sum,pages)=>sum+pages.size,0);
+  if(!count||count>PDF_VISUAL_PAGE_LIMIT)return {question,excluded};
+  pdfVisualRanges.clear();
+  for(const source of entries){
+    const previous=pdfRanges.get(source.id)!;
+    let remainder=[...(previous.windows??[previous])];
+    for(const visual of source.windows){
+      remainder=remainder.flatMap(range=>{
+        if(range.to<visual.from||range.from>visual.to)return [range];
+        return [
+          ...(range.from<visual.from?[{from:range.from,to:visual.from-1}]:[]),
+          ...(range.to>visual.to?[{from:visual.to+1,to:range.to}]:[]),
+        ];
+      });
+    }
+    const keep=[...(chosen.get(source.id)??[])].map(page=>({from:page,to:page}));
+    if(keep.length)pdfVisualRanges.set(source.id,mergePdfRanges(keep));
+    if(remainder.length||keep.length)pdfRanges.set(source.id,mergePdfRanges([...remainder,...keep]));
+    else{pdfRanges.delete(source.id);excluded.add(source.id);}
+  }
+  return {excluded};
+}
+
 export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
   const {pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,confirmedPdfChoices}=pdfSelection(attachments,instructions,questions);
   const worksheet = requestedWorkbookWorksheet(attachments,instructions,questions);
@@ -214,10 +284,12 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
   const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
-  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>()};
+  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>(),pdfVisualChoice:undefined};
+  const visualSelection=pdfChoice||pdfScopeConflict?undefined:selectVisualPdfPages(attachments,instructions,questions,pdfRanges,pdfVisualRanges);
+  const pdfVisualChoice=visualSelection?.question;
   const scopedNames=new Set(attachments.filter(file=>pdfRanges.has(file.id)).map(file=>file.name));
   const siblings=attachments.filter(file=>!pdfRanges.has(file.id)&&(scopedNames.has(file.name)||confirmedPdfChoices.has(file.id)));
-  if(!othersExcluded&&!siblings.length)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict};
+  if(!othersExcluded&&!siblings.length&&!visualSelection?.excluded.size)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice};
 
   const allowed=new Set(pdfRanges.keys());
   if(worksheet?.fileId)allowed.add(worksheet.fileId);
@@ -229,21 +301,18 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
     }
   }
   if(!othersExcluded){
-    const excludedSiblings=siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id);
-    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
+    const excludedSiblings=[...siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id),...(visualSelection?.excluded??[])];
+    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
   }
-  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,allowedFiles:allowed};
+  for(const id of visualSelection?.excluded??[])allowed.delete(id);
+  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,allowedFiles:allowed};
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */
 export function explicitPdfVisualPages(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>,pdfVisualRanges:ReadonlyMap<string,PdfPageScope>){
-  const request=splitTaskRequest(instructions);
-  if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
-    ||/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request))return [];
-  const requested=pdfVisualRanges.size?pdfVisualRanges:pdfRanges.size===1?pdfRanges:new Map<string,PdfPageScope>();
+  const requested=requestedPdfVisualRanges(instructions,pdfRanges,pdfVisualRanges);
+  if(visualPageCount(requested)>PDF_VISUAL_PAGE_LIMIT)return [];
   const windows=[...requested].map(([fileId,range])=>({fileId,ranges:range.windows??[range]}));
-  const count=windows.reduce((total,{ranges})=>total+ranges.reduce((n,range)=>n+range.to-range.from+1,0),0);
-  if(count>3)return [];
   return windows.map(({fileId,ranges})=>({fileId,
     pages:ranges.flatMap(range=>Array.from({length:range.to-range.from+1},(_,index)=>range.from+index)),
   }));

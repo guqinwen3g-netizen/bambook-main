@@ -483,7 +483,8 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
     // a fresh read, and existing source or approval obligations stay in force.
     // A deterministic PDF choice binds the prefetch in the next lease. It does not
     // require an unrelated whole-file or business read before a read-only report.
-    const choosingPdf=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions).pdfChoice?.question===question.question;
+    const attachmentScope=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
+    const choosingPdf=(attachmentScope.pdfChoice?.question??attachmentScope.pdfVisualChoice)===question.question;
     const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
       ||c.sources.length||c.intentRefs?.length||!choosingPdf&&c.attachments?.length||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};

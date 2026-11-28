@@ -1245,6 +1245,38 @@ it('keeps visual PDF pages bound to their own files alongside a text-only source
  expect(text).not.toContain('BETA-OUTSIDE');
 });
 
+it('asks for a bounded visual PDF selection and keeps the same task after a valid answer',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对第 3 页和第 5 页。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对多张扫描页',
+   instructions:'请目视核对 scan.pdf 第 2 至 5 页。'}))
+  .attach('attachments',pdf('OUTSIDE-PAGE-6',6,false,[2,3,4,5]),'scan.pdf').expect(201)).body.item;
+ await f.drain();
+ const pending=await f.current(task.id);
+ expect(pending.state).toBe('waiting_human');
+ expect(pending.questions.at(-1).question).toContain('最多 3 页');
+ expect(complete).not.toHaveBeenCalled();
+ const answer=async(current:any,value:string)=>{
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:current.version,questionId:current.questions.at(-1).id,answer:value,
+  }).expect(200);
+  await f.drain();
+  return f.current(task.id);
+ };
+ const retry=await answer(pending,'3、99');
+ expect(retry.state).toBe('waiting_human');
+ expect(retry.questions.at(-1).id).not.toBe(pending.questions.at(-1).id);
+ expect(complete).not.toHaveBeenCalled();
+ expect(await answer(retry,'第 3 页和第 5 页')).toMatchObject({id:task.id,state:'succeeded'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input=complete.mock.calls[0][0],text=input.messages[0].content;
+ expect(input.images?.map(image=>image.name)).toEqual(['scan.pdf 第 3 页','scan.pdf 第 5 页']);
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ expect(facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text')
+  .map((step:{result:{range:{pageFrom:number;pageTo:number}}})=>[step.result.range.pageFrom,step.result.range.pageTo])).toEqual([[3,3],[5,5]]);
+});
+
 it('reads the short tail of each PDF before asking the model to prepare the report', async () => {
  const complete = vi.fn(async (_input: LlmCompletionInput) =>
    tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已整理附件核对报告' }));

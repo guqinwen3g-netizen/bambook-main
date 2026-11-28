@@ -38,6 +38,20 @@ it('keeps mixed-source reading and ignores exclusion text in prior conversation 
   expect(scope.worksheet).toMatchObject({fileId:'xlsx',worksheet:'确认报价'});
 });
 
+it('narrows a multi-file visual choice without altering a separately requested text-only PDF',()=>{
+ const files=['alpha','beta','note'].map(id=>({id,name:id+'.pdf',mimeType:'application/pdf',size:1}));
+ const request='请目视核对 alpha.pdf 第 1 至 3 页。请目视核对 beta.pdf 第 2 至 3 页。请只读取 note.pdf 第 1 页的文字。';
+ const question=requestedTaskAttachmentScope(files,request).pdfVisualChoice;
+ expect(question).toContain('每个文件一行');
+ const response=(answer:string)=>requestedTaskAttachmentScope(files,request,[{id:'q',question:question!,answer,askedAt:'',answeredAt:'now'}]);
+ expect(response('note.pdf 第 1 页').pdfVisualChoice).toBe(question);
+ const selected=response('beta.pdf 第 2 页');
+ expect(selected.pdfVisualChoice).toBeUndefined();
+ expect([...selected.pdfVisualRanges]).toEqual([['beta',{from:2,to:2}]]);
+ expect([...selected.pdfRanges]).toEqual([['beta',{from:2,to:2}],['note',{from:1,to:1}]]);
+ expect([...selected.excludedPdfIds!]).toEqual(['alpha']);
+});
+
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
   expect(parsePlatformTaskPlan('{"name":"bambook_query","arguments":{"type":"email"}}')).toEqual({name:'bambook_query',arguments:{type:'email'}});
   expect(()=>parsePlatformTaskPlan('{"name":"bambook_workspaces","arguments":{}}')).toThrow();
