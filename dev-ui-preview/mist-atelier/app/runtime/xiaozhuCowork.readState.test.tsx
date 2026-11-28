@@ -183,6 +183,56 @@ it('rechecks opened completed reports on focus and restores access from a fresh 
  expect(channel.tasks.find(item=>item.id==='task')?.result).toBe('已重新读取原件');
 });
 
+it('applies a completed permission batch while another batch is still pending',async()=>{
+ const conversationId='c_long_access';
+ const reports=Array.from({length:31},(_,index)=>({...task,id:'long-report-'+index,conversationId,result:'报告 '+index}));
+ const denied=reports.at(-1)!;
+ const slow=Promise.withResolvers<{restrictedIds:string[]}>();
+ const requests:string[][]=[];
+ api.mockImplementation(async(url:string)=>{
+  if(url.includes('/personal-agent/task-access?')){
+   const ids=new URL(url,'https://example.test').searchParams.get('taskIds')!.split(',');
+   requests.push(ids);
+   return ids.includes(denied.id)?{restrictedIds:[denied.id]}:slow.promise;
+  }
+  if(url.endsWith('/agent-tasks'))return {items:reports,nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId={conversationId}/>));
+ expect(requests.map(ids=>ids.length)).toEqual([30,1]);
+ expect(channel.tasks.find(item=>item.id===denied.id)).toMatchObject({contentRestricted:true,result:''});
+ expect(channel.tasks.find(item=>item.id===reports[0].id)?.result).toBe(reports[0].result);
+ await act(async()=>slow.resolve({restrictedIds:[]}));
+ expect(channel.tasks.find(item=>item.id===denied.id)).toMatchObject({contentRestricted:true,result:''});
+});
+
+it('does not restore reports after another permission batch denies the workspace',async()=>{
+ const conversationId='c_access_denied';
+ const reports=Array.from({length:31},(_,index)=>({...task,id:'denied-'+index,conversationId}));
+ const denied=Promise.withResolvers<{restrictedIds:string[]}>();
+ let mask=true,fullReads=0;
+ api.mockImplementation(async(url:string)=>{
+  if(url.includes('/personal-agent/task-access?')){
+   const ids=new URL(url,'https://example.test').searchParams.get('taskIds')!.split(',');
+   if(mask)return {restrictedIds:ids};
+   return ids.length===30?{restrictedIds:[]}:denied.promise;
+  }
+  if(url.endsWith('/agent-tasks'))return {items:reports,nextCursor:null};
+  if(url.includes('/agent-tasks/'))fullReads++;
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId={conversationId}/>));
+ expect(channel.tasks.every(item=>item.contentRestricted)).toBe(true);
+ mask=false;
+ await act(async()=>window.dispatchEvent(new Event('focus')));
+ expect(fullReads).toBe(0);
+ await act(async()=>denied.reject(Object.assign(new Error('Denied'),{status:403})));
+ expect(channel.tasks.every(item=>item.contentRestricted&&!item.result)).toBe(true);
+ expect(fullReads).toBe(0);
+});
+
 it('restores each authorized report immediately and rotates reports not yet rechecked',async()=>{
  const conversationId='c_restore_many';
  const reports=Array.from({length:6},(_,index)=>({...task,id:'report-'+index,conversationId,result:'原报告 '+index}));

@@ -352,42 +352,60 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const controller = new AbortController();
       request = controller;
       const current = () => request === controller && live.current === scope;
-      const restricted = new Set(restrictedReports.current);
+      const authority = deniedHistory.current;
+      const authorized = () => current() && deniedHistory.current === authority;
       const readable = new Set<string>();
-      try {
-        await withRequestDeadline(controller, TASK_READ_TIMEOUT_MS, '任务暂时无法核对', async signal => {
-          for (let offset = 0; offset < ids.length; offset += TASK_ACCESS_BATCH_LIMIT) {
-            signal.throwIfAborted();
-            const batch = ids.slice(offset, offset + TASK_ACCESS_BATCH_LIMIT);
-            const result = await mistApiRequest(base + '/personal-agent/task-access?taskIds=' + encodeURIComponent(batch.join(',')),
-              { signal, cache: 'no-store' }) as { restrictedIds?: string[] };
-            if (!Array.isArray(result.restrictedIds) || result.restrictedIds.some(id => !batch.includes(id))) continue;
-            for (const id of batch) if (!result.restrictedIds.includes(id)) readable.add(id);
-            for (const id of result.restrictedIds) restricted.add(id);
-          }
-        });
-      } catch (error) {
-        if ([401, 403, 404].includes(Number((error as {status?: number})?.status))) {
-          for (const id of ids) restricted.add(id);
-          readable.clear();
-        }
-      }
-      if (!current()) return;
-      const prior = restrictedReports.current;
-      if (restricted.size !== prior.size) {
+      let offset = 0;
+      let denied = false;
+      const maskReports = (ids: readonly string[]) => {
+        const before = restrictedReports.current;
+        const restricted = new Set([...before, ...ids]);
+        if (restricted.size === before.size) return;
         restrictedReports.current = restricted;
         setReportAccess({ scope, restricted });
         setTasks(old => old.map(task => restricted.has(task.id) && !task.contentRestricted ? restrictReport(task) : task));
+      };
+      const checkBatches = async () => {
+        while (authorized() && !denied && offset < ids.length) {
+          const batch = ids.slice(offset, offset + TASK_ACCESS_BATCH_LIMIT);
+          offset += TASK_ACCESS_BATCH_LIMIT;
+          const batchController = new AbortController();
+          const abort = () => batchController.abort(controller.signal.reason);
+          controller.signal.addEventListener('abort', abort, { once:true });
+          try {
+            const result = await withRequestDeadline(batchController, TASK_READ_TIMEOUT_MS, '任务暂时无法核对', signal =>
+              mistApiRequest(base + '/personal-agent/task-access?taskIds=' + encodeURIComponent(batch.join(',')),
+                { signal, cache:'no-store' }) as Promise<{ restrictedIds?: string[] }>);
+            if (!authorized() || denied) return;
+            if (!Array.isArray(result.restrictedIds) || result.restrictedIds.some(id => !batch.includes(id))) continue;
+            for (const id of batch) if (!result.restrictedIds.includes(id)) readable.add(id);
+            maskReports(result.restrictedIds);
+          } catch (error) {
+            if (!authorized()) return;
+            if ([401, 403, 404].includes(Number((error as {status?:number})?.status))) {
+              denied = true;
+              readable.clear();
+              maskReports(ids);
+            }
+          } finally {
+            controller.signal.removeEventListener('abort', abort);
+          }
+        }
+      };
+      // A delayed batch must not postpone confirmed revocations from another batch.
+      await Promise.all([checkBatches(), checkBatches()]);
+      if (!authorized() || denied) {
+        if (current()) request = undefined;
+        return;
       }
       // Restore each report only after its own fresh, authorized full read.
-      const authority = deniedHistory.current;
       const toRestore = currentTasks.current.filter(task => readable.has(task.id) && task.contentRestricted)
         .sort((left,right) => (restoreOrder.get(left.id) ?? 0) - (restoreOrder.get(right.id) ?? 0))
         .slice(0, 4);
       await Promise.allSettled(toRestore.map(async task => {
         restoreOrder.set(task.id, ++attempt);
         const next = await readCoworkTask(base, task.id, controller.signal);
-        if (!current() || deniedHistory.current !== authority || next.contentRestricted) return;
+        if (!authorized() || next.contentRestricted) return;
         const previous = currentTasks.current.find(item => item.id === task.id);
         if (!previous?.contentRestricted || mergeTaskUpdate(previous, next) === previous) return;
         const remaining = new Set(restrictedReports.current);
