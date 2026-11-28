@@ -165,7 +165,7 @@
 |---|---|---|
 | `InModalContext` | True inside a Dialog or Drawer: page-level feedback there must stay in the overlay, not go to the shell behind the scrim. | — |
 | `useInModal` | — | `()` |
-| `useModalFocus` | 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 | `(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement \| null>)` |
+| `useModalFocus` | 顶层浮层独占交互，关闭后回到触发器；允许自身的 portal 菜单。 | `(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement \| null>)` |
 | `Portal` | 浮层统一挂到 .mist-root 内（保证 token 生效），没有则挂 body。 | `({ children }: { children: React.ReactNode })` |
 | `DialogProps` | — | `type DialogProps = { open: boolean; onClose: () => void; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon; tone?: 'accent' \| 'bad' \| 'warn' \| 'ok'; children?: React.ReactNode; footer?: React.ReactNode; width?: number };` |
 | `Dialog` | 居中弹窗：只用于需要打断的确认（删除、提交不可撤回操作）。普通编辑用 Drawer 或页内表单。 | `({ open, onClose, title, description, icon, tone = 'accent', children, footer, width }: DialogProps)` |
