@@ -1011,6 +1011,55 @@ it('does not consume a restored receipt when the capability read denies access o
  }finally{savePendingSubmissions(scope,new Map());}
 });
 
+it.each(['create','answer'])('aborts pending %s responses when history authorization is denied',async(action)=>{
+ const scope='account:workspace',store='denied-control';
+ const controls=new Map();
+ const waiting={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请补交原件。'}]};
+ const settled={...waiting,version:3,state:'succeeded',result:'旧提交结果'};
+ let denied=false,requestSignal:AbortSignal|undefined,finish:(value:unknown)=>void=()=>{};
+ const notified=vi.fn();
+ window.addEventListener('bambook:agent-task-update',notified);
+ function Page(){channel=useXiaozhuCowork('workspace',scope,true,undefined,undefined,controls,store);return <div/>;}
+ const file=new File(['abc'],'quote.txt',{type:'text/plain'});
+ Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode('abc').buffer});
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks')){
+    if(denied)throw Object.assign(new Error('权限不足'),{status:403});
+    return {items:[waiting],nextCursor:null};
+   }
+   if(init?.method==='POST'){
+    requestSignal=init.signal??undefined;
+    return new Promise(resolve=>{finish=resolve;});
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<Page/>));
+  let submitted:Promise<unknown>|undefined;
+  await act(async()=>{
+   submitted=action==='create'?channel.send('先前的任务'):channel.answer(channel.tasks[0],'q1','补充原件',[file]);
+  });
+  await vi.waitFor(()=>expect(requestSignal).toBeDefined());
+  denied=true;
+  await act(async()=>channel.reload());
+  expect(requestSignal?.aborted).toBe(true);
+  await act(async()=>{finish({item:settled});await submitted;});
+  expect(channel.error).toBe('权限不足');
+  expect(channel.tasks).toEqual([]);
+  expect(channel.busy).toBe(false);
+  expect(channel.controls).toEqual({});
+  expect(notified).not.toHaveBeenCalled();
+  if(action==='answer')expect(readTaskControls(store).size).toBe(1);
+  else expect(sessionStorage.getItem('mist.xiaozhu.submissions:'+scope)).toContain('先前的任务');
+  expect(api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
+ }finally{
+  window.removeEventListener('bambook:agent-task-update',notified);
+  savePendingSubmissions(scope,new Map());saveTaskControls(store,new Map());vi.unstubAllGlobals();
+ }
+});
+
 it('keeps an old receipt from restoring a report after history returns a permission denial',async()=>{
  const scope='account:workspace',conversationId='c_old_receipt';
  const recovered={...task,id:'old-receipt',conversationId};
