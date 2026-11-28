@@ -18,7 +18,7 @@
  *      env 提供方始终排在最后兜底（见 platformProviders.ts）。
  */
 
-/** A provider-supplied lower bound for the next automatic attempt. */
+/** The earliest safe time for the next automatic attempt on a busy provider. */
 export class LlmProviderRetryError extends Error {
   constructor(message: string, readonly retryNotBefore: number) {
     super(message);
@@ -29,20 +29,18 @@ export class LlmProviderRetryError extends Error {
 export class LlmProviderCooldownError extends LlmProviderRetryError {}
 
 const MAX_PROVIDER_COOLDOWNS = 32;
+const TASK_BUSY_RETRY_MS = 20_000;
 
-function responseRetryNotBefore(response: Response, now: number) {
+function honorRetryAfter(response: Response, missingRetryAfterMs?: number): void {
   if (response.status !== 429 && response.status !== 503) return;
-  const value = response.headers?.get('retry-after')?.trim();
-  if (!value) return;
+  const now = Date.now();
+  const value = response.headers?.get('retry-after')?.trim() ?? '';
   const at = /^\d+$/.test(value) ? Math.min(Number.MAX_SAFE_INTEGER, now + Number(value) * 1000)
     : /^[A-Za-z]{3}/.test(value) ? Date.parse(value) : NaN;
-  return Number.isSafeInteger(at) && at > now ? at : undefined;
-}
-
-function honorRetryAfter(response: Response): void {
-  const retryNotBefore = responseRetryNotBefore(response, Date.now());
+  const retryNotBefore = Number.isSafeInteger(at) && at > now ? at
+    : missingRetryAfterMs === undefined ? undefined : now + missingRetryAfterMs;
   if (retryNotBefore === undefined) return;
-  // The headers already establish the retry time. A slow error body must not delay it.
+  // A busy response already establishes a retry time without waiting for its error body.
   void response.body?.cancel().catch(() => {});
   throw new LlmProviderRetryError(`Model API failed with ${response.status}`, retryNotBefore);
 }
@@ -204,7 +202,7 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       const providerId = step.kind === 'subscription' ? 'chatgpt-subscription' : step.provider.id;
       try {
         const reply = step.kind === 'api'
-          ? await completeWithProvider(step.provider, attempt)
+          ? await completeWithProvider(step.provider, attempt, profile === 'agent-task' ? TASK_BUSY_RETRY_MS : undefined)
           : await subscriptions.complete(PLATFORM_SUBJECT, attempt, { reasoning: profile && platformReasoning(profile) });
         input.signal.throwIfAborted();
         try {
@@ -246,7 +244,7 @@ export function testLlmProvider(provider: LlmProviderConfig, signal: AbortSignal
   return completeWithProvider(provider, { systemPrompt: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], temperature: 0, signal });
 }
 
-async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput): Promise<string> {
+async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput, missingRetryAfterMs?: number): Promise<string> {
   const model = input.model || provider.model;
   // Ark requires temperature=1.0 for Kimi K3.1 Pro on its standard API and Agent Plan.
   const arkKimi = (model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3')
@@ -263,7 +261,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
       return await streamChatCompletion({
         baseUrl: provider.baseUrl, apiKey: provider.apiKey, model, messages,
         temperature,
-        signal: input.signal, onDelta: input.onDelta,
+        signal: input.signal, onDelta: input.onDelta, missingRetryAfterMs,
       });
     } catch (streamErr: any) {
       if (streamErr?.name === 'AbortError' || streamErr instanceof LlmProviderRetryError) throw streamErr;
@@ -297,7 +295,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    honorRetryAfter(res);
+    honorRetryAfter(res, missingRetryAfterMs);
     const data: any = await res.json().catch(() => ({}));
     const message = data?.error?.message || data?.message || `Model API failed with ${res.status}`;
     throw new Error(message);
@@ -315,6 +313,7 @@ async function streamChatCompletion(params: {
   messages: Array<{ role: string; content: string }>;
   temperature: number; signal: AbortSignal;
   onDelta: (chunk: string) => void;
+  missingRetryAfterMs?: number;
 }): Promise<string> {
   const res = await aiFetch(`${params.baseUrl}/chat/completions`, {
     method: 'POST', signal: params.signal,
@@ -322,7 +321,7 @@ async function streamChatCompletion(params: {
     body: JSON.stringify({ model: params.model, temperature: params.temperature, stream: true, messages: params.messages }),
   });
   if (!res.ok) {
-    honorRetryAfter(res);
+    honorRetryAfter(res, params.missingRetryAfterMs);
     throw new Error(`Model API stream failed with ${res.status}`);
   }
   if (!res.body) throw new Error('Model API stream returned no body');
