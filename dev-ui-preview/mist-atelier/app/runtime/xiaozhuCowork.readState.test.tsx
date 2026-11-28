@@ -628,7 +628,7 @@ it.each([true,false])('checks the exact uploaded answer receipt after a lost res
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
   await act(async()=>root!.render(<View conversationId={original.conversationId}/>));
   await act(async()=>{await channel.answer(channel.tasks[0], 'q1','附件见本轮。',[file]);});
-  expect(api.mock.calls.filter(([url])=>url.includes('/answer/receipt/'))).toHaveLength(1);
+  expect(api.mock.calls.filter(([url])=>url.includes('/answer/receipt/'))).toHaveLength(committed?1:2);
   expect(api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
   expect(channel.tasks[0].attachments).toEqual([committed?supplied:other]);
   expect(notified).toHaveBeenCalledTimes(committed?1:0);
@@ -665,6 +665,48 @@ it('keeps the same upload request id on a byte-identical retry and changes it fo
   expect(requests).toHaveLength(3);
   expect(requests[0]).toBe(requests[1]);
   expect(requests[2]).not.toBe(requests[0]);
+ }finally{vi.unstubAllGlobals();}
+});
+
+it.each([[false,503],[true,503],[false,404]] as const)(
+ 'finds the same uploaded answer when status comes first %s and the first receipt returns %s',async(statusFirst,firstStatus)=>{
+ const original={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请补交原件。'}]};
+ const file=new File(['abc'],'quote.txt',{type:'text/plain'});
+ Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode('abc').buffer});
+ const attachment={id:'original-answer-file',name:file.name,mimeType:file.type,size:file.size};
+ const completed={...original,state:'succeeded',version:3,canControl:false,attachments:[attachment],questions:[
+  {...original.questions[0],answer:'补充原件',answeredAt:task.updatedAt,attachmentIds:[attachment.id]},
+ ]};
+ let postId='',receiptReads=0,rejectPost:(error:unknown)=>void=()=>{};
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks'))return {items:[original],nextCursor:null};
+   if(url.endsWith('/answer')&&init?.method==='POST'){
+    postId=JSON.parse(String((init.body as FormData).get('answer'))).requestId;
+    return new Promise((_,reject)=>{rejectPost=reject;});
+   }
+   if(url.includes('/answer/receipt/')){
+    expect(url.endsWith(postId)).toBe(true);
+    if(++receiptReads===1)throw Object.assign(new Error('暂时无法核对'),{status:firstStatus});
+    return {item:completed,attachmentIds:[attachment.id]};
+   }
+   if(url.endsWith('/agent-tasks/task'))return {item:firstStatus===404&&receiptReads>0?completed:original};
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  let submitted:Promise<void>|undefined;
+  await act(async()=>{submitted=channel.answer(channel.tasks[0],'q1','补充原件',[file]);});
+  await vi.waitFor(()=>expect(postId).not.toBe(''));
+  if(statusFirst)await act(async()=>channel.applyTaskUpdate(completed as any));
+  expect(receiptReads).toBe(0);
+  await act(async()=>{rejectPost(new Error('连接中断'));await submitted;});
+  if(!statusFirst&&firstStatus!==404)await act(async()=>channel.applyTaskUpdate(completed as any));
+  expect(receiptReads).toBe(2);
+  expect(channel.controls.task?.attachmentAnswerRecovered).toBe(true);
+  expect(channel.tasks[0].attachments).toEqual([attachment]);
+  expect(api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
  }finally{vi.unstubAllGlobals();}
 });
 

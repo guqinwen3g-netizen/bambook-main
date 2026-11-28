@@ -225,17 +225,18 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const controlRequests = React.useRef(new Map<string,AbortController>());
   const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   const controlKeys=savedControls??localControls;
-  const restoredAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
-  const abortRestoredAnswerChecks=React.useCallback(()=>{
-    for(const controller of restoredAnswerChecks.values())controller?.abort();
-    restoredAnswerChecks.clear();
-  },[restoredAnswerChecks]);
+  const attachmentAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
+  const abortAttachmentAnswerChecks=React.useCallback(()=>{
+    for(const controller of attachmentAnswerChecks.values())controller?.abort();
+    attachmentAnswerChecks.clear();
+  },[attachmentAnswerChecks]);
   React.useEffect(()=>{
     let changed=false;
     for(const task of tasks){
       const pending=controlKeys.get(task.id);
-      const restoredUpload=pending?.action==='answer'&&pending.hasAttachments&&pending.restoredFromStorage;
-      if(pending&&(task.contentRestricted||!restoredUpload&&(task.version>pending.version||task.canControl===false))) {
+      const awaitingAttachmentReceipt=pending?.action==='answer'&&pending.hasAttachments
+        &&(pending.restoredFromStorage||task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt));
+      if(pending&&(task.contentRestricted||!awaitingAttachmentReceipt&&(task.version>pending.version||task.canControl===false))) {
         controlKeys.delete(task.id);
         changed=true;
       }
@@ -243,17 +244,17 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
   },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
-  const recoverRestoredAnswers=React.useCallback(()=>{
+  const recoverAttachmentAnswers=React.useCallback(()=>{
     if(!base||!enabled||!navigator.onLine)return;
     for(const task of currentTasks.current){
       const pending=controlKeys.get(task.id);
-      if(pending?.action!=='answer'||!pending.hasAttachments||!pending.restoredFromStorage||task.contentRestricted
+      if(pending?.action!=='answer'||!pending.hasAttachments||task.contentRestricted||controlRequests.current.has(task.id)
         ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt)
-        ||restoredAnswerChecks.has(pending.requestId))continue;
+        ||attachmentAnswerChecks.has(pending.requestId))continue;
       const controller=new AbortController(),authority=deniedHistory.current;
-      restoredAnswerChecks.set(pending.requestId,controller);
+      attachmentAnswerChecks.set(pending.requestId,controller);
       const current=()=>navigator.onLine&&!controller.signal.aborted&&deniedHistory.current===authority
-        &&live.current===scope&&restoredAnswerChecks.get(pending.requestId)===controller
+        &&live.current===scope&&attachmentAnswerChecks.get(pending.requestId)===controller
         &&controlKeys.get(task.id)===pending&&currentTasks.current.some(item=>item.id===task.id&&!item.contentRestricted);
       const forget=()=>{
         controlKeys.delete(task.id);
@@ -268,24 +269,26 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         // An answered question with no receipt for this request belongs to a different submission.
         if(current()&&(error as {status?:number})?.status===404)forget();
       }).finally(()=>{
-        if(restoredAnswerChecks.get(pending.requestId)===controller)restoredAnswerChecks.set(pending.requestId,null);
+        if(attachmentAnswerChecks.get(pending.requestId)!==controller)return;
+        if(controlKeys.get(task.id)===pending)attachmentAnswerChecks.set(pending.requestId,null);
+        else attachmentAnswerChecks.delete(pending.requestId);
       });
     }
-  },[base,enabled,scope,controlKeys,controlStorageScope,restoredAnswerChecks]);
-  React.useEffect(()=>{recoverRestoredAnswers();},[tasks,recoverRestoredAnswers]);
+  },[base,enabled,scope,controlKeys,controlStorageScope,attachmentAnswerChecks]);
+  React.useEffect(()=>{recoverAttachmentAnswers();},[tasks,recoverAttachmentAnswers]);
   React.useEffect(()=>{
     const reconnect=()=>{
-      for(const [id,controller] of restoredAnswerChecks)if(!controller)restoredAnswerChecks.delete(id);
-      recoverRestoredAnswers();
+      for(const [id,controller] of attachmentAnswerChecks)if(!controller)attachmentAnswerChecks.delete(id);
+      recoverAttachmentAnswers();
     };
-    window.addEventListener('offline',abortRestoredAnswerChecks);
+    window.addEventListener('offline',abortAttachmentAnswerChecks);
     window.addEventListener('online',reconnect);
     return()=>{
-      window.removeEventListener('offline',abortRestoredAnswerChecks);
+      window.removeEventListener('offline',abortAttachmentAnswerChecks);
       window.removeEventListener('online',reconnect);
-      abortRestoredAnswerChecks();
+      abortAttachmentAnswerChecks();
     };
-  },[abortRestoredAnswerChecks,recoverRestoredAnswers,restoredAnswerChecks]);
+  },[abortAttachmentAnswerChecks,recoverAttachmentAnswers,attachmentAnswerChecks]);
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
@@ -349,10 +352,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const clearDeniedHistory = React.useCallback(()=>{
     deniedHistory.current++;trackedOrigin.current=undefined;
     receiptReconnectPending.current=false;receiptRead.current?.abort();
-    abortRestoredAnswerChecks();abortOlderRead();moreRecovery.current=undefined;
+    abortAttachmentAnswerChecks();abortOlderRead();moreRecovery.current=undefined;
     setLoadingMore(false);setMoreError('');
     setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
-  },[abortOlderRead,abortRestoredAnswerChecks]);
+  },[abortOlderRead,abortAttachmentAnswerChecks]);
   const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
     historyRecovery.current=mode==='reconnect'?'pending':undefined;
@@ -987,6 +990,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     };
     const checkTask = async (request:TaskControlRequest) => {
       const denial = deniedHistory.current;
+      const answerWasKnown=request.action==='answer'&&currentTasks.current.find(item=>item.id===task.id)?.questions
+        ?.some(question=>question.id===request.questionId&&question.answeredAt);
       if(request.action==='answer'&&request.hasAttachments){
         try{
           const item=await readAttachmentAnswerReceipt(base,task.id,request,controller);
@@ -1012,7 +1017,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (confirmed) {
         accept(latest);
         error = '';
-      } else applyTaskUpdate(latest);
+      } else {
+        if(request.action==='answer'&&request.hasAttachments&&answerWasKnown&&answer!==undefined&&controlKeys.get(task.id)===request){
+          // A 404 observed after the question was answered belongs to another submission.
+          controlKeys.delete(task.id);
+          if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+        }
+        applyTaskUpdate(latest);
+      }
     };
     try {
       if (checkOnly) {
@@ -1057,6 +1069,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (isCurrent()) {
         controlRequests.current.delete(task.id);
         setControls(old=>({...old,[task.id]:{busy:false,error}}));
+        if(submitted?.action==='answer'&&submitted.hasAttachments)recoverAttachmentAnswers();
       }
     }
   };
