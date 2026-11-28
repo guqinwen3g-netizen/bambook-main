@@ -246,6 +246,22 @@ it('links the observed row when a report bullet repeats its annotated worksheet 
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it.each(['报价 第 47 行','报价第47行'])('keeps a worksheet-level link when the repeated name is actually %s',async longer=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const file={id:'quote',name:'sparse.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const reads=[{at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:file.id,
+  taskAttachmentObservedSheets:['报价',longer],taskAttachmentObservedSheetRows:[{sheet:'报价',row:47}]}];
+ const text=`- **sparse.xlsx（工作表：报价）**：工作表：${longer}，可核对数据见原表。`;
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[file]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button[title]')];
+  expect(buttons.map(button=>button.title)).toEqual(['工作表 报价']);
+  await act(async()=>buttons[0].click());
+  expect(preview).toHaveBeenCalledExactlyOnceWith(file,'报价');
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet rows and keeps other rows at worksheet level',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

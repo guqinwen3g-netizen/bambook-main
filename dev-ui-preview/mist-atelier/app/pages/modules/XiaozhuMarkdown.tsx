@@ -130,9 +130,10 @@ function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTr
       const repeated=following.slice(body[0].length);
       const repeatedPrefix=WORKSHEET_REFERENCE.exec(repeated);
       if(repeatedPrefix){
-        const repeatedSheet=repeated.slice(repeatedPrefix[0].length);
-        if(!repeatedSheet.startsWith(sheet))return sheet;
-        return sheetRowTarget(sheet,repeatedSheet.slice(sheet.length),file,reads)?.target??sheet;
+        const labeled=repeated.slice(repeatedPrefix[0].length);
+        const repeatedSheet=observedWorksheet(labeled,file,reads,/^(?:$|[ \t\p{P}]|第[ \t]*[1-9]\d*[ \t]*行|row[ \t]+[1-9]\d*\b)/iu);
+        if(repeatedSheet!==sheet)return sheet;
+        return sheetRowTarget(sheet,labeled.slice(sheet.length),file,reads)?.target??sheet;
       }
     }
     return sheetRowTarget(sheet,following,file,reads)?.target??sheet;
