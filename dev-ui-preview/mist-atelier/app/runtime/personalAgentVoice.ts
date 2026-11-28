@@ -12,6 +12,7 @@ const VOICE_SETUP_TIMEOUT_MS = 10_000;
 // Allow the server's 15-second handshake deadline to report its own result.
 const VOICE_READY_TIMEOUT_MS = 18_000;
 const VOICE_TIMEOUT = '语音连接超时，请重试';
+const VOICE_DISCONNECTED = '语音已断开，已交办事项继续执行';
 /** A call stays with its original account, company and conversation. */
 export function usePersonalAgentVoice(scope: string, workspaceId: string | undefined, onTask: (task: AgentTaskView) => void, conversationId?: string) {
   const callScope = JSON.stringify([scope, conversationId]);
@@ -50,7 +51,9 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
     if (taskId) selection.current = { taskId, questionId };
     let ticketBinding: VoiceTaskBinding | undefined;
     try {
+      if (!navigator.onLine) throw new Error('请联网后重试语音');
       if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext || !window.AudioWorkletNode) throw new Error('当前设备不支持实时语音');
+      window.addEventListener('offline', () => fail(VOICE_DISCONNECTED), { signal: setup.signal });
       // Unlock playback within the original click, before any network or permission wait.
       const player = RealtimePcmPlayer.create(24000);
       r.player = player;
@@ -125,7 +128,7 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
         else if (message.type === 'error') fail(message.message || '语音未完成，请重试', message.code);
       };
       socket.onerror = () => fail('语音连接失败，请重试');
-      socket.onclose = () => fail('语音已断开，已交办事项继续执行');
+      socket.onclose = () => fail(VOICE_DISCONNECTED);
     } catch (e) {
       if (current() && ticketBinding?.questionId && selection.current === ticketBinding && (e as {code?:string})?.code === 'AGENT_TASK_CHANGED') {
         selection.current = undefined;
