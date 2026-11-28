@@ -121,7 +121,7 @@ it('shows which current draft lines will be removed before listing replacement l
  const kept={id:'line-kept',orderId:order.id,name:'样衣',style:'SIM-KEEP',qty:10,unit:'件',price:1.95};
  const removed={...kept,id:'line-remove',name:'量产外套',style:'SIM-REMOVE',qty:24};
  state.orderLines=[kept,removed] as typeof state.orderLines;
- proposal.command.payload.lines=[kept];
+ proposal.command.payload.lines=[{...kept,price:2.15}];
  const changes=proposalFieldChanges(proposal.command,true,state);
  expect(changes.rows).toContainEqual(expect.objectContaining({field:'拟移除条目',value:'SIM-REMOVE · 量产外套 · 24 件'}));
  expect(changes.rows.findIndex(row=>row.field==='拟移除条目')).toBeLessThan(changes.rows.findIndex(row=>row.path==='lines.1.id'));
@@ -162,6 +162,44 @@ it('uses the active order currency when the new draft omits a currency change',(
  expect(rows).toContainEqual(expect.objectContaining({field:'当前订单金额',value:'140.00 EUR'}));
  expect(rows).toContainEqual(expect.objectContaining({field:'拟改订单金额',value:'120.00 USD'}));
  expect(rows.find(row=>row.path==='lines.1.price')?.value).toBe('12.00 USD');
+});
+
+it('keeps a long replacement review focused on the one removed line',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.currency='USD';
+ state.orderLines=Array.from({length:35},(_,index)=>({
+  id:'line-'+index,orderId:order.id,name:'模拟外套',style:'SIM-'+index,qty:10,unit:'件',price:12,img:'coat',made:0,qc:0,
+  fulfillmentMode:'cmt',cmtIncludedItems:[],
+ }));
+ proposal.command.payload.lines=state.orderLines.slice(0,-1).map(({orderId,made,qc,img,...line})=>line);
+ const {rows,omitted}=proposalFieldChanges(proposal.command,true,state);
+ expect(rows.filter(row=>row.path.startsWith('lines.'))).toEqual([
+  expect.objectContaining({field:'拟移除条目',value:'SIM-34 · 模拟外套 · 10 件'}),
+ ]);
+ expect(omitted).toBe(0);
+ const host=document.createElement('div'),root=createRoot(host);
+ document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  expect(getConfirm(host).disabled).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+it('keeps reordered and structurally changed retained lines in the review',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.currency='USD';
+ const first={id:'line-a',orderId:order.id,name:'模拟外套',nameEn:'Coat',style:'SIM-A',qty:10,unit:'件',price:12,img:'coat'};
+ const second={...first,id:'line-b',style:'SIM-B'};
+ state.orderLines=[first,second] as typeof state.orderLines;
+ proposal.command.payload.lines=[second,first];
+ let rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows.filter(row=>row.path.endsWith('.id')).map(row=>row.value)).toEqual(['SIM-B','SIM-A']);
+ const {nameEn,...withoutEnglishName}=first;
+ proposal.command.payload.lines=[withoutEnglishName,second];
+ rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows.filter(row=>row.path.endsWith('.id')).map(row=>row.value)).toEqual(['SIM-A']);
+ expect(rows.find(row=>row.path==='lines.1.nameEn')?.value).toBe('未填写');
 });
 
 it('blocks an order draft replacement when all its line changes cannot be reviewed',()=>{

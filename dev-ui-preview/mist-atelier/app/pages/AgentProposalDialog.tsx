@@ -73,6 +73,19 @@ function quotationSourceMissing(command:AgentProposal['command'],state?:MistStat
     ||Array.isArray(input.lines)&&input.lines.some(line=>line&&typeof line==='object'&&(missing(line.productId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)));
 }
 const ORDER_LABEL:Record<string,string>={type:'订单类型',season:'季节 / 批次',due:'交期',name:'品名',nameEn:'英文品名',style:'款号 / 品号',unit:'单位',governance:'合同',poNumber:'PO / 合同号',confirmationFileIds:'客户依据',internalPurpose:'内部用途',receiver:'接收团队 / 负责人',paymentMethod:'付款方式',depositPercent:'定金比例（%）',preShipmentPercent:'出运前累计收款（%）',paymentNote:'付款条款',incoterm:'贸易术语',deliveryPlace:'交付地点',overPercent:'溢装上限（%）',shortPercent:'短装下限（%）',quantityBasis:'数量口径',quantityBasisNote:'数量依据',breakdown:'规格明细',composition:'成分',width:'门幅（cm）',weight:'克重（g/m²）',rows:'颜色明细',color:'颜色 / 色号',sizes:'尺码',quantities:'各码数量',sourceProductId:'来源产品',sourceDevId:'来源开发案',sourceVersionId:'来源版本',sourceQuotationId:'来源报价',sourceQuotationLineId:'来源报价条目',internalSupply:'内部供料',receiverId:'接收负责人',markupPercent:'内部加价（%）'};
+const orderLineReviewFields={
+  id:true,name:true,nameEn:true,style:true,img:true,qty:true,unit:true,price:true,
+  fulfillmentMode:true,cmtIncludedItems:true,sourceProductId:true,sourceDevId:true,sourceVersionId:true,breakdown:true,
+} satisfies Record<keyof OrderGovernanceLine,true>;
+const orderLineReviewKeys=Object.keys(orderLineReviewFields) as Array<keyof OrderGovernanceLine>;
+const ignoredOrderLineFields=new Set(['orderId','made','qc']);
+function isUnchangedOrderLine(proposed:OrderGovernanceLine,current:OrderGovernanceLine){
+  if(Object.keys(proposed).some(key=>!Object.hasOwn(orderLineReviewFields,key)&&!ignoredOrderLineFields.has(key)))return false;
+  return orderLineReviewKeys.every(key=>{
+    const value=key==='img'?(proposed.img??current.img):proposed[key];
+    return value===current[key]||stableJson(value)===stableJson(current[key]);
+  });
+}
 function orderPriceBasis(state:MistState,order:MistState['orders'][number]){
   const lines=(rows:readonly OrderGovernanceLine[])=>rows.map(({id,name,style,qty,unit,price,breakdown})=>[id,name,style,qty,unit,price,breakdown]);
   const draft=order.governance?.changeDraft;
@@ -120,7 +133,7 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
   const contractPatch=command.payload.orderPatch as {currency?:unknown}|undefined;
   const proposedCurrency=typeof contractPatch?.currency==='string'?contractPatch.currency.trim().toUpperCase():currentOrder?.currency;
   const activeLines=currentOrder&&state?state.orderLines.filter(line=>line.orderId===currentOrder.id):[];
-  const currentLines=currentChange?.lines??activeLines;
+  const currentLines:readonly OrderGovernanceLine[]=currentChange?.lines??activeLines;
   const proposedLines=orderContract&&Array.isArray(command.payload.lines)?command.payload.lines:undefined;
   if(orderCreate){
     const lines=command.payload.lines,contract=command.payload.governance as Partial<OrderGovernanceInput>|undefined;
@@ -190,6 +203,24 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
         );
         return;
       }
+    }
+    if(path==='lines'&&currentOrder&&proposedLines?.length){
+      const original=new Map(currentLines.map(line=>[line.id,line] as const));
+      const nextIds=new Set(proposedLines.map(line=>line?.id));
+      const previousOrder=currentLines.filter(line=>nextIds.has(line.id)).map(line=>line.id);
+      const nextOrder=proposedLines.filter(line=>original.has(line?.id)).map(line=>line.id);
+      const reordered=stableJson(previousOrder)!==stableJson(nextOrder);
+      proposedLines.forEach((line,index)=>{
+        const previous=original.get(line?.id);
+        if(previous&&!reordered&&isUnchangedOrderLine(line,previous))return;
+        const review=previous?{
+          ...line,
+          ...(previous.nameEn&&line.nameEn==null?{nameEn:''}:{}),
+          ...(previous.breakdown&&line.breakdown==null?{breakdown:''}:{}),
+        }:line;
+        walk(review,`lines.${index+1}`);
+      });
+      return;
     }
     if (value && typeof value === 'object') {
       const entries = Array.isArray(value) ? value.map((child, i) => [String(i + 1), child] as const) : Object.entries(value);
