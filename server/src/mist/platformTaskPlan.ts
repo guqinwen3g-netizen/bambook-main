@@ -354,10 +354,10 @@ export function attachmentScopeCorrectionRanges(input:string,prompt:AttachmentSc
   const text=input.normalize('NFKC').trim().replace(/[。.]$/u,'').trim();
   if(/^(?:按原范围|use the original range)$/iu.test(text))return prompt.allowed;
   const pdf=prompt.kind==='pdf';
-  const rangeText=pdf?text.replace(/^pages?\s+/iu,'').replace(/\s*页$/u,'')
-    :text.replace(/^rows?\s+/iu,'').replace(/\s*行$/u,'');
+  const rangeText=pdf?text.replace(/^pages?\s+/iu,'').replace(/\s*页(?=\s*(?:[,、和与及至到–—-]|$))/gu,'')
+    :text.replace(/^rows?\s+/iu,'').replace(/\s*行(?=\s*(?:[,、和与及至到–—-]|$))/gu,'');
   const ranges:PdfPageRange[]=[];
-  for(const item of rangeText.split(/\s*[,、]\s*/u)){
+  for(const item of rangeText.split(/\s*[,、和与及]\s*/u)){
     const match=/^(?:第\s*)?([1-9]\d*)(?:\s*(?:至|到|to|[-–—])\s*(?:第\s*)?([1-9]\d*))?$/iu.exec(item);
     if(!match)return;
     const from=Number(match[1]),to=Number(match[2]??match[1]);

@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{attachmentScopeCorrectionRanges,compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 import {composeTaskInstructions} from '../shared/mistTaskHistoryText';
 
@@ -252,6 +252,14 @@ it('intersects an Excel row scope from the answer with the original scope',()=>{
   answer:'请只读取 quote.xlsx 的工作表「报价」第 45 至第 47 行。'};
  expect(requestedTaskAttachmentScope([file],'请只读取 quote.xlsx 的工作表「报价」第 23 至第 46 行。',[answered]).worksheet)
   .toMatchObject({fileId:file.id,worksheet:'报价',rows:[{from:45,to:46}]});
+});
+it('accepts common page and row phrasing within the matching bounded range',()=>{
+ const prompt={sourceQuestionId:'answer',fileId:'file',kind:'pdf' as const,allowed:[{from:2,to:4},{from:6,to:6}]};
+ expect(attachmentScopeCorrectionRanges('第 2 页至第 4 页、 第 6 页',prompt))
+  .toEqual([{from:2,to:4},{from:6,to:6}]);
+ expect(attachmentScopeCorrectionRanges('第 2 页至第 6 页',prompt)).toBeUndefined();
+ expect(attachmentScopeCorrectionRanges('第 2 行至第 4 行',prompt)).toBeUndefined();
+ expect(attachmentScopeCorrectionRanges('第 2 行至第 4 行',{...prompt,kind:'worksheet'})).toEqual([{from:2,to:4}]);
 });
 it('preserves the valid PDF range when correcting an Excel range in the same answer',()=>{
  const pdf={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200};
