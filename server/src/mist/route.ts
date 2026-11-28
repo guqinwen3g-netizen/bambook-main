@@ -13,7 +13,7 @@ import { MistPrivateFiles, MIST_FILE_MAX_BYTES } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { MistApiError, fail } from './errors';
 import { assertCurrentAccount } from './authority';
-import {getMistAssistantStatus,runMistAssistant} from './assistant';
+import {checkMistAssistantHistory,getMistAssistantStatus,runMistAssistant} from './assistant';
 import { analyzeEmail } from './mail/intelligence';
 import {runQuoteCostAdvisor} from './quoteCostAdvisor';
 import { hasScope } from '../auth/permissionService';
@@ -246,6 +246,11 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/agent-conversations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listConversations(actor(req),req.params.id));}));
   router.put('/workspaces/:id/agent-conversations/:conversationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveConversation(actor(req),req.params.id,req.params.conversationId,exactBody(req.body,['title','hidden']))});}));
   router.get('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAutomations(actor(req),req.params.id));}));
+  router.get('/workspaces/:id/agent-automations/receipt/:requestId',run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    exactBody(req.query,[]);
+    res.json({item:await repository.getAutomationCreationReceipt(actor(req),req.params.id,req.params.requestId)});
+  }));
   router.post('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.saveAutomation(actor(req),req.params.id,undefined,exactBody(req.body,['requestId','name','trigger','time','instructions','enabled']))});}));
   router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled','expectedVersion']))});}));
   router.patch('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
@@ -270,7 +275,32 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.post('/workspaces/:id/agent-tasks/:taskId/claim',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.claimAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','workerId']),delegation.makeTaskCredential));}));
   router.post('/workspaces/:id/agent-tasks/:taskId/issue',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.issueAgentTaskControl(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']),delegation.makeTaskControl));}));
   for(const action of ['pause','resume'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.changeAgentTask(actor(req),req.params.id,req.params.taskId,action,exactBody(req.body,['requestId','version']))});}));
-  router.post('/workspaces/:id/agent-tasks/:taskId/answer',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.answerAgentTaskQuestion(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version','questionId','answer']))});}));
+  router.post('/workspaces/:id/agent-tasks/:taskId/answer',(req:Request,res:Response,next:NextFunction)=>{
+    if(!req.is('multipart/form-data'))return next();
+    void repository.authorizeTaskAnswerUpload(actor(req),req.params.id,req.params.taskId).then(()=>taskUpload(req,res,error=>{
+      if(error){publicError(res,new MistApiError('INVALID_UPLOAD','最多 6 个附件，单个不超过 8 MiB',400));return;}
+      next();
+    })).catch(error=>publicError(res,error));
+  },run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    const files=Array.isArray(req.files)?req.files:[];
+    let body=req.body;
+    if(req.is('multipart/form-data')){
+      const form=exactBody(req.body,['answer']);
+      if(typeof form.answer!=='string'||!files.length)fail('INVALID_UPLOAD','请求缺少答复或附件',400);
+      try{body=JSON.parse(form.answer as string);}catch{fail('INVALID_INPUT','补充资料请求无效',400);}
+    }
+    const answer=exactBody(body,['requestId','version','questionId','answer']);
+    const attachments=files.map(file=>({bytes:file.buffer,name:file.originalname,mimeType:file.mimetype,multipartFilename:true}));
+    const item=attachments.length
+      ?await repository.answerAgentTaskQuestion(actor(req),req.params.id,req.params.taskId,answer,attachments)
+      :await repository.answerAgentTaskQuestion(actor(req),req.params.id,req.params.taskId,answer);
+    res.json({item});
+  }));
+  router.get('/workspaces/:id/agent-tasks/:taskId/answer/receipt/:requestId',run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    res.json(await repository.getTaskAnswerAttachmentReceipt(actor(req),req.params.id,req.params.taskId,req.params.requestId));
+  }));
   router.post('/workspaces/:id/agent-tasks/:taskId/cancel',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');await repository.cancelAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']));res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId)});}));
   for(const action of ['heartbeat','checkpoint','wait','finish'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{if(!isAgentActor(actor(req))||(actor(req) as any).agentTaskLease?.taskId!==req.params.taskId)fail('FORBIDDEN','请使用本任务执行连接',403);const body=exactBody(req.body,action==='heartbeat'?['sequence']:action==='checkpoint'?['requestId','summary']:action==='wait'?['requestId','summary','delaySeconds','until','condition']:['requestId','outcome','result']);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.agentTaskRuntime(actor(req),req.params.id,action,body)});}));
   // ChatGPT 订阅连接：凭据只留在服务器，响应只含连接状态与设备验证码。
@@ -471,7 +501,12 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.post('/workspaces/:id/restore',run(async(req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision']);res.json(await repository.changeArchive(actor(req),req.params.id,body as any,'restore'));}));
   router.post('/workspaces/:id/members',run(async(req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','action','account']);res.json(await repository.changeMember(actor(req),req.params.id,body as any));}));
   router.get('/workspaces/:id/assistant/status',run(async(req,res)=>{await repository.getForAssistant(actor(req),req.params.id);res.json(getMistAssistantStatus());}));
-  router.post('/workspaces/:id/assistant',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.json(await runMistAssistant({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
+  router.post('/workspaces/:id/assistant/history-access',run(async(req,res)=>{
+    const context=await repository.getForAssistant(actor(req),req.params.id);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json(checkMistAssistantHistory({...context,body:exactBody(req.body,['tokens'])}));
+  }));
+  router.post('/workspaces/:id/assistant',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.setHeader('Cache-Control','private, no-store');res.json(await runMistAssistant({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.post('/workspaces/:id/quotation-cost-advisor',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.setHeader('Cache-Control','private, no-store');res.json(await runQuoteCostAdvisor({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.get('/workspaces/:id/team-scopes', run(async (req, res) => { res.json(await repository.teamScopes(actor(req), req.params.id)); }));
   router.get('/workspaces/:id/internal-receivers', run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); res.json(await repository.internalReceivers(actor(req), req.params.id)); }));

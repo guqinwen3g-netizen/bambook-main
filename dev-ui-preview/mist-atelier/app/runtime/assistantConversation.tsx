@@ -1,12 +1,16 @@
 import React from 'react';
-import type { TaskAttachment, TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
+import { readTaskControls } from './xiaozhuControlRequests';
+import { TASK_ATTACHMENT_COUNT, type TaskAttachment, type TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 
 export type AssistantReply = {
   role: 'user' | 'assistant'; content: string;
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
-  revision?: number; truncated?: boolean;
+  revision?: number; truncated?: boolean; contextToken?: string;
 };
-export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'>;
+export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
+type TaskAnswerDraft = {taskId:string;questionId:string;text:string;files:readonly File[]};
+const emptyAnswerFiles:readonly File[]=[];
+export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
@@ -16,18 +20,35 @@ type ComposerDraft = {
 type Conversation = ComposerDraft & {
   messages: AssistantReply[];
   inactiveDrafts: Map<string, ComposerDraft>;
+  answerDrafts: Map<string,TaskAnswerDraft>;
+  workLogExpanded: Map<string,boolean>;
+  readOnlyQuestion: string;
+  readOnlySelected: ComposerDraft['selected'];
 };
 const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [], attachmentRefs: [] });
-const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map() });
+const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map(), workLogExpanded:new Map(), readOnlyQuestion:'', readOnlySelected:[] });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
-function load(scope: string): Conversation {
-  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { ...empty(), question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+const attachmentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function storedAttachmentRefs(value: unknown): AssistantAttachmentRef[] {
+  if (!Array.isArray(value) || value.length > TASK_ATTACHMENT_COUNT) return [];
+  const fileIds = new Set<string>();
+  return value.flatMap(ref => {
+    const { taskId, fileId } = ref ?? {};
+    if (typeof taskId !== 'string' || !attachmentId.test(taskId) || typeof fileId !== 'string' || !attachmentId.test(fileId)
+      || fileIds.has(fileId)) return [];
+    fileIds.add(fileId);
+    return [{ taskId, fileId, name: '', size: 0, needsVerification: true as const }];
+  });
 }
-function save(scope: string, { question, selected, messages }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages })); } catch { /* storage full or blocked: keep in memory only */ } }
+function load(scope: string): Conversation {
+  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { ...empty(), question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], attachmentRefs: storedAttachmentRefs(v.attachmentRefs), messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+}
+function save(scope: string, { question, selected, messages, attachmentRefs }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages, attachmentRefs: attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})) })); } catch { /* storage full or blocked: keep in memory only */ } }
 
-function useConversationState(scope: string) {
+function useConversationState(scope: string, controlStorageScope?: string) {
   const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
+  const taskControlRequests=React.useMemo(()=>readTaskControls(controlStorageScope??''),[scope,controlStorageScope]);
   React.useEffect(() => { if (entry.scope === scope) save(scope, entry.value); }, [entry, scope]);
   const live = React.useRef(scope);
   live.current = scope;
@@ -42,14 +63,32 @@ function useConversationState(scope: string) {
       const value = previous.scope === scope ? previous.value : empty();
       const next = typeof action === 'function'
         ? (action as (old: Conversation[K]) => Conversation[K])(value[key]) : action;
+      if (next === value[key]) return previous;
       return { scope, value: { ...value, [key]: key === 'messages' ? (next as AssistantReply[]).slice(-40) : next } };
     });
   }, [scope]);
   const setQuestion = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(value => update('question', value), [update]);
   const setSelected = React.useCallback<React.Dispatch<React.SetStateAction<Conversation['selected']>>>(value => update('selected', value), [update]);
+  const setReadOnlyQuestion = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(value => update('readOnlyQuestion', value), [update]);
+  const setReadOnlySelected = React.useCallback<React.Dispatch<React.SetStateAction<Conversation['selected']>>>(value => update('readOnlySelected', value), [update]);
   const setMessages = React.useCallback<React.Dispatch<React.SetStateAction<AssistantReply[]>>>(value => update('messages', value), [update]);
   const setFiles = React.useCallback<React.Dispatch<React.SetStateAction<File[]>>>(value => update('files', value), [update]);
   const setAttachmentRefs = React.useCallback<React.Dispatch<React.SetStateAction<AssistantAttachmentRef[]>>>(value => update('attachmentRefs', value), [update]);
+  const updateAnswerDraft = React.useCallback((taskId:string,questionId:string,patch:Partial<Pick<TaskAnswerDraft,'text'|'files'>>)=>update('answerDrafts',old=>{
+    const key=taskAnswerDraftKey(taskId,questionId), next=new Map(old);
+    const draft={taskId,questionId,text:'',files:emptyAnswerFiles,...old.get(key),...patch};
+    if(draft.text||draft.files.length)next.set(key,draft);else next.delete(key);
+    return next;
+  }),[update]);
+  const setAnswerDraft=React.useCallback((taskId:string,questionId:string,text:string)=>updateAnswerDraft(taskId,questionId,{text}),[updateAnswerDraft]);
+  const setAnswerFiles=React.useCallback((taskId:string,questionId:string,files:readonly File[])=>updateAnswerDraft(taskId,questionId,{files}),[updateAnswerDraft]);
+  const setWorkLogExpanded = React.useCallback((taskId: string, expanded: boolean) =>
+    update('workLogExpanded', previous => previous.get(taskId) === expanded
+      ? previous : new Map(previous).set(taskId, expanded)), [update]);
+  const discardAnswerDrafts = React.useCallback((discard:(draft:TaskAnswerDraft)=>boolean)=>update('answerDrafts',old=>{
+    const retained=[...old].filter(([,draft])=>!discard(draft));
+    return retained.length===old.size?old:new Map(retained);
+  }),[update]);
   const switchDraft = React.useCallback((from: string, to: string) => {
     if (from === to || live.current !== scope) return;
     setEntry(previous => {
@@ -73,14 +112,17 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft };
+  const value=entry.scope===scope?entry.value:fresh;
+  const readAnswerFiles=React.useCallback((taskId:string,questionId:string)=>
+    value.answerDrafts.get(taskAnswerDraftKey(taskId,questionId))?.files??emptyAnswerFiles,[value.answerDrafts]);
+  return { scope, ...value, setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,readAnswerFiles,setAnswerFiles,discardAnswerDrafts,taskControlRequests,controlStorageScope,setWorkLogExpanded,setReadOnlyQuestion,setReadOnlySelected };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);
 
-/** Session/company memory only. It survives source navigation, not logout, company change or reload. */
-export function AssistantConversationProvider({ scope, children }: { scope: string; children: React.ReactNode }) {
-  const value = useConversationState(scope);
+/** The active draft is tab/account/company scoped. Local file bytes and drafts in inactive threads stay in memory. */
+export function AssistantConversationProvider({ scope, controlStorageScope, children }: { scope: string; controlStorageScope?: string; children: React.ReactNode }) {
+  const value = useConversationState(scope,controlStorageScope);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
