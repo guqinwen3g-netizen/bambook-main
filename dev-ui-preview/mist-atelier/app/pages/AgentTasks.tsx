@@ -85,11 +85,16 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const loadedPages=React.useRef(1);
  const [connectionError,setConnectionError]=React.useState('');
  const detailAbort=React.useRef<AbortController|null>(null),historyAbort=React.useRef<AbortController|null>(null);
- const readDetailHistory=React.useCallback(async(id:string,options:{
-  cursor?:string|null;refresh?:boolean;onDenied?:(error:unknown)=>boolean;
- }={})=>{
-  const {cursor,refresh,onDenied}=options;
-  if(refresh&&historyAbort.current)return;
+ const historyRefreshPending=React.useRef(false);
+ const readDetailHistory=React.useCallback(async function readHistory(id:string,options:{
+  cursor?:string|null;refresh?:boolean;afterStateChange?:boolean;onDenied?:(error:unknown)=>boolean;
+ }={}){
+  const {cursor,refresh,afterStateChange,onDenied}=options;
+  if(refresh&&historyAbort.current){
+   if(afterStateChange)historyRefreshPending.current=true;
+   return;
+  }
+  historyRefreshPending.current=false;
   const epoch=detailGeneration.current,abort=new AbortController();
   historyAbort.current?.abort();historyAbort.current=abort;setHistoryLoading(true);setHistoryError(null);
   const current=()=>alive.current&&epoch===detailGeneration.current&&historyAbort.current===abort;
@@ -110,10 +115,15 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   }catch(error){
    if(current()&&!onDenied?.(error))setHistoryError({message:error instanceof Error?error.message:'任务记录读取失败',cursor});
   }finally{
-   if(current()){historyAbort.current=null;setHistoryLoading(false);}
+   if(current()){
+    historyAbort.current=null;
+    setHistoryLoading(false);
+    // The current response may have been generated before the new task state was observed.
+    if(historyRefreshPending.current)void readHistory(id,{refresh:true,onDenied});
+   }
   }
  },[base]);
- const readDetail=React.useCallback(async(id:string,opening=false,refreshHistory=true)=>{
+ const readDetail=React.useCallback(async(id:string,opening=false)=>{
   if(detailAbort.current&&!opening)return;
   const epoch=detailGeneration.current,abort=new AbortController();detailAbort.current=abort;
   const current=()=>alive.current&&epoch===detailGeneration.current&&detailAbort.current===abort;
@@ -131,7 +141,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    if(previous?.id===id&&item.version<previous.version)return;
    if(contentRestricted(item))clearDetailActions();
    setCurrentDetail(item);setDetailError('');setDetailNeedsRead(false);
-   if(refreshHistory&&previous?.id===id&&previous.state!==item.state)void readDetailHistory(id,{refresh:true});
+   if(previous?.id===id&&previous.state!==item.state)void readDetailHistory(id,{refresh:true,afterStateChange:true});
    setPage(page=>({...page,items:page.items.map(row=>row.id===id&&row.version<=item.version?item:row)}));
    if(!previous||previous.id!==id||previous.version!==item.version||previous.updatedAt!==item.updatedAt
     ||contentRestricted(previous)!==contentRestricted(item))onTaskUpdateRef.current?.(item);
@@ -227,11 +237,10 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    if(connectionsPending){setIdentities([]);setConnectionError('连接读取超时');}
    if(capabilitiesPending)setPlatformAvailable(false);
   });
-  const selectedRead=selected?readDetail(selected,false,false).then(()=>{
-   if(current()&&selectedGeneration===detailGeneration.current&&detailRef.current?.id===selected)
-    return readDetailHistory(selected,{refresh:true,onDenied:error=>current()&&deny(error)});
+  const historyRead=selected?readDetailHistory(selected,{refresh:true,
+   onDenied:error=>current()&&detailRef.current?.id===selected&&deny(error),
   }):null;
-  await Promise.all([listRead,auxiliaryRead,selectedRead]);
+  await Promise.all([listRead,auxiliaryRead,historyRead,selected?readDetail(selected):null]);
  },[base,workspaceId,page.nextCursor,readDetail,readDetailHistory]);
  const currentLoad=React.useRef(load);currentLoad.current=load;
  React.useEffect(()=>{

@@ -374,6 +374,46 @@ it('refreshes the open task and its history even after it leaves the first page'
  act(paint);await flush();await click(getByText(host,'核对邮件'));advanced=true;await click(getByRole(host,'button',{name:'刷新'}));
  expect(getByText(document.body,'当前检查点')).toBeTruthy();expect(getByText(document.body,'保存检查点')).toBeTruthy();expect(getByText(document.body,'执行中')).toBeTruthy();
 });
+it('refreshes the open history even when the selected detail request hangs',async()=>{
+ const paused={...row(),state:'paused'};
+ let refreshing=false;
+ seam.api.mockImplementation((url:string)=>{
+  if(url.endsWith('/task'))return refreshing?new Promise(()=>{}):Promise.resolve({item:paused});
+  if(url.endsWith('/history'))return Promise.resolve({items:refreshing?[{action:'resume',version:4,at:'2026-11-01T00:01:00Z',actorName:'顾言'}]:[],nextCursor:null});
+  return Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:{items:[paused],nextCursor:null});
+ });
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ refreshing=true;
+ await click(getByRole(host,'button',{name:'刷新'}));
+ const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+ expect(dialog.querySelector('.mist-drawer-body')?.textContent).toContain('继续任务');
+ expect(getByText(dialog,'已暂停')).toBeTruthy();
+});
+
+it('rechecks history if the current read started before a task state transition',async()=>{
+ let update=false,releaseHistory:((value:unknown)=>void)|undefined;
+ const running={...row(),executor:'platform',state:'running'};
+ const finished={action:'finished',version:4,at:'2026-11-01T00:01:00Z',actorName:'顾言'};
+ seam.api.mockImplementation((url:string)=>{
+  if(url.endsWith('/task'))return Promise.resolve({item:update?{...running,state:'succeeded',version:4,result:'核对报告'}:running});
+  if(url.endsWith('/history')){
+   if(!update)return Promise.resolve({items:[],nextCursor:null});
+   if(!releaseHistory)return new Promise(resolve=>{releaseHistory=resolve;});
+   return Promise.resolve({items:[finished],nextCursor:null});
+  }
+  return Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:{items:[running],nextCursor:null});
+ });
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ update=true;
+ await click(getByRole(host,'button',{name:'刷新'}));
+ const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+ expect(getByText(dialog,'核对报告')).toBeTruthy();
+ expect(releaseHistory).toBeTypeOf('function');
+ await act(async()=>releaseHistory?.({items:[],nextCursor:null}));
+ await flush();
+ expect(dialog.textContent?.match(/执行结束/g)).toHaveLength(2);
+});
+
 it('loads the finish event as the active task reaches its report, before the list poll',async()=>{
  vi.useFakeTimers();
  vi.spyOn(document,'hidden','get').mockReturnValue(false);
