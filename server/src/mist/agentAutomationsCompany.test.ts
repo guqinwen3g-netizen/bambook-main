@@ -41,6 +41,19 @@ it('halts with a reason when the owner can no longer act, and never runs for the
   expect((await repo.dueAutomations(10)).jobs).toEqual([]);
 });
 
+it('requires current company and assistant access to read an original automation receipt', async () => {
+  const requestId = randomUUID();
+  const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, {
+    requestId, name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办',
+  });
+  expect(await repo.getAutomationCreationReceipt(clerk(), workspaceId, requestId)).toEqual(saved);
+  auth.users.get('clerk')!.permissions = ['orders:read'];
+  await expect(repo.getAutomationCreationReceipt(clerk(), workspaceId, requestId)).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+  auth.users.get('clerk')!.permissions.push('ai:chat');
+  await expect(repo.getAutomationCreationReceipt({ ...clerk(), companyId: randomUUID() }, workspaceId, requestId))
+    .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+});
+
 it('reaches later companies beyond the first 50 enabled rules and keeps the original run after restart', async () => {
   const firstCompanyActor = clerk();
   for (const userId of ['clerk', 'second', 'third']) {
