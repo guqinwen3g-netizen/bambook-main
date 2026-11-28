@@ -770,6 +770,39 @@ it('retains the original submission key when checking finds no receipt and the u
  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
 });
 
+it('does not reopen an old original preview after report access is restored',async()=>{
+ const id='00000000-0000-4000-8000-000000000071',file={id:'00000000-0000-4000-8000-000000000072',name:'验货报告.pdf',size:42,mimeType:'application/pdf'};
+ const task={id,identityId:'personal',executor:'platform',conversationId:'c_preview_access',instructions:'核对验货原件',
+  state:'succeeded',result:'已核对 验货报告.pdf。',questions:[],waitingProposalIds:[],
+  createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:01:00Z',attachments:[file]};
+ let restricted=false;
+ mock.fetch.mockResolvedValue(response({configured:true}));
+ mock.workspace.readTaskAttachment=vi.fn(()=>new Promise<Blob>(()=>{}));
+ mock.api.mockImplementation(async(url:string)=>{
+  if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+  if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+  if(url.includes('/personal-agent/task-access?'))return {restrictedIds:restricted?[id]:[]};
+  if(url.endsWith('/agent-tasks/'+id))return {item:task};
+  return {items:url.endsWith('/agent-tasks')?[task]:[],nextCursor:null};
+ });
+ const viewer=()=>document.querySelector('[data-file-preview="'+file.id+'"]');
+ const focus=()=>act(async()=>window.dispatchEvent(new Event('focus')));
+ await mount();
+ await click('核对验货原件');
+ await click(file.name);
+ expect(viewer()).toBeTruthy();
+ restricted=true;await focus();
+ expect(viewer()).toBeNull();
+ expect(button(file.name)).toBeUndefined();
+ restricted=false;await focus();
+ expect(button(file.name)).toBeTruthy();
+ expect(viewer()).toBeNull();
+ expect(mock.workspace.readTaskAttachment).toHaveBeenCalledOnce();
+ await click(file.name);
+ expect(viewer()).toBeTruthy();
+ expect(mock.workspace.readTaskAttachment).toHaveBeenCalledTimes(2);
+});
+
 it.each([true,false])('finds and downloads an attached original with model availability %s', async available => {
   const original = {
     id: '00000000-0000-4000-8000-000000000041',
