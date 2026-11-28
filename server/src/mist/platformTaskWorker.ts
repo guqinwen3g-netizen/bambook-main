@@ -10,7 +10,7 @@ import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./a
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
-import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,shortDisjointPdfContinuationPlan,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskContext,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
+import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedTaskAttachmentScope,explicitPdfVisualPage,scopedAttachmentTaskSteps,shortDisjointPdfContinuationPlan,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskContext,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead,taskIntentReadTargets}from'./agentTaskIntentRefs';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 
@@ -284,8 +284,17 @@ export class MistPlatformTaskWorker{
               phase='model';
               const now=Date.now();
               const businessAt=context.businessAt===undefined?now:Date.parse(context.businessAt);
-              const images=readableAttachments?.some(file=>isTaskImage(file.name))?await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages):undefined;
+              const visualPage=explicitPdfVisualPage(context.task.instructions,pdfRanges);
+              const visualStep=visualPage&&[...readableSteps].reverse().find(item=>item.plan.name==='bambook_file_text'
+                &&item.plan.arguments.fileId===visualPage.fileId&&!item.compacted&&item.result!==undefined);
+              const read=(visualStep||undefined)?.result as {kind?:string;sha256?:string;pagesWithoutText?:number[];range?:{pageFrom?:number;pageTo?:number}}|undefined;
+              const scan=visualPage&&read?.kind==='pdf'&&read?.sha256&&read.range?.pageFrom===visualPage.page
+                &&read.range.pageTo===visualPage.page&&read.pagesWithoutText?.includes(visualPage.page)
+                ? {...visualPage,sha256:read.sha256}:undefined;
+              const images=scan||readableAttachments?.some(file=>isTaskImage(file.name))
+                ? await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages,scan):undefined;
               const imageSources=images?.map(image=>image.name);
+              const pdfPageImage=images?.find(image=>image.pdfPage)?.pdfPage;
               const attachmentHandles=platformTaskAttachmentHandles(context.task.attachments);
               const attachmentRules=attachmentHandles.size ? '\n本任务附件用 task.attachments 中的简短 id，例如 attachment_1。调用 bambook_file_text 时把对应附件的简短 id 原样填入 fileId；续读保留同一简短 id，不猜原件编号或借用其他附件的编号。PDF 的 pdfTextByPage 逐页对应原件；引用正文的明确单页时，以其中对应文字为准，文件名或 reportLabel 紧接“第 N 页”（英文 page N）。只有页段时，不推断段落属于哪一页。pagesWithoutText 只用于说明哪些页无可提取文字。fileText 回执的 pageScopeStart 和 pageScopeLimit 表示本人明确限定的 PDF 页码边界；pageScopeWindows 列出不连续的指定范围。只核实实际返回正文的页，范围之外不请求读取。 Excel 引用已读取的具体工作表时，在文件名或 reportLabel 后紧接“（工作表：名称）”，名称使用该次读取的 observedSheets 原文。只有名称、未返回该表正文时，不把其他表的字段归给它。worksheetScope 表示只读取了本人指定的工作表；worksheetComplete 为 true 表示该表的可提取正文在本次已完整返回；此时 complete 为 false 表示整份工作簿仍未核实。' : '';
               const labels=taskAttachmentLabels(context.task.attachments);
@@ -353,7 +362,7 @@ export class MistPlatformTaskWorker{
                 : ambiguousOrderLineReads
                   ? '\nambiguousOrderLineReads 是同一款号的全部候选订单行完整回执。本人明确要求处理该款号的全部条目时按其范围核对。只处理其中一条且本人没有用数量、品名、颜色等区分到唯一时，先用 bambook_task 的 question 询问。先简短问要处理哪一条，再用编号列出候选，每项单独一行，写品名与数量、单位，必要时加单价或规格；不要只重复款号，也不要显示内部 ID。本人答复后继续原任务。身份仍不明确时继续询问，明确后才按正常预演与确认提交。'
                   : '';
-              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),...(namedOrderLineRead?{namedOrderLineRead}:{}),...(ambiguousOrderLineReads?{ambiguousOrderLineReads}:{}),history,...(imageSources?.length?{imageSources}:{})};
+              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),...(namedOrderLineRead?{namedOrderLineRead}:{}),...(ambiguousOrderLineReads?{ambiguousOrderLineReads}:{}),history,...(imageSources?.length?{imageSources}:{}),...(pdfPageImage?{pdfPageImage}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead
                 ? '\n当前答复无待复核的业务来源。问题已由本人补充且只需回答时，直接用 finish。若要办理业务，必须先读取当前相关记录；补充资料不代表批准操作。'
                 : '';
@@ -362,6 +371,9 @@ export class MistPlatformTaskWorker{
                 : '';
               const imageRules=imageSources?.length
                 ? '\n本轮消息附有 imageSources 所列图片。编号、颜色或图片文字直接从随附图片核对，并注明图片名称。bambook_file_text 不提取图片文字，请勿对这些图片调用它。仅报告实际看清的内容，看不清则说明。'
+                : '';
+              const pdfVisualRule=pdfPageImage
+                ? '\npdfPageImage 是本人指定 PDF 页面的图像，与原 PDF 页码绑定。只报告能目视辨认的内容，注明来自该 PDF 第几页。没有可提取文字仍可报告该页图片中实际看清的内容；看不清时明确说明。不要将图片内容归给其他页或附件。'
                 : '';
               const attachmentAttributionRule = imageSources?.length && attachments?.some(file => !isTaskImage(file.name))
                 ? '\n摘要、明细和未核实项都沿用事实的实际出处。跨附件关系无法核对时，分别写明在哪份附件看到什么、哪份附件缺少依据。不要把只在图片上看到的编号归给 PDF 或表格。'
@@ -374,7 +386,7 @@ export class MistPlatformTaskWorker{
                 catch (error) { abort.abort(); throw error; }
               };
               if(context.hasTaskHistory)await checkModelAuthority(false);
-              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+decisionRule+customerCommandRule+lineIndexRule+namedLineRule+(draftCommand?'\n'+ORDER_DRAFT_RULE:'')+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+pdfVisualRule+answerRule+decisionRule+customerCommandRule+lineIndexRule+namedLineRule+(draftCommand?'\n'+ORDER_DRAFT_RULE:'')+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
               if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
             }
           }

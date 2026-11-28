@@ -1158,6 +1158,28 @@ it('keeps pages without text outside the report text ranges for the same origina
  expect(input.systemPrompt).toContain('同一句明示排除无可提取文字的页');
 });
 
+it.each([true,false])('only supplies an explicitly requested scanned PDF page as an image (%s)',async visual=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const instructions=visual?'请目视核对 scan.pdf 第 3 页的扫描标签，其他页不要读取。':'请只核对 scan.pdf 第 3 页的可提取文字。';
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对 PDF 指定页',instructions}))
+  .attach('attachments',pdf('OUTSIDE-PAGE-5',5,false,3),'scan.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input=complete.mock.calls[0][0],text=input.messages[0].content;
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ if(visual){
+  expect(input.images).toEqual([expect.objectContaining({name:'scan.pdf 第 3 页',url:expect.stringMatching(/^data:image\/jpeg;base64,/)} )]);
+  expect(facts.pdfPageImage).toEqual({file:'scan.pdf',page:3});
+ }else{
+  expect(input.images).toBeUndefined();
+  expect(facts).not.toHaveProperty('pdfPageImage');
+ }
+ expect(text).not.toContain('OUTSIDE-PAGE-5');
+});
+
 it('reads the short tail of each PDF before asking the model to prepare the report', async () => {
  const complete = vi.fn(async (_input: LlmCompletionInput) =>
    tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已整理附件核对报告' }));

@@ -118,8 +118,8 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
     if(namedPdf||files.length>1)return {...binding,ids:[...pdfIds],confirm:true};
     if(attachments.length===1||/\bpdf\b/i.test(clause))return {...binding,ids:[files[0].id],confirm:false};
   };
-  const chinese=[...request.matchAll(/(?:^|[。；;，,\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)[ \t]*页|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?(?:[ \t]*页|(?=[ \t]*(?:、|，|,|和|与|及|以及)[ \t]*(?:第[ \t]*)?[1-9]\d*[^。；;\n]{0,32}页)))/gu)];
-  const english=[...request.matchAll(/(?:^|[.;,\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages?[ \t]+([1-9]\d*)\b(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)?|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
+  const chinese=[...request.matchAll(/(?:^|[。；;，,\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:(?:(?:只|仅)[ \t]*)?(?:目视|按图片)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)|(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看))[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)[ \t]*页|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?(?:[ \t]*页|(?=[ \t]*(?:、|，|,|和|与|及|以及)[ \t]*(?:第[ \t]*)?[1-9]\d*[^。；;\n]{0,32}页)))/gu)];
+  const english=[...request.matchAll(/(?:^|[.;,\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only|visually[ \t]+inspect)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages?[ \t]+([1-9]\d*)\b(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)?|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
   const tailAfter=(match:RegExpMatchArray)=>request.slice((match.index??0)+match[0].length);
   const ranges=[
     ...chinese.map(match=>{
@@ -231,6 +231,16 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */
+export function explicitPdfVisualPage(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>){
+  const request=splitTaskRequest(instructions);
+  if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
+    ||/(?:不要|禁止|无需|不用)\s*(?:目视|看图|用?\s*OCR)|\b(?:do not|without)\s+(?:use\s+)?OCR\b/i.test(request)
+    ||pdfRanges.size!==1)return undefined;
+  const [entry]=pdfRanges;
+  const [fileId,range]=entry;
+  return !range.windows&&range.from===range.to?{fileId,page:range.from}:undefined;
+}
+
 export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:ReadonlyMap<string,PdfPageScope>,
   worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>,allowedFiles?:ReadonlySet<string>,excludedPdfIds?:ReadonlySet<string>):PlatformTaskStep[] {
   if(!pdfRanges.size&&!worksheetScope&&!allowedFiles&&!excludedPdfIds)return steps;

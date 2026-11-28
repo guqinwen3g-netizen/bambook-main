@@ -21,6 +21,23 @@ type SheetTextSpan = {name:string;start:number;end:number};
 
 export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheetTextSpans?:SheetTextSpan[]; attributedValues?:true; sheets?: string[]; reason?: string };
 
+export async function renderPdfPageImage(bytes:Buffer,page:number):Promise<Buffer|undefined>{
+  if(bytes.length>SOURCE_BYTES_MAX||bytes.subarray(0,5).toString('latin1')!=='%PDF-'
+    ||!Number.isSafeInteger(page)||page<1)return undefined;
+  let parser:PDFParse|undefined;
+  try{
+    parser=new PDFParse({data:new Uint8Array(bytes),isEvalSupported:false,maxImageSize:20_000_000});
+    const info=await parser.getInfo({partial:[page],parsePageInfo:true});
+    const size=info.pages.find(item=>item.pageNumber===page);
+    if(!size||![size.width,size.height].every(value=>Number.isFinite(value)&&value>0))return undefined;
+    const scale=Math.min(1600/size.width,1600/size.height);
+    const rendered=await parser.getScreenshot({partial:[page],scale,imageDataUrl:false,imageBuffer:true});
+    const image=rendered.pages.find(item=>item.pageNumber===page)?.data;
+    return image?.length?Buffer.from(image):undefined;
+  }catch{return undefined;}
+  finally{try{await parser?.destroy();}catch{/* parser already released */}}
+}
+
 export const fileTextLimit = (value: unknown): number => {
   if (value === undefined) return FILE_TEXT_DEFAULT;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 200 || value > FILE_TEXT_MAX) throw new RangeError(`maxChars 需为 200–${FILE_TEXT_MAX} 的整数`);
