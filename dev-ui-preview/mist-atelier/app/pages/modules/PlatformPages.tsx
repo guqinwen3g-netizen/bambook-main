@@ -235,7 +235,6 @@ export function AssistantPage(){
   };
   const attachmentScope=scope+':'+conversationId;
   const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string;target?:TaskAttachmentTarget}>();
-  React.useEffect(()=>{setTaskPreview(undefined);},[attachmentScope]);
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
   const legacyTargets=React.useRef(new Map<string,string>());
   React.useEffect(()=>{legacyTargets.current.clear();},[scope]);
@@ -405,10 +404,15 @@ export function AssistantPage(){
       }
     }
   }
-  const previewTask=taskPreview?.scope===attachmentScope?visibleTasks.find(task=>task.id===taskPreview.taskId):undefined;
+  const previewTask=taskPreview?.scope===attachmentScope
+    ?visibleTasks.find(task=>task.id===taskPreview.taskId&&!task.contentRestricted&&task.state!=='access_changed'):undefined;
   const previewFiles=previewTask?.attachments??[];
   const previewIndex=previewFiles.findIndex(file=>file.id===taskPreview?.fileId);
   const previewFile=previewFiles[previewIndex];
+  React.useEffect(()=>{
+    // Restoring a report or returning to a workspace requires a fresh preview action.
+    if(taskPreview&&!previewFile)setTaskPreview(current=>current===taskPreview?undefined:current);
+  },[taskPreview,previewFile]);
   const previewAttachment=(task:AgentTaskView,file:TaskAttachment,target?:TaskAttachmentTarget)=>{
     setTaskPreview({scope:attachmentScope,taskId:task.id,fileId:file.id,target});
   };
