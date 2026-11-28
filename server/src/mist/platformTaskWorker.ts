@@ -257,8 +257,12 @@ export class MistPlatformTaskWorker{
           ? ['finish','question'].includes(String(plan.arguments.action))
           : plan.name==='bambook_file_text'&&typeof plan.arguments.fileId==='string'&&providedFileIds.has(plan.arguments.fileId);
         const attachmentSteps=scopedAttachmentTaskSteps(context.steps,pdfRanges,worksheetScope,allowedFiles,excludedPdfIds);
+        const latestProvidedAnswer=providedOnly
+          ? context.task.questions?.reduce((latest,question)=>question.answeredAt&&question.answeredAt>latest?question.answeredAt:latest,'')
+          : undefined;
         const readableSteps=providedOnly
-          ? attachmentSteps.filter(previous=>previous.plan.name==='bambook_file_text'&&withinProvidedScope(previous.plan))
+          ? attachmentSteps.filter(previous=>previous.plan.name==='bambook_file_text'&&withinProvidedScope(previous.plan)
+            &&(!latestProvidedAnswer||(previous.completedAt??previous.at)>=latestProvidedAnswer))
           : attachmentSteps;
         const scopeDisposition=(previous:PlatformTaskStep)=>
           previous.result as {error?:boolean;providedMaterialScopeRejected?:boolean}|undefined;

@@ -132,6 +132,28 @@ it('does not bypass the supplied-material scope when a live business record is a
  expect(await f.current(item.id)).toMatchObject({state:'failed',result:expect.stringContaining('请提供要核对的原件')});
 });
 
+it('reads only the supplied original again after the owner answers a missing detail',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'确认报价：十二月十日。'}))
+  .mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请提供约定交期。'}));
+ const f=await fixture(complete),read=vi.spyOn(f.repository,'getForAgent'),file=vi.spyOn(f.repository,'fileText');
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对报价补充项',instructions:'只用我提供的数据。核对附件，缺少交期时请先问我。'}))
+  .attach('attachments',Buffer.from('报价条款 CURRENT-QUOTE-5281。交期未登记。'),'quote.txt').expect(201)).body.item;
+ await f.drain();
+ const waiting=await f.current(task.id);
+ expect(waiting.state).toBe('waiting_human');
+ expect(file).toHaveBeenCalledTimes(1);
+ await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+  requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'约定交期十二月十日。',
+ }).expect(200);
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'确认报价：十二月十日。'});
+ expect(file.mock.calls.map(([, , id])=>id)).toEqual([task.attachments[0].id,task.attachments[0].id]);
+ expect(read).not.toHaveBeenCalled();
+ expect(complete.mock.calls.at(-1)?.[0].messages[0].content).toContain('约定交期十二月十日');
+});
+
 it('sends one shared object-type definition and source receipts without duplicating the UI trail',async()=>{
  let input:LlmCompletionInput|undefined;
  const f=await fixture(async prompt=>{input=prompt;return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟订单。'});});

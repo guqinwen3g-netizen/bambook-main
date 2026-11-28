@@ -11,7 +11,7 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
-import {compactPlatformTaskSteps,newPlatformTaskStep,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
+import {compactPlatformTaskSteps,newPlatformTaskStep,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
 import{responseLocale,type ResponseLocale}from'./responseLanguage';
 import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskConditionTarget} from './agentTaskConditions';
 
@@ -496,8 +496,12 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
     const choosingAttachmentScope=(attachmentScope.pdfChoice?.question??attachmentScope.pdfVisualChoice
       ??worksheetChoice)===question.question
       ||!!worksheetScope?.needsWorksheetChoice&&isWorksheetNameQuestion(question.question);
+    // Provided-only tasks verify their original attachments in the next worker
+    // turn without opening the business-read gate.
+    const requiresBusinessOrUnrestrictedAttachmentRead=!choosingAttachmentScope&&c.attachments?.length
+      &&!requestsProvidedMaterialsOnly(c.instructions);
     const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
-      ||c.sources.length||c.intentRefs?.length||!choosingAttachmentScope&&c.attachments?.length||c.waitingProposalIds.length);
+      ||c.sources.length||c.intentRefs?.length||requiresBusinessOrUnrestrictedAttachmentRead||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};
   }
   await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now);return taskView(n,actor,now);
