@@ -14,9 +14,10 @@ export type ChatMessage =
 /**
  * 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。
  * html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。
+ * onExpand 收到当前草稿，返回 true 时清空侧栏输入。
  */
 export function AssistantDrawer({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes, onExpand }: {
-  open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; onExpand?: () => void;
+  open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; onExpand?: (draft: string) => boolean | void;
 }) {
   const [draft, setDraft] = React.useState('');
   const list = React.useRef<HTMLDivElement>(null);
@@ -36,7 +37,7 @@ export function AssistantDrawer({ open, onClose, messages, onSend, suggestions =
         </div>
       </div>
       {suggestions.length > 0 && <div className="mist-sugg">{suggestions.map(s => <button key={s} type="button" onClick={() => send(s)}>{s}</button>)}</div>}
-      {onExpand && <div className="mist-row"><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={onExpand}>{uiText('完整版')}</Button></div>}
+      {onExpand && <div className="mist-row"><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={() => { if (onExpand(draft)) setDraft(''); }}>{uiText('完整版')}</Button></div>}
       <div className="mist-composer">
         <textarea value={draft} placeholder={uiText("问小竹，或让它帮你做事…")} aria-label={uiText("输入问题")} onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(draft); } }} />
