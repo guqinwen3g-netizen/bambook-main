@@ -8,6 +8,7 @@ export const reviewedEnglish: Record<string, string> = {
   '客户付款条件已更新，请重新提出提议': 'The customer’s payment terms changed. Ask for a new proposal.',
   '客户已不可见，请重新核对': 'The customer is no longer visible. Recheck the source.',
   '当前付款说明': 'Current payment note',
+  '订单条目或币种已更新，请重新提出提议': 'The order lines or currency changed. Ask for a new proposal.',
   '拟移除条目': 'Order line to remove',
   '当前订单金额': 'Current order amount',
   '拟改订单金额': 'Proposed order amount',

@@ -16,7 +16,7 @@ import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, Signature
 import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
-import type { OrderGovernanceInput } from '../../../../server/src/shared/mistOrderGovernance';
+import type { OrderGovernanceInput, OrderGovernanceLine } from '../../../../server/src/shared/mistOrderGovernance';
 import { lineQuantityFromBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
 import { emailLinkTarget } from '../../../../server/src/shared/mistEmail';
@@ -73,6 +73,12 @@ function quotationSourceMissing(command:AgentProposal['command'],state?:MistStat
     ||Array.isArray(input.lines)&&input.lines.some(line=>line&&typeof line==='object'&&(missing(line.productId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)));
 }
 const ORDER_LABEL:Record<string,string>={type:'订单类型',season:'季节 / 批次',due:'交期',name:'品名',nameEn:'英文品名',style:'款号 / 品号',unit:'单位',governance:'合同',poNumber:'PO / 合同号',confirmationFileIds:'客户依据',internalPurpose:'内部用途',receiver:'接收团队 / 负责人',paymentMethod:'付款方式',depositPercent:'定金比例（%）',preShipmentPercent:'出运前累计收款（%）',paymentNote:'付款条款',incoterm:'贸易术语',deliveryPlace:'交付地点',overPercent:'溢装上限（%）',shortPercent:'短装下限（%）',quantityBasis:'数量口径',quantityBasisNote:'数量依据',breakdown:'规格明细',composition:'成分',width:'门幅（cm）',weight:'克重（g/m²）',rows:'颜色明细',color:'颜色 / 色号',sizes:'尺码',quantities:'各码数量',sourceProductId:'来源产品',sourceDevId:'来源开发案',sourceVersionId:'来源版本',sourceQuotationId:'来源报价',sourceQuotationLineId:'来源报价条目',internalSupply:'内部供料',receiverId:'接收负责人',markupPercent:'内部加价（%）'};
+function orderPriceBasis(state:MistState,order:MistState['orders'][number]){
+  const lines=(rows:readonly OrderGovernanceLine[])=>rows.map(({id,name,style,qty,unit,price,breakdown})=>[id,name,style,qty,unit,price,breakdown]);
+  const draft=order.governance?.changeDraft;
+  return stableJson([order.id,order.currency,lines(state.orderLines.filter(line=>line.orderId===order.id)),
+    draft?[draft.orderPatch.currency,lines(draft.lines)]:null]);
+}
 function orderSourceMissing(command:AgentProposal['command'],state?:MistState|null){
   const contractDraft=command.type==='order.governance.saveDraft';
   if(command.type!=='order.create'&&!contractDraft)return false;
@@ -317,16 +323,23 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
     &&typeof patch?.terms==='string';
   const termsCustomer=changesCustomerTerms?state?.customers.find(customer=>customer.id===proposal?.command.payload.id):undefined;
   const draftInput=proposal?.command.payload.input as {paymentNote?:unknown}|undefined;
-  const suppliesOrderPaymentNote=proposal?.command.type==='order.governance.saveDraft'&&typeof draftInput?.paymentNote==='string';
-  const noteOrder=suppliesOrderPaymentNote?state?.orders.find(order=>order.id===proposal?.command.payload.orderId):undefined;
-  const currentDraft=noteOrder?.governance?.changeDraft?.contract??noteOrder?.governance?.contract;
+  const savesOrderDraft=proposal?.command.type==='order.governance.saveDraft';
+  const suppliesOrderPaymentNote=savesOrderDraft&&typeof draftInput?.paymentNote==='string';
+  const draftPatch=proposal?.command.payload.orderPatch as {currency?:unknown}|undefined;
+  const reviewsOrderPrices=savesOrderDraft&&(Array.isArray(proposal.command.payload.lines)||draftPatch?.currency!==undefined);
+  const draftOrder=savesOrderDraft?state?.orders.find(order=>order.id===proposal.command.payload.orderId):undefined;
+  const currentDraft=draftOrder?.governance?.changeDraft?.contract??draftOrder?.governance?.contract;
   const sourceFingerprint=sourceReview?.fingerprint??(termsCustomer?stableJson([termsCustomer.id,termsCustomer.terms])
-    :currentDraft?stableJson([noteOrder!.id,currentDraft.paymentNote]):'');
+    :suppliesOrderPaymentNote&&currentDraft?stableJson([draftOrder!.id,currentDraft.paymentNote]):'');
+  const priceFingerprint=reviewsOrderPrices&&state&&draftOrder?orderPriceBasis(state,draftOrder):'';
   const sourceReason=sourceReview?.reason??(changesCustomerTerms&&state&&!termsCustomer?'客户已不可见，请重新核对':'');
-  const sourceBasis=React.useRef({key:'',fingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
-  if(sourceBasis.current.key!==sourceKey)sourceBasis.current={key:sourceKey,fingerprint:''};
+  const sourceBasis=React.useRef({key:'',fingerprint:'',priceFingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
+  if(sourceBasis.current.key!==sourceKey)sourceBasis.current={key:sourceKey,fingerprint:'',priceFingerprint:''};
   if(sourceFingerprint&&!sourceReason&&!sourceBasis.current.fingerprint)sourceBasis.current.fingerprint=sourceFingerprint;
   const sourceChanged=!!sourceFingerprint&&!!sourceBasis.current.fingerprint&&sourceFingerprint!==sourceBasis.current.fingerprint;
+  if(priceFingerprint&&!sourceBasis.current.priceFingerprint)sourceBasis.current.priceFingerprint=priceFingerprint;
+  const orderPriceChanged=!!priceFingerprint&&priceFingerprint!==sourceBasis.current.priceFingerprint;
+
   const incomingBasis=React.useRef({key:'',fingerprint:''}),incomingKey=scopeKey+':'+proposal?.id;
   if(incomingBasis.current.key!==incomingKey)incomingBasis.current={key:incomingKey,fingerprint:''};
   if(incoming&&!incoming.reason&&!incomingBasis.current.fingerprint)incomingBasis.current.fingerprint=incoming.fingerprint;
@@ -352,7 +365,7 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   const signing = commandRequiresSignature(proposal.command);
   const awaitingReceipt=pendingFailure||!!pendingRequestId;
   const confirmBlocked=!!mail?.reason||!!reopening?.reason||!!incoming?.reason||incomingChanged||!!sourceReason
-    ||sourceChanged||!!proposal.taskBlocked||!!proposal.unavailable||!!draftSourceMissing||quoteSourceMissing||rfqSourceUnavailable
+    ||sourceChanged||orderPriceChanged||!!proposal.taskBlocked||!!proposal.unavailable||!!draftSourceMissing||quoteSourceMissing||rfqSourceUnavailable
     ||orderSourceUnavailable||incomplete||(risk==='high'&&!password)||(signing&&!signature);
   const canReplay=checkedMissing&&!!onReplayOriginal
     &&(pendingDecision==='reject'||pendingDecision==='confirm'&&risk!=='high'&&!signing&&!confirmBlocked);
@@ -401,6 +414,7 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
       {(incoming?.reason||incomingChanged)&&<Banner tone="warn" title={uiText(incoming?.reason||'来样或工厂任务已变化，请重新提出提议')} />}
       {(sourceReason||sourceChanged&&(!(changesCustomerTerms||suppliesOrderPaymentNote)||!awaitingReceipt))&&<Banner tone="warn"
         title={uiText(sourceReason||(changesCustomerTerms?'客户付款条件已更新，请重新提出提议':suppliesOrderPaymentNote?'订单付款说明已更新，请重新提出提议':'办理资料已变化，请重新提出提议'))}/>}
+      {orderPriceChanged&&!awaitingReceipt&&<Banner tone="warn" title={uiText('订单条目或币种已更新，请重新提出提议')} />}
       {reopening?.reason&&<Banner tone="warn" title={uiText(reopening.reason)} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{(incoming?[incoming.title]:sourceReview?[sourceReview.title]:reopening?['恢复开发案']:proposal.summary).map((line, i) => <span key={i}>{incoming||sourceReview||reopening?uiText(line):line}</span>)}</div>

@@ -85,10 +85,37 @@ it('identifies the assigned owner and priced line, permits new proposed lines, a
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();
   expect(host.textContent).toContain('负责人 · 沈禾');expect(host.textContent).toContain('单价 · 2.25 GBP');expect(host.textContent).not.toContain('line-private');expect(host.textContent).not.toContain('owner-private');expect(host.textContent).not.toContain('img ·');
-  state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(false);expect(host.textContent).toContain('HLB-T01');expect(host.textContent).not.toContain('line-private');
+  proposal.id='fresh-new-line-proposal';state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(false);expect(host.textContent).toContain('HLB-T01');expect(host.textContent).not.toContain('line-private');
   state.orderLines=[{id:'line-private',orderId:'another-order',style:'OTHER'} as any];render();expect(getConfirm(host).disabled).toBe(true);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it.each(['line','currency'] as const)('disables stale order draft confirmation when its %s basis changes',kind=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.currency='USD';
+ const line={id:'keep',orderId:order.id,name:'模拟外套',style:'SIM-A',qty:10,unit:'件',price:12};
+ const other={...line,id:'other-line',orderId:'another-order'};
+ state.orderLines=[line,other] as typeof state.orderLines;
+ if(kind==='line')proposal.command.payload.lines=[{...line,price:14}];
+ else proposal.command.payload.orderPatch={currency:'EUR'};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  expect(getConfirm(host).disabled).toBe(false);
+  other.price=50;render();
+  expect(getConfirm(host).disabled).toBe(false);
+  if(kind==='line')line.price=15;else order.currency='GBP';
+  render();
+  expect(host.textContent).toContain('订单条目或币种已更新，请重新提出提议');
+  expect(host.textContent).toContain('当前订单金额 · '+(kind==='line'?'150.00 USD':'120.00 GBP'));
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it('shows which current draft lines will be removed before listing replacement lines',()=>{
  const{state,proposal}=contractProposalFixture(),order=state.orders[0];
  const kept={id:'line-kept',orderId:order.id,name:'样衣',style:'SIM-KEEP',qty:10,unit:'件',price:1.95};
