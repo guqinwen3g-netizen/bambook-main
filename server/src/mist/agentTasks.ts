@@ -136,6 +136,9 @@ function owner(actor: TokenPayload, c: TaskRecord) { if (actor.userId !== c.owne
 const usedRuntime = (c: TaskRecord, now: number) => c.runtimeUsedMs + (c.lease ? Math.max(0, Math.min(now, c.lease.expiresAt) - c.lease.startedAt) : 0);
 const canReadContents = (c: TaskRecord, actor: TokenPayload) => c.ceiling.every(scope => hasScope(actor, scope as any));
 const hasUnansweredQuestion=(c:TaskRecord)=>(c.questions??[]).some(q=>!q.answeredAt);
+export function isPersonalPlatformTask(c:TaskRecord):boolean{
+  return c.executor==='platform'&&!c.automationId&&c.identityId===personalIdentityId(c.workspaceId,c.ownerId);
+}
 export function taskView(c: TaskRecord, actor: TokenPayload, now: number, authorityValid = true): AgentTaskView {
   owner(actor, c); const readable = authorityValid && canReadContents(c, actor) && c.credentialVersion === actor.credentialVersion, ended = ['succeeded', 'failed', 'cancelled'].includes(c.state);
   const state = ended ? c.state : !readable ? 'access_changed' : now >= c.expiresAt ? 'expired' : (usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT && (!c.lease||c.lease.expiresAt<=now)) ? 'budget_exhausted' : c.state === 'running' && (!c.lease || c.lease.expiresAt <= now) ? 'queued' : c.state;
@@ -182,17 +185,19 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
+    ...(readable&&!isAgentActor(actor)&&isPersonalPlatformTask(c)&&['waiting_human','paused'].includes(state)
+      &&hasUnansweredQuestion(c)?{canSupplementAttachments:true}:{}),
     ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions,resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
   if (changed.count !== 1) fail('AGENT_TASK_CHANGED', '任务已更新，请核对状态', 409);
 }
-async function event(db: any, c: TaskRecord, actor: TokenPayload, action: string, requestId: string, now: number) {
+async function event(db: any, c: TaskRecord, actor: TokenPayload, action: string, requestId: string, now: number, attachmentIds?: string[]) {
   const request = EVENT_PREFIX + c.id + ':' + hash(requestId).slice(0, 32);
   if (await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: c.workspaceId, requestId: request } } })) fail('CONFLICT', '操作编号已使用，请核对原结果', 409);
   const value: AgentTaskEvent = { action, at: new Date(now).toISOString(), actorId: actor.userId,actorName:['claimed','checkpoint','waiting_human','question','waiting_time','waiting_condition','condition_changed','condition_deadline','model_retry','model_paused','recovering','finished'].includes(action)?c.identityName:actor.displayName||'本人', version: c.version, state: c.state };
-  await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: c.workspaceId, requestId: request, actorId: actor.userId, inputHash: EVENT_HASH, expectedRevision: 0, result: { revision: 0, taskId: c.id, event: value, operation: { action, inputHash: c.lastInputHash,...(action==='connected'?{controlGeneration:c.control?.generation}:{}) } }, createdAt: new Date(now) } });
+  await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: c.workspaceId, requestId: request, actorId: actor.userId, inputHash: EVENT_HASH, expectedRevision: 0, result: { revision: 0, taskId: c.id, event: value, operation: { action, inputHash: c.lastInputHash,...(action==='connected'?{controlGeneration:c.control?.generation}:{}),...(attachmentIds?.length?{attachmentIds}:{}) } }, createdAt: new Date(now) } });
 }
 function next(c: TaskRecord, now: number, action: string, requestId: string, input: unknown): TaskRecord {
   return { ...c, version: c.version + 1, updatedAt: new Date(now).toISOString(), lastAction: action, lastRequestId: requestId, lastInputHash: hash(JSON.stringify(input)) };
@@ -472,17 +477,39 @@ export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskL
   platformEffect(n,requestId,{status:'waiting_human',questionId:n.questions.at(-1)!.id});
   await save(db,row,c,n);await event(db,n,actor,'question',requestId,now);return taskView(n,actor,now);
 }
-export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,now:number){
+export async function answerAttachmentReceipt(db:any,actor:TokenPayload,c:TaskRecord,requestId:unknown):Promise<string[]>{
+  owner(actor,c);
+  const row=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{
+    workspaceId:c.workspaceId,requestId:EVENT_PREFIX+c.id+':'+hash(rid(requestId)).slice(0,32),
+  }}});
+  const receipt=row?.result,ids:unknown=receipt?.operation?.attachmentIds;
+  if(row?.inputHash!==EVENT_HASH||row.actorId!==actor.userId||receipt?.taskId!==c.id
+    ||receipt.operation?.action!=='answered'||!Array.isArray(ids)||!ids.length
+    ||!c.questions?.some(q=>q.answeredAt&&q.attachmentIds?.length===ids.length&&ids.every((fileId,i)=>q.attachmentIds![i]===fileId)))
+    fail('RECEIPT_NOT_FOUND','未找到补充附件的回执',404);
+  return ids;
+}
+
+type AnswerAttachments={fingerprint:unknown;save:(task:TaskRecord)=>Promise<MistStoredFile[]>};
+export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,now:number,attachments?:AnswerAttachments){
   if(isAgentActor(actor))fail('FORBIDDEN','资料须由本人补充',403);
   if(Object.keys(input).some(k=>!['requestId','version','questionId','answer'].includes(k))||!Number.isSafeInteger(input.version))fail('INVALID_INPUT','补充资料请求无效',400);
-  const requestId=rid(input.requestId),questionId=id(input.questionId),answer=plain(input.answer,4000,'补充资料');
+  const requestId=rid(input.requestId),questionId=id(input.questionId),answer=plain(input.answer,4000,'补充资料',!!attachments);
   await lockTaskRecord(db,workspaceId,taskId);const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);await assertTaskAuthority(db,actor,c,now);
-  const values=[input.version,questionId,answer];if(await pastOperation(db,c,requestId,'answered',values))return taskView(c,actor,now);
+  if(attachments&&!isPersonalPlatformTask(c))
+    fail('FILE_NOT_FOUND','任务不存在或无权访问',404);
+  const values=attachments?[input.version,questionId,answer,attachments.fingerprint]:[input.version,questionId,answer];
+  if(await pastOperation(db,c,requestId,'answered',values))return taskView(c,actor,now);
   if(c.controlVersion!==input.version)fail('AGENT_TASK_CHANGED','任务设置已更新，请核对状态',409);
   if(!['waiting_human','paused'].includes(c.state))fail('AGENT_TASK_NOT_READY','任务当前不等待补充资料',409);
   if(c.expiresAt<=now||c.stepsUsed>=STEP_LIMIT||usedRuntime(c,now)>=RUNTIME_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到执行限额',409);
   const question=c.questions?.find(q=>q.id===questionId&&!q.answeredAt);if(!question)fail('AGENT_TASK_CHANGED','问题已处理，请刷新核对',409);
-  const n=next(c,now,'answered',requestId,values);n.controlVersion++;n.lease=undefined;n.questions=c.questions!.map(q=>q.id===questionId?{...q,answer,answeredAt:new Date(now).toISOString()}:q);
+  const files=await attachments?.save(c);
+  const attachmentIds=files?.map(file=>file.id);
+  const submittedAnswer=answer||(c.locale==='en-US'?'Files supplied.':'已补交附件。');
+  const n=next(c,now,'answered',requestId,values);n.controlVersion++;n.lease=undefined;
+  if(files?.length)n.attachments=[...(c.attachments??[]),...files];
+  n.questions=c.questions!.map(q=>q.id===questionId?{...q,answer:submittedAnswer,answeredAt:new Date(now).toISOString(),...(attachmentIds?.length?{attachmentIds}:{})}:q);
   n.state=c.state==='paused'?'paused':n.waitingProposalIds.length||hasUnansweredQuestion(n)?'waiting_human':'queued';n.checkpoint='本人已补充资料；续办前核对原问题与答案。';
   if(n.platform){
     // An answer can complete a standalone reply. A business write still needs
@@ -504,7 +531,7 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
       ||c.sources.length||c.intentRefs?.length||requiresBusinessOrUnrestrictedAttachmentRead||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};
   }
-  await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now);return taskView(n,actor,now);
+  await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now,attachmentIds);return taskView(n,actor,now);
 }
 /** In the SAME transaction as proposal creation: a model cannot continue after requesting approval. */
 export async function waitTaskForProposal(db: any, actor: TokenPayload, lease: AgentTaskLease, proposalId: string, requestId: string, now: number) {

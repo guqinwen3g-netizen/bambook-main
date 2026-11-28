@@ -45,7 +45,7 @@ import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, markPlatformModelFallback, parseTaskHistoryIds, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskConversationHistory, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
+import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerAttachmentReceipt, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, isPersonalPlatformTask, listTasks, markPlatformModelFallback, parseTaskHistoryIds, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskConversationHistory, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import { taskHistoryReadRefs, taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
@@ -734,6 +734,16 @@ export class MistRepository {
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
     await this.transact(db=>this.taskAccess(db,prior,workspaceId,'ai:chat'));
   }
+  async authorizeTaskAnswerUpload(prior:TokenPayload,workspaceId:string,taskId:string){
+    if(isAgentActor(prior))fail('FORBIDDEN','资料须由本人补充',403);
+    await this.transact(async db=>{
+      const {actor,row}=await this.own(db,prior,workspaceId,'ai:chat');
+      const {value:task}=await taskRecord(db,row.id,taskId);
+      if(task.ownerId!==actor.userId||!isPersonalPlatformTask(task)||!await this.taskViewSourcesAllowed(db,row,actor,task))
+        fail('FILE_NOT_FOUND','任务不存在或无权访问',404);
+      await assertTaskViewAuthority(db,actor,task,Date.now());
+    });
+  }
   /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
   async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){
     if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))fail('INVALID_INPUT','月份格式为 YYYY-MM',400);
@@ -1213,15 +1223,75 @@ export class MistRepository {
     this.wakeQueuedPlatformTask(item);
     return item;
   }
-  async answerAgentTaskQuestion(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>){
+  async getTaskAnswerAttachmentReceipt(prior:TokenPayload,workspaceId:string,taskId:string,requestId:unknown){
+    if(isAgentActor(prior))fail('FORBIDDEN','补充回执只供本人查看',403);
+    const unavailable=()=>fail('RECEIPT_NOT_FOUND','未找到补充附件的回执',404);
+    return this.transact(async db=>{
+      const {actor,row}=await this.own(db,prior,workspaceId,'ai:chat').catch(error=>{
+        if(error instanceof MistApiError&&[403,404].includes(error.status))unavailable();
+        throw error;
+      });
+      const {value:task}=await taskRecord(db,row.id,taskId);
+      const attachmentIds=await answerAttachmentReceipt(db,actor,task,requestId);
+      if(!isPersonalPlatformTask(task)||!await this.taskViewSourcesAllowed(db,row,actor,task))unavailable();
+      const now=Date.now();
+      try { await assertTaskViewAuthority(db,actor,task,now); }
+      catch(error){if(error instanceof MistApiError)unavailable();throw error;}
+      const privacy=await prepareFilePrivacy(this.files,row.id,row.state);
+      if(attachmentIds.some(fileId=>{
+        const file=task.attachments?.find(item=>item.id===fileId);
+        return !file?.sha256||restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256,file.size);
+      }))unavailable();
+      return {item:taskView(task,actor,now),attachmentIds};
+    });
+  }
+  async answerAgentTaskQuestion(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,files:MistFileInput[]=[]){
     if(isAgentActor(prior))fail('FORBIDDEN','资料须由本人补充',403);
+    let metadata:ReturnType<typeof validateFileInput>[]=[];
+    if(files.length){
+      await this.authorizeTaskAnswerUpload(prior,workspaceId,taskId);
+      assertTaskAttachmentLimits(files.map(file=>file.bytes.length));
+      metadata=files.map(validateFileInput);
+      if(metadata.some(file=>!isTaskAttachment(file.name)))fail('INVALID_UPLOAD','此文件类型暂不支持',400);
+      for(const [index,input] of files.entries()){
+        if(!isTaskImage(metadata[index].name))continue;
+        const image=await sharp(input.bytes,{limitInputPixels:40_000_000}).metadata().catch(()=>null);
+        if(!image?.format||!['jpeg','png','webp','gif'].includes(image.format))fail('INVALID_UPLOAD','图片无法读取或尺寸过大',400);
+      }
+    }
+    const staged:MistStoredFile[]=[];
+    let stored:Promise<MistStoredFile[]>|undefined,prepared=false;
+    const removeStaged=(items:MistStoredFile[])=>Promise.allSettled(items.map(file=>this.files.remove(workspaceId,file)));
     const item=await this.connectionTransaction(async db=>{
+      prepared=false;
       const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat'),task=(await taskRecord(db,workspaceId,taskId)).value;
       this.assertTaskSources(row,actor,task);
       if(task.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,task);
       await this.assertTaskHistorySources(db,row,actor,task);
-      return answerTaskQuestion(db,actor,workspaceId,taskId,input,Date.now());
+      const attachments=files.length?{
+        fingerprint:metadata,
+        save:async(current:TaskRecord)=>{
+          assertTaskAttachmentLimits([...(current.attachments??[]).map(file=>file.size),...metadata.map(file=>file.size)]);
+          const privacy=await prepareFilePrivacy(this.files,row.id,row.state);
+          if(metadata.some(file=>restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256,file.size)))
+            fail('FORBIDDEN','该附件的原件受权限限制',403);
+          return stored??=(async()=>{
+            for(const input of files)staged.push(await this.files.write(workspaceId,input,new Date().toISOString(),{previews:false}));
+            return staged;
+          })();
+        },
+      }:undefined;
+      const result=await answerTaskQuestion(db,actor,workspaceId,taskId,input,Date.now(),attachments);
+      prepared=true;
+      return result;
+    }).catch(async error=>{
+      if(!prepared||retryableTransaction(error))await removeStaged(staged);
+      throw error;
     });
+    if(staged.length){
+      const committed=new Set(item.attachments?.map(file=>file.id));
+      await removeStaged(staged.filter(file=>!committed.has(file.id)));
+    }
     this.wakeQueuedPlatformTask(item);
     return item;
   }
