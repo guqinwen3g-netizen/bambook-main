@@ -333,6 +333,15 @@ export function agentGetQuotationForOrder(
 export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown, options: { excludeTypes?: readonly string[]; relatedType?: unknown } = {}) {
   const { type, row } = find(state, actor, typeName, id);
   const relatedType = options.relatedType === undefined ? undefined : typeOf(options.relatedType, actor);
+  if(type.type==='order'&&relatedType?.type==='order_line'&&!options.excludeTypes?.includes('order_line')){
+    const lines=rows(state,relatedType).filter(line=>line.orderId===row.id);
+    const related=lines.slice(0,RELATED_LIMIT).map(line=>({
+      ...ref(relatedType,line),relation:'referenced_by' as const,
+      ...(typeof line.style==='string'&&line.style.length<=200?{style:line.style}:{}),
+    }));
+    return {...ref(type,row),related,total:lines.length,truncated:lines.length>related.length};
+  }
+
   const candidates = readable(actor, options.excludeTypes).filter(candidate => relatedType === undefined || candidate === relatedType);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。

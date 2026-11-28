@@ -947,6 +947,7 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
   const prompt=input.messages[0].content;
   const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
   if(complete.mock.calls.length===1){
+   expect(facts).not.toHaveProperty('orderLineIndex');
    expect(facts.orderDraftCommand).toMatchObject({type:'order.governance.saveDraft',orderId,via:'confirm',
     payload:expect.stringContaining('OrderGovernanceInput'),
     types:{OrderGovernanceInput:expect.any(String),OrderGovernanceLine:expect.any(String)}});
@@ -994,7 +995,14 @@ it('reads back a confirmed draft removal even after reading the removed line',as
  let calls=0;
  const complete=vi.fn(async(input:LlmCompletionInput)=>{
   calls++;
-  if(calls===1)return tool('bambook_get',{type:'order_line',id:removedId});
+  if(calls===1){
+   const content=input.messages[0].content;
+   const facts=JSON.parse(content.slice(content.indexOf('{"task":')));
+   const index=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.orderLineIndex?.operationId);
+   expect(index).toMatchObject({name:'bambook_related',arguments:{type:'order',id:orderId,relatedType:'order_line'},
+    result:{object:{id:orderId,truncated:false,related:expect.arrayContaining([{id:removedId,style:'SIM-REMOVE',type:'order_line',label:expect.any(String),link:expect.any(String),relation:'referenced_by'}])}}});
+   return tool('bambook_get',{type:'order_line',id:removedId});
+  }
   if(calls===2)return JSON.stringify({name:'bambook_execute',requestId:'untrusted-envelope-id',arguments:{
    requestId:'untrusted-argument-id',command:{type:'order.governance.saveDraft',payload:{orderId,input:contract,lines:[kept]}},
   }});
@@ -1020,7 +1028,7 @@ it('reads back a confirmed draft removal even after reading the removed line',as
  delete kept.img;
  f.worker.start(3_600_000);
  const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks').send({
-  requestId:randomUUID(),name:'复核模拟草稿条目',instructions:'只拟移除引用草稿中的 SIM-REMOVE。',intentRefs:[{kind:'orders',id:orderId}],
+  requestId:randomUUID(),name:'复核模拟草稿条目',instructions:'请从引用的订单草稿中移除款号 SIM-REMOVE 的条目。',intentRefs:[{kind:'orders',id:orderId}],
  }).expect(201);
  await f.drain();
  const pending=await f.current(task.id);
