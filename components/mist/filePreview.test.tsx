@@ -69,7 +69,7 @@ it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a request
   } finally { bounds.mockRestore();layout.mockRestore();canvas.mockRestore();mockWidth.mockRestore(); }
 });
 
-it('jumps from the PDF page count without reopening the original',async()=>{
+it('retries a temporary PDF render error in place and keeps the original opening and page jump',async()=>{
  const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(640);
  const canvas=vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(null);
  const offsets=vi.spyOn(HTMLElement.prototype,'offsetTop','get').mockImplementation(function(this:HTMLElement){
@@ -77,11 +77,19 @@ it('jumps from the PDF page count without reopening the original',async()=>{
  });
  try {
   const page={getViewport:()=>({width:600,height:800}),render:()=>({promise:Promise.resolve(),cancel:vi.fn()})};
-  pdfMock.getDocument.mockReturnValue({promise:Promise.resolve({numPages:23,getPage:vi.fn(async()=>page),destroy:vi.fn(async()=>{})})});
+  pdfMock.getDocument.mockClear()
+   .mockImplementationOnce(()=>({promise:Promise.reject(Object.assign(new Error('temporary failure'),{name:'UnknownErrorException'}))}))
+   .mockReturnValue({promise:Promise.resolve({numPages:23,getPage:vi.fn(async()=>page),destroy:vi.fn(async()=>{})})});
   const blob=new Blob(['%PDF-1.4']);(blob as any).arrayBuffer??=async()=>new ArrayBuffer(0);
   const load=vi.fn(async()=>blob);
   const view=mount([{id:'pdf',name:'验货报告.pdf'}],load,{initialPdfPage:22});
   await flush();
+  const dialog=document.querySelector('[data-file-preview="pdf"]');
+  expect(btn('重试')).toBeTruthy();
+  await act(async()=>btn('重试').click());
+  await flush();
+  expect(document.querySelector('[data-file-preview="pdf"]')).toBe(dialog);
+  expect(pdfMock.getDocument).toHaveBeenCalledTimes(2);
   const opener=btn('第 22 页，共 23 页');
   expect(opener).toBeTruthy();
   await act(async()=>opener.click());
@@ -329,10 +337,10 @@ describe('附件预览浮层', () => {
 });
 
 
-it.each([['UnknownErrorException','预览加载失败，请刷新后重试'],['InvalidPDFException','PDF 无法解析，文件可能已损坏']])('distinguishes PDF loading errors (%s) from invalid original files',async(name,message)=>{
+it.each([['UnknownErrorException','预览未能打开',true],['InvalidPDFException','PDF 无法解析，文件可能已损坏',false],['PasswordException','该 PDF 设有打开密码',false]])('distinguishes PDF loading errors (%s) from invalid or protected original files',async(name,message,canRetry)=>{
   pdfMock.options.workerSrc='';pdfMock.getDocument.mockImplementation(()=>({promise:Promise.reject(Object.assign(new Error('load failed'),{name}))}));
   mount([{id:'pdf',name:'purchase.pdf',mimeType:'application/pdf'}],async()=>new Blob(['%PDF-1.4'],{type:'application/pdf'}));
   await flush();expect(document.body.textContent).toContain(message);
   expect(pdfMock.options.workerSrc).toBe('/assets/pdf.worker.mjs?module=1');
-  if(name==='UnknownErrorException')expect(document.body.textContent).not.toContain('文件可能已损坏');
+  expect(!!btn('重试')).toBe(canRetry);
 });
