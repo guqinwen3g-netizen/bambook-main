@@ -995,8 +995,9 @@ it('reads back a confirmed draft removal even after reading the removed line',as
  const complete=vi.fn(async(input:LlmCompletionInput)=>{
   calls++;
   if(calls===1)return tool('bambook_get',{type:'order_line',id:removedId});
-  if(calls===2)return tool('bambook_execute',{command:{type:'order.governance.saveDraft',
-   payload:{orderId,input:contract,lines:[kept]}}});
+  if(calls===2)return JSON.stringify({name:'bambook_execute',requestId:'untrusted-envelope-id',arguments:{
+   requestId:'untrusted-argument-id',command:{type:'order.governance.saveDraft',payload:{orderId,input:contract,lines:[kept]}},
+  }});
   const prompt=input.messages[0].content;
   const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
   const read=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.proposalReadBack?.operationId);
@@ -1024,9 +1025,13 @@ it('reads back a confirmed draft removal even after reading the removed line',as
  await f.drain();
  const pending=await f.current(task.id);
  expect(pending.state).toBe('waiting_human');
- expect((await taskRecord(f.local.database,f.workspace.id,task.id)).value.sources).toEqual(expect.arrayContaining([
+ const stored=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
+ expect(stored.sources).toEqual(expect.arrayContaining([
   expect.objectContaining({path:'orderLines',id:removedId,fullReadHash:expect.any(String)}),
  ]));
+ const executed=stored.platform?.steps.find(step=>step.plan.name==='bambook_execute');
+ expect(executed?.plan.arguments.requestId).toBe(executed?.id);
+ expect(JSON.stringify(executed)).not.toContain('untrusted-');
  const confirmation=await f.command('agent.proposal.confirm',{id:pending.waitingProposalIds[0]});
  expect.soft(confirmation.body.workspace.state.orderLines.filter((item:{orderId:string})=>item.orderId===orderId)).toEqual([retained]);
  await f.drain();

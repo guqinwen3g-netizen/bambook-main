@@ -16,22 +16,30 @@ export const PLATFORM_TASK_RESULT_LIMIT=160_000;
 export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;proposalReadBack?:{proposalId:string;outcome:'confirmed'|'rejected';ref:AgentTaskIntentRef;stepOffset:number};steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
 const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_get_orders','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
 
+function assignsPlatformRequestId(name:string,args:Record<string,unknown>){
+  return name==='bambook_execute'||name==='bambook_task'&&args.action!=='status';
+}
+
 /** Persist an observable tool decision, never private reasoning or provider credentials. */
 export function parsePlatformTaskPlan(text:string):PlatformTaskPlan{
   if(typeof text!=='string'||text.length>30_000)throw Error('MODEL_PLAN_INVALID');
   const raw=text.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');let value:any;
   try{value=JSON.parse(raw);}catch{throw Error('MODEL_PLAN_INVALID');}
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['name','arguments','progress'].includes(k))||!names.has(value.name)||!value.arguments||typeof value.arguments!=='object'||Array.isArray(value.arguments))throw Error('MODEL_PLAN_INVALID');
+  if(!value||typeof value!=='object'||Array.isArray(value)||!names.has(value.name)||!value.arguments||typeof value.arguments!=='object'||Array.isArray(value.arguments))throw Error('MODEL_PLAN_INVALID');
+  const assignsRequestId=assignsPlatformRequestId(value.name,value.arguments);
+  // A redundant envelope ID can be dropped only for tools that get a server ID.
+  if(Object.keys(value).some(key=>!['name','arguments','progress'].includes(key)
+    &&!(key==='requestId'&&assignsRequestId&&typeof value.requestId==='string')))throw Error('MODEL_PLAN_INVALID');
   if('workspaceId'in value.arguments||'taskId'in value.arguments)throw Error('MODEL_PLAN_SCOPE');
   if(value.name==='bambook_task'&&!['status','checkpoint','question','wait','finish'].includes(value.arguments.action))throw Error('MODEL_PLAN_INVALID');
-  // Idempotency belongs to the persisted server turn, not to text proposed by a model.
-  const args={...value.arguments};if(value.name==='bambook_execute'||value.name==='bambook_task'&&args.action!=='status')delete args.requestId;
+  const args={...value.arguments};
+  if(assignsRequestId)delete args.requestId;
   const progress=typeof value.progress==='string'&&!/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value.progress)
     ? value.progress.replace(/[\u0000-\u001f\u007f\s]+/gu,' ').trim().slice(0,240) : '';
   return{name:value.name,arguments:args,...(progress?{progress}:{})};
 }
 export function newPlatformTaskStep(plan:PlatformTaskPlan,now:number):PlatformTaskStep{
-  const id='platform_'+randomUUID();return{id,plan:{...plan,arguments:{...plan.arguments,...(plan.name==='bambook_execute'||plan.name==='bambook_task'&&plan.arguments.action!=='status'?{requestId:id}:{})}},at:new Date(now).toISOString()};
+  const id='platform_'+randomUUID();return{id,plan:{...plan,arguments:{...plan.arguments,...(assignsPlatformRequestId(plan.name,plan.arguments)?{requestId:id}:{})}},at:new Date(now).toISOString()};
 }
 export const PLATFORM_TASK_ATTACHMENT_PREFIX = 'attachment_';
 

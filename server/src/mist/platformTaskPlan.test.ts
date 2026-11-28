@@ -48,6 +48,26 @@ it('accepts only a bound business tool decision, without thoughts, owner imperso
   expect(step.plan.arguments.requestId).toBe(step.id);expect(step.plan.arguments.requestId).not.toBe('model-id');
   expect(parsePlatformTaskPlan('{"name":"bambook_audit","arguments":{"requestId":"mcp-original-receipt"}}').arguments.requestId).toBe('mcp-original-receipt');
 });
+
+it('discards a model envelope request ID only when the server assigns the operation ID',()=>{
+ const execute={name:'bambook_execute',arguments:{requestId:'from-arguments',command:{type:'order.governance.saveDraft',payload:{}}},requestId:'from-envelope'};
+ const plan=parsePlatformTaskPlan(JSON.stringify(execute));
+ expect(plan).toEqual({name:execute.name,arguments:{command:execute.arguments.command}});
+ const step=newPlatformTaskStep(plan,0);
+ expect(step.plan.arguments.requestId).toBe(step.id);
+ const finish={name:'bambook_task',arguments:{action:'finish',outcome:'succeeded',result:'已核对'},requestId:'from-model'};
+ expect(parsePlatformTaskPlan(JSON.stringify(finish))).toEqual({name:finish.name,arguments:finish.arguments});
+ for(const wrong of [
+  {...execute,requestId:{value:'from-model'}},
+  {...execute,reasoning:'private'},
+  {...execute,workspaceId:'outside'},
+  {...execute,name:'bambook_get'},
+  {...finish,arguments:{action:'status'}},
+  {...execute,name:'bambook_audit'},
+ ])expect(()=>parsePlatformTaskPlan(JSON.stringify(wrong))).toThrow('MODEL_PLAN_INVALID');
+ expect(()=>parsePlatformTaskPlan(JSON.stringify({...execute,arguments:{...execute.arguments,workspaceId:'outside'}}))).toThrow('MODEL_PLAN_SCOPE');
+});
+
 it('labels omitted results while retaining stable operation references for recovery',()=>{
   const plan={name:'bambook_query',arguments:{type:'email'}},old={...newPlatformTaskStep(plan,0),result:{body:'x'.repeat(150_000)}},latest={...newPlatformTaskStep(plan,1),result:{revision:3,body:'y'.repeat(150_000),results:[{id:'mail'}]}};
   const history=platformTaskHistory([old,latest]);expect(history.omitted).toBe(1);expect(history.recent).toHaveLength(1);expect(history.operations.map(x=>x.operationId)).toEqual([old.id,latest.id]);
