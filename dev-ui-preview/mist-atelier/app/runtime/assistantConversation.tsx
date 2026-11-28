@@ -19,6 +19,7 @@ type ComposerDraft = {
 };
 type Conversation = ComposerDraft & {
   messages: AssistantReply[];
+  activeDraftId?: string;
   inactiveDrafts: Map<string, ComposerDraft>;
   answerDrafts: Map<string,TaskAnswerDraft>;
   workLogExpanded: Map<string,boolean>;
@@ -41,10 +42,78 @@ function storedAttachmentRefs(value: unknown): AssistantAttachmentRef[] {
     return [{ taskId, fileId, name: '', size: 0, needsVerification: true as const }];
   });
 }
-function load(scope: string): Conversation {
-  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { ...empty(), question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], attachmentRefs: storedAttachmentRefs(v.attachmentRefs), messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+const validConversationId = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(value);
+const hasDraft = ({question, selected, files, attachmentRefs}: ComposerDraft) =>
+  !!(question || selected.length || files.length || attachmentRefs.length);
+
+function selectedConversation(scope: string) {
+  // Match the composer selection, which uses the remembered ID when this tab has none.
+  try {
+    const key = 'mist.xiaozhu.conversation:' + scope;
+    const id = sessionStorage.getItem(key) ?? localStorage.getItem(key);
+    return validConversationId(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
-function save(scope: string, { question, selected, messages, attachmentRefs }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages, attachmentRefs: attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})) })); } catch { /* storage full or blocked: keep in memory only */ } }
+
+function readDraft(value: unknown): ComposerDraft {
+  if (!value || typeof value !== 'object') return emptyDraft();
+  const {question, selected, attachmentRefs} = value as Partial<Record<keyof ComposerDraft, unknown>>;
+  return {
+    question: typeof question === 'string' ? question : '',
+    selected: Array.isArray(selected) ? selected.filter(source =>
+      typeof source?.id === 'string' && typeof source.label === 'string') : [],
+    files: [],
+    attachmentRefs: storedAttachmentRefs(attachmentRefs),
+  };
+}
+
+function storedDraft({question, selected, attachmentRefs}: ComposerDraft) {
+  return {question, selected, attachmentRefs: attachmentRefs.map(({taskId,fileId})=>({taskId,fileId}))};
+}
+
+function load(scope: string): Conversation {
+  try {
+    const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope));
+    if (!raw) return empty();
+    const value = JSON.parse(raw);
+    if (!Array.isArray(value?.messages)) return empty();
+    const inactiveDrafts = new Map<string, ComposerDraft>();
+    for (const entry of Array.isArray(value.inactiveDrafts) ? value.inactiveDrafts : []) {
+      if (!Array.isArray(entry) || !validConversationId(entry[0])) continue;
+      const draft = readDraft(entry[1]);
+      if (hasDraft(draft)) inactiveDrafts.set(entry[0], draft);
+    }
+    const activeDraftId = selectedConversation(scope);
+    let active = readDraft(value);
+    if (validConversationId(value.activeDraftId) && value.activeDraftId !== activeDraftId) {
+      // A reload can observe a selection update before the corresponding draft save.
+      if (hasDraft(active)) inactiveDrafts.set(value.activeDraftId, active);
+      active = (activeDraftId ? inactiveDrafts.get(activeDraftId) : undefined) ?? emptyDraft();
+    }
+    if (activeDraftId) inactiveDrafts.delete(activeDraftId);
+    return { ...empty(), ...active, activeDraftId, inactiveDrafts, messages: value.messages.slice(-40) };
+  } catch {
+    return empty();
+  }
+}
+
+function save(scope: string, value: Conversation) {
+  try {
+    if (typeof sessionStorage === 'undefined' || !scope) return;
+    const {messages, inactiveDrafts} = value;
+    const inactive = [...inactiveDrafts].flatMap(([id, draft]) => {
+      const safe = storedDraft(draft);
+      return validConversationId(id) && (safe.question || safe.selected.length || safe.attachmentRefs.length)
+        ? [[id, safe]] : [];
+    });
+    sessionStorage.setItem(KEY(scope), JSON.stringify({
+      ...storedDraft(value), messages, activeDraftId: value.activeDraftId ?? selectedConversation(scope), inactiveDrafts: inactive,
+    }));
+  } catch { /* storage full or blocked: keep in memory only */ }
+}
 
 function useConversationState(scope: string, controlStorageScope?: string) {
   const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
@@ -93,19 +162,20 @@ function useConversationState(scope: string, controlStorageScope?: string) {
     if (from === to || live.current !== scope) return;
     setEntry(previous => {
       if (previous.scope !== scope || live.current !== scope) return previous;
-      const { question, selected, files, attachmentRefs, inactiveDrafts } = previous.value;
+      const { question, selected, files, attachmentRefs, inactiveDrafts, activeDraftId } = previous.value;
+      const outgoing = { question, selected, files, attachmentRefs };
       const drafts = new Map(inactiveDrafts);
       const incoming = drafts.get(to) ?? emptyDraft();
       drafts.delete(to);
-      if (question || selected.length || files.length || attachmentRefs.length) drafts.set(from, { question, selected, files, attachmentRefs });
-      return { scope, value: { ...previous.value, ...incoming, inactiveDrafts: drafts } };
+      if (hasDraft(outgoing)) drafts.set(activeDraftId ?? from, outgoing);
+      return { scope, value: { ...previous.value, ...incoming, activeDraftId: to, inactiveDrafts: drafts } };
     });
   }, [scope]);
   const clearDraft = React.useCallback((id: string, activeId: string) => {
     if (live.current !== scope) return;
     setEntry(previous => {
       if (previous.scope !== scope || live.current !== scope) return previous;
-      if (id === activeId) return { scope, value: { ...previous.value, ...emptyDraft() } };
+      if (id === (previous.value.activeDraftId ?? activeId)) return { scope, value: { ...previous.value, ...emptyDraft() } };
       if (!previous.value.inactiveDrafts.has(id)) return previous;
       const inactiveDrafts = new Map(previous.value.inactiveDrafts);
       inactiveDrafts.delete(id);
@@ -120,7 +190,7 @@ function useConversationState(scope: string, controlStorageScope?: string) {
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);
 
-/** The active draft is tab/account/company scoped. Local file bytes and drafts in inactive threads stay in memory. */
+/** Drafts are tab/account/company scoped. Local file bytes stay in memory. */
 export function AssistantConversationProvider({ scope, controlStorageScope, children }: { scope: string; controlStorageScope?: string; children: React.ReactNode }) {
   const value = useConversationState(scope,controlStorageScope);
   return <Context.Provider value={value}>{children}</Context.Provider>;
