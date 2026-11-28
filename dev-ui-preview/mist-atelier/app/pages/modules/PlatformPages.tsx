@@ -1,4 +1,4 @@
-import { isTaskAttachment, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { isTaskAttachment, taskAttachmentLabels, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import type { AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import {isOverdueMistInvoice} from '../../../../../server/src/shared/mistWorkspace';
 import {ClaimReplacementWork} from './ClaimReplacementWork';
@@ -733,7 +733,7 @@ export function AssistantPage(){
     <Drawer open={drafts} onClose={()=>setDrafts(false)} title={uiText("已保存草稿")} sub={uiText("审阅后保存的回复，尚未执行任何业务操作。")} footer={canChat?<Button icon={FileText} onClick={()=>{setDrafts(false);draft('');}}>{uiText("新建草稿")}</Button>:undefined}>
       {saved.length?<div className="mist-chat-picks">{saved.map(d=><div key={d.id} className="mist-chat-draft"><b>{d.title}</b><p className="mist-chat-text">{d.content}</p><div className="mist-row">{d.orderId&&<SourceOrder id={d.orderId}/>}<span className="mist-note">{d.createdAt.slice(0,10)}{uiText(" · 尚未执行")}</span></div></div>)}</div>:<EmptyState title={uiText("尚无草稿")} description={uiText("在小竹的回复下点“保存草稿”即可留存。")} compact/>}
     </Drawer>
-    {previewTask&&previewFile&&<FilePreview key={previewTask.id} files={previewFiles} index={previewIndex}
+    {previewTask&&previewFile&&<FilePreview key={previewTask.id} files={previewFiles} index={previewIndex} displayNames={taskAttachmentLabels(previewFiles)}
       initialPdfPage={typeof taskPreview?.target==='number'?taskPreview.target:undefined}
       initialSheetName={typeof taskPreview?.target==='string'?taskPreview.target:undefined}
       onIndex={index=>setTaskPreview({scope:attachmentScope,taskId:previewTask.id,fileId:previewFiles[index].id})}

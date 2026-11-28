@@ -388,8 +388,10 @@ it('rechecks an open report on focus and visibility, withholds it after confirme
 });
 it('opens a report attachment from the task drawer and removes its preview on restriction', async () => {
  const pdf={id:'pdf-a',name:'发票.pdf',mimeType:'application/pdf',size:30};
- const report={...row(),state:'succeeded',executor:'platform',result:'请核对 发票.pdf 第 23 页。',canControl:false,contentRestricted:false,
-  attachments:[pdf],trail:[{at:'',kind:'read',label:'已读',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[23]}]};
+ const sibling={...pdf,id:'pdf-b'};
+ const label='发票.pdf（2）';
+ const report={...row(),state:'succeeded',executor:'platform',result:'请核对 '+label+' 第 23 页。',canControl:false,contentRestricted:false,
+  attachments:[sibling,pdf],trail:[{at:'',kind:'read',label:'已读',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[23]}]};
  let current=report;
  seam.readAttachment.mockRejectedValue(new Error('暂时无法读取'));
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:current}
@@ -397,23 +399,23 @@ it('opens a report attachment from the task drawer and removes its preview on re
  act(paint);await flush();await click(getByText(host,report.name));
  expect(seam.readAttachment).not.toHaveBeenCalled();
  const dialog=getByRole(document.body,'dialog',{name:report.name});
- const citation=getByRole(dialog,'button',{name:pdf.name});
+ const citation=getByRole(dialog,'button',{name:label});
  expect(citation.title).toBe('第 23 页');
  citation.focus();await click(citation);
- expect(getByRole(document.body,'dialog',{name:pdf.name})).toBeTruthy();
+ expect(getByRole(document.body,'dialog',{name:label})).toBeTruthy();
  expect(seam.readAttachment).toHaveBeenLastCalledWith(report.id,pdf);
  await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));await flush();
  expect(document.activeElement).toBe(citation);
  await click(citation);
  current={...report,name:'Agent任务',result:'',attachments:[],trail:[],contentRestricted:true};
  await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
- expect(queryByRole(document.body,'dialog',{name:pdf.name})).toBeNull();
+ expect(queryByRole(document.body,'dialog',{name:label})).toBeNull();
  expect(getByRole(document.body,'dialog',{name:'Agent任务'})).toBeTruthy();
- expect(queryByRole(document.body,'button',{name:pdf.name})).toBeNull();
+ expect(queryByRole(document.body,'button',{name:label})).toBeNull();
  current=report;
  await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
- expect(getByRole(document.body,'button',{name:pdf.name})).toBeTruthy();
- expect(queryByRole(document.body,'dialog',{name:pdf.name})).toBeNull();
+ expect(getByRole(document.body,'button',{name:label})).toBeTruthy();
+ expect(queryByRole(document.body,'dialog',{name:label})).toBeNull();
  expect(seam.readAttachment).toHaveBeenCalledTimes(2);
  expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
 });

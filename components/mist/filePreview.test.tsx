@@ -12,9 +12,9 @@ let host: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement('div'); document.body.append(host); root = createRoot(host); (URL as any).createObjectURL ??= () => 'blob:mock'; (URL as any).revokeObjectURL ??= () => {}; });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ''; });
 const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
-function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number; initialSheetName?:string } = {}) {
+function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number; initialSheetName?:string; displayNames?:readonly string[] } = {}) {
   let index = 0; const onClose = vi.fn();
-  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} initialSheetName={extra.initialSheetName} />));
+  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} initialSheetName={extra.initialSheetName} displayNames={extra.displayNames} />));
   render(); return { onClose, get index() { return index; } };
 }
 const btn = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label || b.textContent?.trim() === label) as HTMLButtonElement;
@@ -127,6 +127,22 @@ describe('附件预览浮层', () => {
     expect(view.index).toBe(1); expect(document.querySelector('.mist-viewer-text')!.textContent).toBe('第二个文本');
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }))); await flush();
     expect(view.index).toBe(0); expect(load).toHaveBeenCalledTimes(2);
+  });
+  it('同名附件的标题保留显示编号，读取与下载仍传原件', async () => {
+    const files = [{ id: 'a', name: '条款.txt' }, { id: 'b', name: '条款.txt' }];
+    const load = vi.fn(async (file: PreviewFile) => new Blob([file.id], { type: 'text/plain' }));
+    const onDownload = vi.fn();
+    const title = () => document.querySelector('.mist-viewer-title .mist-h2')!;
+    mount(files, load, { displayNames: ['条款.txt（1）', '条款.txt（2）'], onDownload });
+    await flush();
+    expect(title().textContent).toBe('条款.txt（1）');
+    await act(async () => btn('下一个附件').click());
+    await flush();
+    expect(title().textContent).toBe('条款.txt（2）');
+    expect(title().getAttribute('title')).toBe('条款.txt（2）');
+    expect(load).toHaveBeenLastCalledWith(files[1]);
+    await act(async () => btn('下载').click());
+    expect(onDownload).toHaveBeenCalledExactlyOnceWith(files[1]);
   });
   it('Excel：显示工作表切换和单元格，行列号齐全', async () => {
     const wb = XLSX.utils.book_new();

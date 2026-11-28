@@ -6,7 +6,7 @@ import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
-import { taskAttachmentChoicesForQuestion, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentChoicesForQuestion, taskAttachmentLabels, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
@@ -422,7 +422,7 @@ function TaskReport({ task }: { task: AgentTaskView }) {
     </div>
    </CardBody>
   </Card>
-  {file&&<FilePreview files={files} index={index}
+  {file&&<FilePreview files={files} index={index} displayNames={taskAttachmentLabels(files)}
     initialPdfPage={typeof selection?.target==='number'?selection.target:undefined}
     initialSheetName={typeof selection?.target==='string'?selection.target:undefined}
     onIndex={next=>setSelection({fileId:files[next].id})} onClose={()=>setSelection(undefined)}
