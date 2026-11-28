@@ -1225,6 +1225,26 @@ it('sends selected scanned pages without the intervening pages or other attachme
  expect(text).not.toContain('OUTSIDE-OTHER-FILE');
 });
 
+it('keeps visual PDF pages bound to their own files alongside a text-only source',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'逐份核对。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'目视比对两份 PDF',
+   instructions:'请目视核对 alpha.pdf 第 3 页。请目视核对 beta.pdf 第 2 页。请只读取 note.pdf 第 1 页的文字。'}))
+  .attach('attachments',pdf('ALPHA-OUTSIDE',5,false,3),'alpha.pdf')
+  .attach('attachments',pdf('BETA-OUTSIDE',4,false,2),'beta.pdf')
+  .attach('attachments',pdf('TEXT-ONLY-REFERENCE'),'note.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ const input=complete.mock.calls[0][0],text=input.messages[0].content;
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ expect(input.images?.map(image=>image.name)).toEqual(['alpha.pdf 第 3 页','beta.pdf 第 2 页']);
+ expect(facts.pdfPageImages).toEqual([{file:'alpha.pdf',page:3},{file:'beta.pdf',page:2}]);
+ expect(text).toContain('TEXT-ONLY-REFERENCE');
+ expect(text).not.toContain('ALPHA-OUTSIDE');
+ expect(text).not.toContain('BETA-OUTSIDE');
+});
+
 it('reads the short tail of each PDF before asking the model to prepare the report', async () => {
  const complete = vi.fn(async (_input: LlmCompletionInput) =>
    tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已整理附件核对报告' }));

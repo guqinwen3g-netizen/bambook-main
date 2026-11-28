@@ -67,6 +67,7 @@ function taskAttachmentNames(attachments:NonNullable<AgentTaskView['attachments'
 type PdfChoice = {question:string;ids:string[]};
 type PdfSelection = {
   pdfRanges: Map<string,PdfPageScope>;
+  pdfVisualRanges: Map<string,PdfPageScope>;
   confirmedPdfChoices: Set<string>;
   pdfChoice?: PdfChoice;
   pdfScopeConflict?: boolean;
@@ -98,11 +99,11 @@ function readPdfPageList(first:PdfPageRange,tail:string,item:RegExp,wider:RegExp
 }
 
 function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]):PdfSelection {
-  const pdfRanges=new Map<string,PdfPageScope>();
+  const pdfRanges=new Map<string,PdfPageScope>(),pdfVisualRanges=new Map<string,PdfPageScope>();
   const confirmedPdfChoices=new Set<string>();
   const request=splitTaskRequest(instructions);
   const files=attachments.filter(isTaskPdf);
-  if(!files.length)return {pdfRanges,confirmedPdfChoices};
+  if(!files.length)return {pdfRanges,pdfVisualRanges,confirmedPdfChoices};
   const namesIn=taskAttachmentNames(attachments);
   const pdfIds=new Set(files.map(file=>file.id));
   const bind=(match:RegExpMatchArray,list:ReturnType<typeof readPdfPageList>)=>{
@@ -111,7 +112,7 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
     const clause=match[0]+' '+suffix;
     const mentioned=namesIn(clause).flat();
     const ids=[...new Set(mentioned.filter(file=>pdfIds.has(file.id)).map(file=>file.id))];
-    const binding={index,ranges:list.ranges,invalid:list.invalid};
+    const binding={index,ranges:list.ranges,invalid:list.invalid,visual:/目视|按图片|\bvisually[ \t]+inspect\b/i.test(match[0])};
     if(ids.length)return {...binding,ids,confirm:ids.length>1};
     const namedPdf= /[^\s。；;，,]+\.pdf\b/iu.test(clause);
     if(mentioned.length&&!namedPdf)return;
@@ -135,9 +136,9 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
   ];
   const bindings=ranges.flatMap(range=>range?[range]:[]).sort((a,b)=>a.index-b.index);
   const removed=new Set<string>();
-  for(const [index,{ranges,ids,confirm,invalid}] of bindings.entries()){
+  for(const [index,{ranges,ids,confirm,invalid,visual}] of bindings.entries()){
     if(invalid||ranges.some(({from,to})=>!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>to||to>1_000_000))
-      return {pdfRanges,confirmedPdfChoices,pdfScopeConflict:true};
+      return {pdfRanges,pdfVisualRanges,confirmedPdfChoices,pdfScopeConflict:true};
     let selected=ids[0];
     if(confirm){
       const planned=mergePdfRanges(ranges);
@@ -146,15 +147,19 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
       const answer=[...questions].reverse().find(q=>q.question===question&&q.answeredAt)?.answer?.trim();
       const name=answer?.replace(/(\.pdf)\((\d+)\)/gi,'$1（$2）');
       const choices=taskPdfChoices(attachments,ids).filter(({label})=>label===name);
-      if(choices.length!==1)return {pdfRanges,confirmedPdfChoices,pdfChoice:{question,ids}};
+      if(choices.length!==1)return {pdfRanges,pdfVisualRanges,confirmedPdfChoices,pdfChoice:{question,ids}};
       selected=choices[0].file.id;
       for(const id of ids)if(id!==selected)removed.add(id);
     }
     const previous=pdfRanges.get(selected);
     pdfRanges.set(selected,mergePdfRanges([...(previous?.windows??(previous?[previous]:[])),...ranges]));
+    if(visual){
+      const priorVisual=pdfVisualRanges.get(selected);
+      pdfVisualRanges.set(selected,mergePdfRanges([...(priorVisual?.windows??(priorVisual?[priorVisual]:[])),...ranges]));
+    }
   }
   for(const id of removed)if(!pdfRanges.has(id))confirmedPdfChoices.add(id);
-  return {pdfRanges,confirmedPdfChoices};
+  return {pdfRanges,pdfVisualRanges,confirmedPdfChoices};
 }
 
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
@@ -202,17 +207,17 @@ const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|nev
  * its own still allows the task to check other requested sources.
  */
 export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
-  const {pdfRanges,pdfChoice,pdfScopeConflict,confirmedPdfChoices}=pdfSelection(attachments,instructions,questions);
+  const {pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,confirmedPdfChoices}=pdfSelection(attachments,instructions,questions);
   const worksheet = requestedWorkbookWorksheet(attachments,instructions,questions);
   const request = splitTaskRequest(instructions);
   const allExcluded = EXCLUDE_ALL_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
   const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
-  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>()};
+  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>()};
   const scopedNames=new Set(attachments.filter(file=>pdfRanges.has(file.id)).map(file=>file.name));
   const siblings=attachments.filter(file=>!pdfRanges.has(file.id)&&(scopedNames.has(file.name)||confirmedPdfChoices.has(file.id)));
-  if(!othersExcluded&&!siblings.length)return {pdfRanges,worksheet,pdfChoice,pdfScopeConflict};
+  if(!othersExcluded&&!siblings.length)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict};
 
   const allowed=new Set(pdfRanges.keys());
   if(worksheet?.fileId)allowed.add(worksheet.fileId);
@@ -225,22 +230,23 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   }
   if(!othersExcluded){
     const excludedSiblings=siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id);
-    return {pdfRanges,worksheet,pdfChoice,pdfScopeConflict,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
+    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
   }
-  return {pdfRanges,worksheet,pdfChoice,pdfScopeConflict,allowedFiles:allowed};
+  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,allowedFiles:allowed};
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */
-export function explicitPdfVisualPages(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>){
+export function explicitPdfVisualPages(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>,pdfVisualRanges:ReadonlyMap<string,PdfPageScope>){
   const request=splitTaskRequest(instructions);
   if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
-    ||/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request)
-    ||pdfRanges.size!==1)return undefined;
-  const [entry]=pdfRanges;
-  const [fileId,range]=entry,windows=range.windows??[range];
-  if(windows.reduce((count,window)=>count+window.to-window.from+1,0)>3)return undefined;
-  const pages=windows.flatMap(window=>Array.from({length:window.to-window.from+1},(_,index)=>window.from+index));
-  return pages.length?{fileId,pages}:undefined;
+    ||/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request))return [];
+  const requested=pdfVisualRanges.size?pdfVisualRanges:pdfRanges.size===1?pdfRanges:new Map<string,PdfPageScope>();
+  const windows=[...requested].map(([fileId,range])=>({fileId,ranges:range.windows??[range]}));
+  const count=windows.reduce((total,{ranges})=>total+ranges.reduce((n,range)=>n+range.to-range.from+1,0),0);
+  if(count>3)return [];
+  return windows.map(({fileId,ranges})=>({fileId,
+    pages:ranges.flatMap(range=>Array.from({length:range.to-range.from+1},(_,index)=>range.from+index)),
+  }));
 }
 
 export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:ReadonlyMap<string,PdfPageScope>,

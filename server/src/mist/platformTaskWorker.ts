@@ -196,7 +196,7 @@ export class MistPlatformTaskWorker{
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
-        const {pdfRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
+        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
         if(pdfScopeConflict){
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
             requestId:'platform-pdf-range-conflict-'+job.taskId,outcome:'failed',result:'PDF 页码范围无效。请注明确切页码或页段后重新提交。',
@@ -284,19 +284,20 @@ export class MistPlatformTaskWorker{
               phase='model';
               const now=Date.now();
               const businessAt=context.businessAt===undefined?now:Date.parse(context.businessAt);
-              const visual=explicitPdfVisualPages(context.task.instructions,pdfRanges);
-              const candidates=visual?[...readableSteps].reverse().flatMap(step=>{
-                if(step.plan.name!=='bambook_file_text'||step.plan.arguments.fileId!==visual.fileId||step.compacted)return [];
-                const read=step.result as {kind?:string;sha256?:string;range?:{pageFrom?:number;pageTo?:number}}|undefined;
-                if(read?.kind!=='pdf'||!read.sha256||!read.range)return [];
-                return [{sha256:read.sha256,range:read.range}];
-              }):[];
-              const sha256=candidates[0]?.sha256;
-              const pages=visual?.pages.filter(page=>candidates.some(item=>item.sha256===sha256
-                &&page>=(item.range.pageFrom??Infinity)&&page<=(item.range.pageTo??-Infinity)))??[];
-              const scan=visual&&sha256&&pages.length?{fileId:visual.fileId,pages,sha256}:undefined;
-              const images=scan||readableAttachments?.some(file=>isTaskImage(file.name))
-                ? await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages,scan):undefined;
+              const visual=explicitPdfVisualPages(context.task.instructions,pdfRanges,pdfVisualRanges);
+              const scans=visual.flatMap(target=>{
+                const candidates=[...readableSteps].reverse().flatMap(step=>{
+                  if(step.plan.name!=='bambook_file_text'||step.plan.arguments.fileId!==target.fileId||step.compacted)return [];
+                  const read=step.result as {kind?:string;sha256?:string;range?:{pageFrom?:number;pageTo?:number}}|undefined;
+                  return read?.kind==='pdf'&&read.sha256&&read.range?[{sha256:read.sha256,range:read.range}]:[];
+                });
+                const sha256=candidates[0]?.sha256;
+                const pages=target.pages.filter(page=>candidates.some(item=>item.sha256===sha256
+                  &&page>=(item.range.pageFrom??Infinity)&&page<=(item.range.pageTo??-Infinity)));
+                return sha256&&pages.length?[{fileId:target.fileId,pages,sha256}]:[];
+              });
+              const images=scans.length||readableAttachments?.some(file=>isTaskImage(file.name))
+                ? await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages,scans):undefined;
               const imageSources=images?.map(image=>image.name);
               const pdfPageImages=images?.flatMap(image=>image.pdfPage?[image.pdfPage]:[])??[];
               const attachmentHandles=platformTaskAttachmentHandles(context.task.attachments);

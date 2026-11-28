@@ -2234,10 +2234,10 @@ export class MistRepository {
     });
   }
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache,
-    scan?:{fileId:string;pages:readonly number[];sha256:string},
+    scans:readonly {fileId:string;pages:readonly number[];sha256:string}[]= [],
   ):Promise<Array<{name:string;url:string;pdfPage?:{file:string;page:number}}>> {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
-    const {allowedFiles,pdfRanges,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
+    const {allowedFiles,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
     const images=files.flatMap((file,index)=>(!allowedFiles||allowedFiles.has(file.id))&&isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
     const prepared=await Promise.all(images.map(async ({file,name}) => {
       // Check the live original even when a previous model turn rendered the same image.
@@ -2255,38 +2255,48 @@ export class MistRepository {
       }
       return { name, url };
     }));
-    const selected=explicitPdfVisualPages(instructions,pdfRanges);
-    if(!scan||pdfChoice||pdfScopeConflict||selected?.fileId!==scan.fileId
-      ||!scan.pages.length||scan.pages.some(page=>!selected.pages.includes(page))
-      ||(allowedFiles&&!allowedFiles.has(scan.fileId)))return prepared;
-    const index=files.findIndex(file=>file.id===scan.fileId&&file.sha256===scan.sha256);
-    if(index<0)return prepared;
-    const file=files[index],bytes=await this.files.read(workspaceId,file);
-    const scanned:Array<{page:number;cacheId:string;url:string}>=[];
-    for(const page of new Set(scan.pages)){
-      const cacheId=file.id+':pdf:'+page,cached=rendered.get(cacheId);
-      let url=cached?.sha256===scan.sha256?cached.url:undefined;
-      if(!url){
-        const image=await renderPdfPageImage(bytes,page);
-        if(!image)continue;
-        const jpeg=await sharp(image,{limitInputPixels:2_560_000}).jpeg({quality:82}).toBuffer().catch(()=>undefined);
-        if(!jpeg)continue;
-        url='data:image/jpeg;base64,'+jpeg.toString('base64');
+    if(!scans.length||pdfChoice||pdfScopeConflict)return prepared;
+    const selected=explicitPdfVisualPages(instructions,pdfRanges,pdfVisualRanges);
+    const scanned:Array<{file:MistStoredFile;label:string;page:number;cacheId:string;url:string}>=[];
+    for(const scan of scans){
+      const target=selected.find(item=>item.fileId===scan.fileId);
+      if(!target||scan.pages.some(page=>!target.pages.includes(page))
+        ||(allowedFiles&&!allowedFiles.has(scan.fileId)))continue;
+      const index=files.findIndex(file=>file.id===scan.fileId&&file.sha256===scan.sha256);
+      if(index<0)continue;
+      const file=files[index],bytes=await this.files.read(workspaceId,file),label=labels[index];
+      for(const page of new Set(scan.pages)){
+        const cacheId=file.id+':pdf:'+page,cached=rendered.get(cacheId);
+        let url=cached?.sha256===scan.sha256?cached.url:undefined;
+        if(!url){
+          const image=await renderPdfPageImage(bytes,page);
+          if(!image)continue;
+          const jpeg=await sharp(image,{limitInputPixels:2_560_000}).jpeg({quality:82}).toBuffer().catch(()=>undefined);
+          if(!jpeg)continue;
+          url='data:image/jpeg;base64,'+jpeg.toString('base64');
+        }
+        scanned.push({file,label,page,cacheId,url});
       }
-      scanned.push({page,cacheId,url});
     }
     if(!scanned.length)return prepared;
     const current=await this.privateTaskAttachments(prior,workspaceId);
-    const stillVisible=current.files.find(item=>item.id===file.id);
     const currentScope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions);
-    const currentPage=explicitPdfVisualPages(current.instructions,currentScope.pdfRanges);
-    if(!stillVisible||!this.sameTaskAttachment(file,stillVisible)||currentScope.pdfChoice||currentScope.pdfScopeConflict
-      ||currentPage?.fileId!==scan.fileId||scanned.some(item=>!currentPage.pages.includes(item.page))
-      ||currentScope.allowedFiles&&!currentScope.allowedFiles.has(file.id))fail('FILE_NOT_FOUND','附件不在当前任务内',404);
-    await this.files.read(workspaceId,stillVisible);
-    const label=labels[index];
-    return [...prepared,...scanned.map(({page,cacheId,url})=>{
-      if(rendered.size<TASK_ATTACHMENT_COUNT&&url.length<=MAX_CACHED_TASK_IMAGE_URL_LENGTH)rendered.set(cacheId,{sha256:scan.sha256,url});
+    const currentPages=explicitPdfVisualPages(current.instructions,currentScope.pdfRanges,currentScope.pdfVisualRanges);
+    const verified=new Set<string>();
+    for(const {file,page} of scanned){
+      const stillVisible=current.files.find(item=>item.id===file.id);
+      const target=currentPages.find(item=>item.fileId===file.id);
+      if(!stillVisible||!this.sameTaskAttachment(file,stillVisible)||currentScope.pdfChoice||currentScope.pdfScopeConflict
+        ||!target?.pages.includes(page)||currentScope.allowedFiles&&!currentScope.allowedFiles.has(file.id))
+        fail('FILE_NOT_FOUND','附件不在当前任务内',404);
+      if(!verified.has(file.id)){
+        await this.files.read(workspaceId,stillVisible);
+        verified.add(file.id);
+      }
+    }
+    return [...prepared,...scanned.map(({file,label,page,cacheId,url})=>{
+      if(file.sha256&&rendered.size<TASK_ATTACHMENT_COUNT&&url.length<=MAX_CACHED_TASK_IMAGE_URL_LENGTH)
+        rendered.set(cacheId,{sha256:file.sha256,url});
       return {name:label+' 第 '+page+' 页',url,pdfPage:{file:label,page}};
     })];
   }
