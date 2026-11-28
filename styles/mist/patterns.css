@@ -1349,7 +1349,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-empty-composer { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .mist-xz-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; }
 .mist-xz-tile { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 0; border-radius: var(--mist-r-md); background: var(--mist-fill); color: var(--mist-ink-2); font: inherit; font-size: var(--mist-text-sm); line-height: 1.5; text-align: left; cursor: pointer; transition: background var(--mist-dur-fast) var(--mist-ease); }
-.mist-xz-tile:hover { background: var(--mist-fill-2); color: var(--mist-ink); }
+.mist-xz-tile:hover:not(:disabled) { background: var(--mist-fill-2); color: var(--mist-ink); }
+.mist-xz-tile:disabled { opacity: .5; cursor: default; }
 .mist-xz-tile > svg { flex: none; margin-top: 2px; color: var(--mist-ai); }
 
 /* 左栏与对话区同一底面，只靠留白分区；不再单独铺色，避免和顶栏拼出一块色块。 */

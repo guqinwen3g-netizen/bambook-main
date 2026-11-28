@@ -696,7 +696,7 @@ export function AssistantPage(){
             </div>
           </div>
           <div className="mist-xz-dock" ref={composerDock}><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
-        </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
+        </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} suggestionsDisabled={cowork.submittingHere} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
     </div>
     <Drawer open={!!activeStatusChoices} onClose={()=>setStatusChoices(undefined)} title={uiText('选择要核对的任务')}>
