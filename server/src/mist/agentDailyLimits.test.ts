@@ -89,3 +89,51 @@ it('allows the last model turn after automatic order preparation and counts only
  expect(usage.items).toMatchObject([{modelTurns:10}]);
  await f.create('platform').expect(429);
 });
+
+it.each([false,true])('reserves the last daily model turn for one task (first model fails: %s)',async firstFails=>{
+ vi.stubEnv('MIST_AGENT_DAILY_TURNS_PER_USER','10');
+ let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ let mail='',turn=0,finish!:()=>void;
+ const gate=new Promise<void>(resolve=>{finish=resolve;});
+ const report=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原件。'});
+ const complete=vi.fn(async()=>{
+  if(++turn<=8)return tool('bambook_get',{type:'email',id:mail});
+  if(turn===9)return report;
+  const first=turn===10;
+  await gate;
+  if(first&&firstFails)throw Error('Synthetic provider failure');
+  return report;
+ });
+ try{
+  const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;
+  f.worker.start(3_600_000);
+  await f.create('platform').expect(201);await f.drain();
+  const tasks=[];
+  for(let i=0;i<2;i++)tasks.push((await f.create('platform').expect(201)).body.item.id as string);
+  const current=()=>Promise.all(tasks.map(id=>taskRecord(f.local.database,f.workspace.id,id).then(({value})=>value)));
+  await f.worker.tick();
+  await vi.waitFor(async()=>{
+   const records=await current();
+   expect(complete.mock.calls.length>10||records.some(task=>task.state==='queued'&&task.lastHeartbeatAt!==undefined)).toBe(true);
+  });
+  expect(complete).toHaveBeenCalledTimes(10);
+  expect((await agentDailyUsage(f.local.database,f.workspace.id,'local-operator',clock)).turns).toBe(9);
+  finish();await f.worker.settled();clock+=1001;await f.drain();
+  expect((await current()).map(task=>task.state).sort()).toEqual([firstFails?'queued':'paused','succeeded']);
+  expect(complete).toHaveBeenCalledTimes(firstFails?11:10);
+  expect((await agentDailyUsage(f.local.database,f.workspace.id,'local-operator',clock)).turns).toBe(10);
+ }finally{finish();}
+});
+
+it('counts a model plan the day its call started even if saved after Shanghai midnight',async()=>{
+ const start=Date.parse('2026-11-28T15:59:59Z');
+ let clock=start;vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ const f=await fixture(async()=>{
+  clock=start+2000;
+  return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原件。'});
+ });
+ f.worker.start(3_600_000);
+ await f.create('platform').expect(201);await f.drain();
+ expect((await agentDailyUsage(f.local.database,f.workspace.id,'local-operator',start)).turns).toBe(1);
+ expect((await agentDailyUsage(f.local.database,f.workspace.id,'local-operator',clock)).turns).toBe(0);
+});

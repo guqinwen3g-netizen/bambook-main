@@ -104,7 +104,7 @@ export type TaskRecord = {
   condition?:TaskCondition;
   wakeReason?:'changed'|'deadline';
   requiredRead?:TaskConditionTarget;
-  lease?: { id: string; nonce: string; grantHash: string; startedAt: number; expiresAt: number; heartbeatAt: number; sequence: number; claimRequestId: string; workerId: string };
+  lease?: { id: string; nonce: string; grantHash: string; startedAt: number; expiresAt: number; heartbeatAt: number; sequence: number; claimRequestId: string; workerId: string; modelTurnAt?: number };
   operations: Array<{ requestId: string; inputHash: string }>;
   lastRequestId: string; lastAction: string; lastInputHash: string;
 };
@@ -342,7 +342,9 @@ export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLe
   if(c.platform.steps.length>=PLATFORM_TASK_TURN_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到模型轮次上限',409);
   const step=newPlatformTaskStep(plan,now);
   if(prefetched)step.prefetched=true;
+  else if(c.lease?.modelTurnAt!==undefined)step.modelTurnAt=c.lease.modelTurnAt;
   const n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],modelFallbackAt:undefined,issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined}};
+  if(step.modelTurnAt!==undefined)n.lease={...c.lease!,modelTurnAt:undefined};
   if(c.platform.checkpointBeforeIssue!==undefined)n.checkpoint=c.platform.checkpointBeforeIssue;
   await save(db,row,c,n);return step;
 }
@@ -358,10 +360,14 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
   await save(db,row,c,n);
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */
-export type PlatformTaskReleaseIssue = 'model_unavailable' | 'model_timeout' | 'model_response_invalid' | 'model_cooldown' | 'daily_limit';
+export type PlatformTaskReleaseIssue = 'model_unavailable' | 'model_timeout' | 'model_response_invalid' | 'model_cooldown' | 'daily_limit' | 'quota_pending';
 export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:PlatformTaskReleaseIssue|undefined,now:number,providerRetryAt?:number){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
+  if(issue==='quota_pending'){
+    await save(db,row,c,{...c,version:c.version+1,state:'queued',runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:now+1000}});
+    return;
+  }
   if(issue==='daily_limit'){
     // 用量上限不是模型故障：立即暂停、不计失败次数；本人次日恢复后从原步骤继续。
     const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,modelFallbackAt:undefined,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
@@ -642,22 +648,39 @@ export async function resolveTaskCredential(db: any, token: unknown, now: number
  * 费用按 2026-11-04 定案记到公司；收费与结算本期不做，这里只提供计量。
  */
 export type AgentDailyUsage = { date: string; tasks: number; turns: number; companyTurns: number; limits: ReturnType<typeof agentDailyLimits> };
+export async function reservePlatformModelTurn(db:any,actor:AgentActor,lease:AgentTaskLease,now:number):Promise<'reserved'|'pending'|'limit'>{
+  const {row,value:c}=await assertTaskLease(db,actor,lease,now,true);
+  if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.lease)fail('FORBIDDEN','请使用平台任务执行器',403);
+  if(c.lease.modelTurnAt!==undefined)return 'pending';
+  // The same serializable transaction reads company usage and writes the reservation.
+  const {usage,pending,companyPending}=await readAgentDailyUsage(db,lease.workspaceId,actor.userId,now,process.env);
+  if(usage.turns>=usage.limits.turnsPerUser||usage.companyTurns>=usage.limits.turnsPerCompany)return 'limit';
+  if(usage.turns+pending>=usage.limits.turnsPerUser||usage.companyTurns+companyPending>=usage.limits.turnsPerCompany)return 'pending';
+  await save(db,row,c,{...c,version:c.version+1,lease:{...c.lease,modelTurnAt:now}});
+  return 'reserved';
+}
 /**
  * 今日（上海营业日）平台任务用量：本人新建任务数、本人与全公司模型调用次数。
  * 任务最长有效 24 小时，今日的调用只可能来自 48 小时内创建的任务，按创建时间限定扫描范围。
  */
 export async function agentDailyUsage(db: any, workspaceId: string, ownerId: string, now: number, env: NodeJS.ProcessEnv = process.env): Promise<AgentDailyUsage> {
+  return (await readAgentDailyUsage(db,workspaceId,ownerId,now,env)).usage;
+}
+async function readAgentDailyUsage(db:any,workspaceId:string,ownerId:string,now:number,env:NodeJS.ProcessEnv){
   const date = mistBusinessDate(new Date(now)), limits = agentDailyLimits(env);
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: TASK_HASH, requestId: { startsWith: TASK_PREFIX }, createdAt: { gte: new Date(now - 2 * 86400_000 - TASK_TTL) } } });
-  let tasks = 0, turns = 0, companyTurns = 0;
+  let tasks = 0, turns = 0, companyTurns = 0, pending = 0, companyPending = 0;
   for (const row of rows) {
     let c: TaskRecord; try { c = record(row, workspaceId); } catch { continue; }
     if (c.executor !== 'platform') continue;
-    const today = (c.platform?.steps ?? []).filter(s => s.prefetched !== true && typeof s.at === 'string' && mistBusinessDate(s.at) === date).length;
+    const today = (c.platform?.steps ?? []).filter(s => s.prefetched !== true && typeof s.at === 'string' && mistBusinessDate(s.modelTurnAt===undefined?s.at:new Date(s.modelTurnAt)) === date).length;
+    const held = c.state==='running' && c.lease && c.lease.expiresAt>now && c.lease.modelTurnAt!==undefined
+      && mistBusinessDate(new Date(c.lease.modelTurnAt))===date ? 1 : 0;
     companyTurns += today;
-    if (c.ownerId === ownerId) { turns += today; if (mistBusinessDate(c.createdAt) === date) tasks++; }
+    companyPending += held;
+    if (c.ownerId === ownerId) { turns += today; pending += held; if (mistBusinessDate(c.createdAt) === date) tasks++; }
   }
-  return { date, tasks, turns, companyTurns, limits };
+  return {usage:{date,tasks,turns,companyTurns,limits},pending,companyPending};
 }
 /** 达到每日上限时拒绝：新建任务同时检查任务数，继续执行只检查模型调用次数。 */
 export function assertDailyRoom(u: AgentDailyUsage, creating: boolean) {

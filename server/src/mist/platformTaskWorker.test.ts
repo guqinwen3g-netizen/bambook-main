@@ -566,8 +566,8 @@ it('rechecks reused history immediately before the first model request', async (
  const {item:child}=(await f.human.post(endpoint).send({
   requestId:randomUUID(),name:'续核资料',instructions:'续核原资料。',conversationId,historyTaskIds:[previous.id],
  }).expect(201)).body;
- const verifyRoom=f.repository.platformTaskDailyRoom.bind(f.repository);
- const room=vi.spyOn(f.repository,'platformTaskDailyRoom').mockImplementationOnce(async actor=>{
+ const verifyRoom=f.repository.reservePlatformModelTurn.bind(f.repository);
+ const room=vi.spyOn(f.repository,'reservePlatformModelTurn').mockImplementationOnce(async actor=>{
   const permitted=await verifyRoom(actor);
   await f.local.database.$transaction(async db=>{
    const row=await db.mistWorkspace.findUnique({where:{id:f.workspace.id}});

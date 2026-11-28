@@ -376,7 +376,6 @@ export class MistPlatformTaskWorker{
             if(attachmentPlan){
               step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan,true);
             }else{
-              if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
               phase='model';
               const now=Date.now();
               const businessAt=context.businessAt===undefined?now:Date.parse(context.businessAt);
@@ -519,7 +518,6 @@ export class MistPlatformTaskWorker{
                 }
                 catch (error) { abort.abort(); throw error; }
               };
-              if(context.hasTaskHistory)await checkModelAuthority(false);
               const scopedCorrection=providedOnly&&context.steps.some(previous=>scopeDisposition(previous)?.providedMaterialScopeRejected)
                 ? '\n先前的范围外操作未执行。只在本轮材料内回答或向本人询问，不重复该操作。' : '';
               const correctionRule=confirmedScopeCorrections?.length
@@ -528,6 +526,11 @@ export class MistPlatformTaskWorker{
               const evidenceRules=attachmentRules+correctionRule+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+pdfVisualRule;
               const sourceRules=providedOnly?PROVIDED_MATERIAL_PROMPT+scopedCorrection+evidenceRules
                 :MODEL_PROMPT_PREFIX[context.task.mode]+evidenceRules+answerRule+decisionRule+customerCommandRule+lineIndexRule+namedLineRule+(draftCommand?'\n'+ORDER_DRAFT_RULE:'')+historyRule;
+              phase='store';
+              const reservation=await this.repository.reservePlatformModelTurn(actor);
+              if(reservation!=='reserved'){issue=reservation==='limit'?'daily_limit':'quota_pending';return;}
+              if(context.hasTaskHistory)await checkModelAuthority(false);
+              phase='model';
               const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:sourceRules+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
               if(abort.signal.aborted)return;
               const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);
