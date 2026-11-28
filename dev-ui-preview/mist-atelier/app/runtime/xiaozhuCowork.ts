@@ -254,7 +254,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     let changed=false;
     for(const task of tasks){
       const pending=controlKeys.get(task.id);
-      if(pending?.action==='cancel'&&restrictedTask(task))continue;
+      if(pending&&pending.action!=='answer'&&restrictedTask(task))continue;
       const awaitingAttachmentReceipt=pending?.action==='answer'&&pending.hasAttachments
         &&(pending.restoredFromStorage||task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt));
       if(pending&&(task.contentRestricted||!awaitingAttachmentReceipt&&(task.version>pending.version||task.canControl===false))) {
@@ -1029,6 +1029,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const controlTask = async (task:AgentTaskView, intent:TaskControlIntent|TaskControlRequest) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
     const {action}=intent;
+    if(action==='pause')return;
     const checkOnly='requestId' in intent;
     if(checkOnly&&(intent.version!==task.version||restrictedTask(task)||!task.canControl))return;
     const failure = CONTROL_FAILURE[action];
@@ -1063,8 +1064,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         }
       }
       const latest = await readCoworkTask(base,task.id,controller.signal);
-      if(request.action==='cancel'&&restrictedTask(latest)){
-        // An access mask does not tell the owner whether the earlier stop was applied.
+      if(request.action!=='answer'&&restrictedTask(latest)){
+        // An access mask does not tell the owner whether the earlier operation was applied.
         if(isCurrent()&&deniedHistory.current===denial){
           applyTaskUpdate(restrictReport(latest));
           maskReports([latest.id]);
@@ -1157,7 +1158,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const visibleControls={...controls};
   for(const task of tasks){
     const pending=controlKeys.get(task.id),previous=controls[task.id];
-    const matching=pending&&pending.version===task.version&&!restrictedTask(task)&&task.canControl!==false;
+    const matching=pending&&pending.action!=='pause'&&pending.version===task.version&&!restrictedTask(task)&&task.canControl!==false;
     if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
     if(previous?.attachmentReceiptPending&&(
       task.contentRestricted||pending?.action!=='answer'||!pending.hasAttachments||pending.requestId!==previous.attachmentReceiptRequestId
