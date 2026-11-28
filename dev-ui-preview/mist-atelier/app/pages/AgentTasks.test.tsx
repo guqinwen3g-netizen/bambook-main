@@ -389,6 +389,46 @@ it.each(['found','missing'])('reads an uncertain creation receipt before explici
  expect(queryByRole(document.body,'dialog',{name:'新建任务'})).toBeNull();
 });
 
+it.each(['found','missing'])('keeps the original task submission through reload for the same account (%s)',async receipt=>{
+ const scope=JSON.stringify(['reload-owner','workspace']);
+ const renders=()=>root.render(<MistRoot><ToastProvider><AssistantConversationProvider scope={seam.identity+':workspace'} controlStorageScope={JSON.stringify([seam.userId,'workspace'])}><AgentTasks onConnections={()=>{}}/></AssistantConversationProvider></ToastProvider></MistRoot>);
+ const posts:any[]=[],reads:string[]=[];
+ seam.userId='reload-owner';sessionStorage.removeItem('mist.xiaozhu.manual-task:'+scope);
+ seam.api.mockImplementation(async(url:string,init:any)=>{
+  if(init?.method==='POST'){posts.push(JSON.parse(init.body));if(posts.length===1)throw Error('网络中断');return {item:row()};}
+  if(url.includes('/agent-tasks/receipt/')){
+   reads.push(url);
+   if(receipt==='missing')throw Object.assign(Error('未找到原回执'),{status:404});
+   return {item:row()};
+  }
+  return url.includes('agent-identities')?{items:[identity()]}:{items:[row()],nextCursor:null};
+ });
+ try{
+  act(renders);await flush();await click(getByRole(host,'button',{name:'新建任务'}));
+  await act(async()=>{
+   fireEvent.change(getByLabelText(document.body,/Agent连接/,{selector:'select'}),{target:{value:'identity'}});
+   fireEvent.input(getByLabelText(document.body,/任务名称/,{selector:'input'}),{target:{value:'核对原交办'}});
+   fireEvent.input(getByLabelText(document.body,/任务内容/,{selector:'textarea'}),{target:{value:'保留这一次交办的原表单。'}});
+  });
+  await click(getByRole(document.body,'button',{name:'安排任务',exact:true}));
+  expect(posts).toHaveLength(1);
+  act(()=>root.unmount());root=createRoot(host);
+  seam.userId='different-account';seam.identity='new-session';act(renders);await flush();
+  expect(queryByRole(host,'button',{name:'核对原交办'})).toBeNull();
+  seam.userId='reload-owner';seam.identity='fresh-session';act(renders);await flush();
+  await click(getByRole(host,'button',{name:'核对原交办'}));
+  const instructions=getByLabelText(document.body,/任务内容/,{selector:'textarea'}) as HTMLTextAreaElement;
+  expect(instructions.value).toBe(posts[0].instructions);expect(instructions.disabled).toBe(true);
+  await click(getByRole(document.body,'button',{name:'核对原操作'}));
+  expect(posts).toHaveLength(1);expect(reads[0]).toMatch(new RegExp('/agent-tasks/receipt/'+posts[0].requestId+'$'));
+  if(receipt==='missing'){
+   await click(getByRole(document.body,'button',{name:'重发原任务'}));
+   expect(posts).toEqual([posts[0],posts[0]]);
+  }
+  expect(queryByRole(host,'button',{name:'核对原交办'})).toBeNull();
+ }finally{sessionStorage.removeItem('mist.xiaozhu.manual-task:'+scope);}
+});
+
 it('refreshes the open task and its history even after it leaves the first page',async()=>{
  let advanced=false;
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:advanced?[{action:'checkpoint',version:5,at:'2026-11-01T00:01:00Z',actorName:'邮件助理',actorId:'sales',state:'running'}]:[],nextCursor:null}:url.endsWith('/task')?{item:{...row(),state:advanced?'running':'queued',checkpoint:advanced?'当前检查点':''}}:{items:advanced?[]:[row()],nextCursor:null}));
