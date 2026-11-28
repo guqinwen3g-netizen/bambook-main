@@ -307,7 +307,8 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
         const heading = tree.children[position-1];
         if (heading.type !== 'heading' && heading.type !== 'paragraph') continue;
         const lead = readLead(heading);
-        const index = lead?.index ?? byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
+        const index = lead?.index ?? attachmentHeadingIndex(heading.children)
+          ?? byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
         if (index === undefined) continue;
         let details = tree.children[position];
         if(heading.type==='heading'&&details.type==='paragraph'&&!mentionsAnotherSource(details)
