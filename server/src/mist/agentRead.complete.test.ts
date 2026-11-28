@@ -13,6 +13,20 @@ it('identifies the RFQ section in a supplier inquiry return link',()=>{
  const s=state();s.rfqs=[{id:'rfq-return',code:'RFQ-RETURN'} as any];const result=agentGet(s,{...actor,permissions:['procurement:read']},'rfq','rfq-return'),url=new URL(result.link!);
  expect(url.searchParams.get('view')).toBe('procurement');expect(url.searchParams.get('section')).toBe('rfq');expect(url.searchParams.get('id')).toBe('rfq-return');
 });
+it('indexes only the selected order lines with their styles and an explicit coverage limit',()=>{
+ const s=state();
+ s.orders=[{id:'order-a',code:'SO-A'},{id:'order-b',code:'SO-B'}] as typeof s.orders;
+ s.orderLines=[
+  ...Array.from({length:31},(_,i)=>({id:'a-'+i,orderId:'order-a',name:'同款名',style:'STYLE-'+i})),
+  {id:'b',orderId:'order-b',name:'同款名',style:'STYLE-0'},
+ ] as typeof s.orderLines;
+ const result=agentRelated(s,actor,'order','order-a',{relatedType:'order_line'});
+ expect(result).toMatchObject({id:'order-a',total:31,truncated:true});
+ expect(result.related).toHaveLength(30);
+ expect(result.related[0]).toMatchObject({id:'a-0',label:'同款名',style:'STYLE-0'});
+ expect(result.related.every(row=>row.id.startsWith('a-'))).toBe(true);
+ expect(()=>agentRelated(s,{...actor,permissionCeiling:[]},'order','order-a',{relatedType:'order_line'})).toThrow('无权读取');
+});
 it('returns a small deep review record in full rather than dropping it at an arbitrary nesting depth',()=>{
  const s=state(),mail={id:'mail',subject:'Production request',body:'Original message',submissions:[{items:[{source:{review:{details:[{result:'accepted',note:'Complete original fact'}]}}}]}]};s.email.messages.push(mail as any);
  const result=agentGet(s,actor,'email','mail');expect(result.truncated).toBe(false);expect(result.data).toEqual(mail);
