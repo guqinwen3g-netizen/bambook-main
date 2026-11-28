@@ -86,7 +86,7 @@ export type TaskRecord = {
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
   stepsUsed: number; runtimeUsedMs: number; checkpoint: string; result: string; waitingProposalIds: string[];
-  lastProposalDecision?:{proposalId:string;outcome:'confirmed'|'rejected';readBack?:boolean};
+  lastProposalDecision?:{proposalId:string;outcome:'confirmed'|'rejected';readBack?:boolean;stepOffset?:number};
   stopReason?:'owner_declined';
   questions?:AgentTaskQuestion[];
   /** 由自动规则触发：遇到待确认提议时本次运行结束，提议留给本人。 */
@@ -508,7 +508,7 @@ export async function settleTaskProposal(db: any, actor: TokenPayload, workspace
   if (outcome === 'confirmed') await assertTaskAuthority(db, actor, c, now);
   if ((outcome === 'confirmed' && c.expiresAt <= now) || !c.waitingProposalIds.includes(proposalId)) fail('AGENT_TASK_NOT_READY', '所属任务或提议已失效', 409);
   const n = next(c, now, outcome, requestId, [proposalId]); n.waitingProposalIds = c.waitingProposalIds.filter(p => p !== proposalId); n.lease = undefined;
-  n.lastProposalDecision={proposalId,outcome};
+  n.lastProposalDecision={proposalId,outcome,...(c.platform?{stepOffset:c.platform.steps.length}:{})};
   if (c.state !== 'paused') n.state = n.waitingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : 'queued';
   n.checkpoint = outcome === 'confirmed' ? '本人已确认上一步提议；续办前核对业务结果。' : '本人已拒绝上一步提议；续办前查看拒绝原因。';
   if(n.platform)n.platform={...n.platform,nextRunAt:0,requiresRead:true};

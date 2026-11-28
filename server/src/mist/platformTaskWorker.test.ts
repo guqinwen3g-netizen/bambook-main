@@ -907,6 +907,37 @@ it('retains read-only service ceilings when the platform model asks to write',as
  let index=0,mail='';const complete=vi.fn(async()=>[tool('bambook_execute',{command:{type:'email.flag',payload:{id:mail,flag:'starred',value:true}}}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只读权限，未修改邮件。'})][index++]);
  const f=await fixture(complete,{mode:'read'});mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();expect((await f.current(task.id)).state).toBe('succeeded');expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(f.workspace.state.email);
 });
+it.each(['confirmed','rejected'] as const)('prefetches the explicitly referenced customer after a %s decision',async outcome=>{
+ let customerId='',calls=0;
+ const newTerms='T/T 40% 预付';
+ const updatedTerms=outcome==='confirmed'?newTerms:'人工换成另一条款';
+ const complete=vi.fn(async(input:LlmCompletionInput)=>{
+  calls++;
+  if(calls===1)return tool('bambook_execute',{command:{type:'customer.update',payload:{id:customerId,patch:{terms:newTerms}}}});
+  const prompt=input.messages[0].content;
+  const row=JSON.parse(prompt.slice(prompt.indexOf('{'))).history.recent.at(-1);
+  if(row?.name!=='bambook_get'||row.result?.object?.data?.terms!==updatedTerms)return tool('bambook_get',{type:'customer',id:customerId});
+  return tool('bambook_task',{action:'finish',outcome:outcome==='confirmed'?'succeeded':'stopped',result:'已回读 '+updatedTerms});
+ });
+ const f=await fixture(complete);
+ customerId=f.workspace.state.customers[0].id;
+ f.worker.start(3_600_000);
+ const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对客户付款条件',instructions:'拟修改引用客户付款条件。',intentRefs:[{kind:'customers',id:customerId}],
+ }).expect(201);
+ await f.drain();
+ const pending=await f.current(task.id);
+ expect(pending.state).toBe('waiting_human');
+ if(outcome==='rejected')await f.command('customer.update',{id:customerId,patch:{terms:updatedTerms}});
+ await f.command(outcome==='confirmed'?'agent.proposal.confirm':'agent.proposal.reject',{id:pending.waitingProposalIds[0]});
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:outcome==='confirmed'?'succeeded':'cancelled',result:'已回读 '+updatedTerms});
+ expect(complete).toHaveBeenCalledTimes(2);
+ const prompt=complete.mock.calls[1][0].messages[0].content;
+ expect(prompt).toContain('proposalReadBack');
+ expect(prompt).toContain(updatedTerms);
+});
+
 it('turns a business command the model executes into an owner proposal, waits for confirmation and then continues',async()=>{
  // customer.update 属中风险：平台执行器经 bambook_execute 只能得到 awaiting_confirmation 提议，本人确认后任务继续，不能直接改客户。
  let index=0,customer='';const complete=vi.fn(async()=>[

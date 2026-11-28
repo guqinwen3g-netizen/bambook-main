@@ -13,7 +13,7 @@ export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;mode
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const ATTACHMENT_PREFETCH_CHARS=3500;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
-export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
+export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;proposalReadBack?:{proposalId:string;outcome:'confirmed'|'rejected';ref:AgentTaskIntentRef;stepOffset:number};steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
 const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_get_orders','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
 
 /** Persist an observable tool decision, never private reasoning or provider credentials. */

@@ -49,10 +49,10 @@ export function taskHistoryReadRefs(
 }
 
 /** Only completed real get steps satisfy this pre-read; selecting an ID is not a read. */
-export function nextTaskIntentRead(refs:AgentTaskIntentRef[],steps:PlatformTaskStep[]):{plan?:PlatformTaskPlan;failed?:boolean}{
+export function nextTaskIntentRead(refs:AgentTaskIntentRef[],steps:PlatformTaskStep[],requireFull=false):{plan?:PlatformTaskPlan;failed?:boolean}{
   for(const target of taskIntentReadTargets(refs)){
     const attempts=steps.filter(step=>step.plan.name==='bambook_get'&&step.plan.arguments.type===target.type&&step.plan.arguments.id===target.id&&step.result!==undefined);
-    const read=attempts.some(step=>{const result=step.result as any;return !result?.error&&(result?.object?.id===target.id||step.compacted);});
+    const read=attempts.some(step=>{const result=step.result as any;return !result?.error&&(requireFull?result?.object?.id===target.id&&result.object.truncated===false:result?.object?.id===target.id||step.compacted);});
     if(read)continue;
     if(attempts.length)return{failed:true};
     return{plan:{name:'bambook_get',arguments:target}};

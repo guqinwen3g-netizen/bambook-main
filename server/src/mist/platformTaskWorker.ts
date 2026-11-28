@@ -206,8 +206,15 @@ export class MistPlatformTaskWorker{
           continue;
         }
         if(!step||step.result!==undefined){
-          const intentRead=nextTaskIntentRead(context.taskReadRefs,context.steps);
-          if(intentRead.failed){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-intent-read-'+job.taskId,outcome:'failed',result:'引用资料未能读取，请回原记录核对后重新安排。'});return;}
+          const decided=context.proposalReadBack;
+          const freshDecisionSteps=decided?context.steps.slice(decided.stepOffset):[];
+          const intentRead=decided&&context.requiresRead
+            ? nextTaskIntentRead([decided.ref],freshDecisionSteps,true)
+            : nextTaskIntentRead(context.taskReadRefs,context.steps);
+          if(intentRead.failed){
+            const result=decided&&context.requiresRead?'本人决定已记录，客户档案暂未能回读。请回原客户核对当前条款。':'引用资料未能读取，请回原记录核对后重新安排。';
+            await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-intent-read-'+job.taskId,outcome:'failed',result});return;
+          }
           if(context.steps.length>=PLATFORM_TASK_TURN_LIMIT){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-limit-'+job.taskId,outcome:'failed',result:'本次执行已达轮次上限，请核对原业务和已办记录后接续。'});return;}
           if(!this.available)throw Error('MODEL_UNAVAILABLE');
           if(intentRead.plan){step=await this.repository.savePlatformTaskPlan(actor,intentRead.plan);}
@@ -252,7 +259,16 @@ export class MistPlatformTaskWorker{
               const pdfTextRangeRule=history.pdfTextPageRanges
                 ? '\nhistory.pdfTextPageRanges 只列本轮有分段正文证据的页。摘要、明细和末段概括统一按同一原件的 ranges 描述文字。若用一个较大的页段概括正文，在同一句明示排除无可提取文字的页，不能把这些页也写成有文字。没有业务必要时，省略与问题无关的页段概括。'
                 : '';
-              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,history,...(imageSources?.length?{imageSources}:{})};
+              const reviewed=decided&&[...freshDecisionSteps].reverse().find(step=>{
+                const read=step.result as {error?:boolean;object?:{type?:string;id?:string;truncated?:boolean}}|undefined;
+                return step.plan.name==='bambook_get'&&!step.compacted&&!read?.error
+                  &&read?.object?.type==='customer'&&read.object.id===decided.ref.id&&read.object.truncated===false;
+              });
+              const proposalReadBack=reviewed&&decided&&!context.requiresRead&&history.recent.some(step=>step.operationId===reviewed.id)?{proposalId:decided.proposalId,outcome:decided.outcome,operationId:reviewed.id}:undefined;
+              const decisionRule=proposalReadBack
+                ? '\nproposalReadBack 指向本人决定之后已取得的客户完整回执。只为核对这项变更时，按该回执报告实际状态；本人拒绝则用 outcome=stopped 结束，不重复读取同一客户。'
+                : '';
+              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),history,...(imageSources?.length?{imageSources}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead
                 ? '\n当前答复无待复核的业务来源。问题已由本人补充且只需回答时，直接用 finish。若要办理业务，必须先读取当前相关记录；补充资料不代表批准操作。'
                 : '';
@@ -273,7 +289,7 @@ export class MistPlatformTaskWorker{
                 catch (error) { abort.abort(); throw error; }
               };
               if(context.hasTaskHistory)await checkModelAuthority(false);
-              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+decisionRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
               if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
             }
           }
