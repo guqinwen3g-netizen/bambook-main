@@ -2342,8 +2342,8 @@ export class MistRepository {
     scans:readonly {fileId:string;pages:readonly number[];sha256:string}[]= [],
   ):Promise<Array<{name:string;url:string;pdfPage?:{file:string;page:number}}>> {
     const {files,instructions,questions,readScopes}=await this.privateTaskAttachments(prior,workspaceId);
-    const {allowedFiles,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions,readScopes),labels=taskAttachmentLabels(files);
-    const images=files.flatMap((file,index)=>(!allowedFiles||allowedFiles.has(file.id))&&isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
+    const {allowedFiles,excludedFileIds,pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions,readScopes),labels=taskAttachmentLabels(files);
+    const images=files.flatMap((file,index)=>!excludedFileIds?.has(file.id)&&(!allowedFiles||allowedFiles.has(file.id))&&isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
     const prepared=await Promise.all(images.map(async ({file,name}) => {
       // Check the live original even when a previous model turn rendered the same image.
       const bytes = await this.files.read(workspaceId, file);
@@ -2366,7 +2366,7 @@ export class MistRepository {
     for(const scan of scans){
       const target=selected.find(item=>item.fileId===scan.fileId);
       if(!target||scan.pages.some(page=>!target.pages.includes(page))
-        ||(allowedFiles&&!allowedFiles.has(scan.fileId)))continue;
+        ||excludedFileIds?.has(scan.fileId)||(allowedFiles&&!allowedFiles.has(scan.fileId)))continue;
       const index=files.findIndex(file=>file.id===scan.fileId&&file.sha256===scan.sha256);
       if(index<0)continue;
       const file=files[index],bytes=await this.files.read(workspaceId,file),label=labels[index];
@@ -2392,7 +2392,7 @@ export class MistRepository {
       const stillVisible=current.files.find(item=>item.id===file.id);
       const target=currentPages.find(item=>item.fileId===file.id);
       if(!stillVisible||!this.sameTaskAttachment(file,stillVisible)||currentScope.pdfChoice||currentScope.pdfScopeConflict||currentScope.pdfVisualChoice
-        ||!target?.pages.includes(page)||currentScope.allowedFiles&&!currentScope.allowedFiles.has(file.id))
+        ||!target?.pages.includes(page)||currentScope.excludedFileIds?.has(file.id)||currentScope.allowedFiles&&!currentScope.allowedFiles.has(file.id))
         fail('FILE_NOT_FOUND','附件不在当前任务内',404);
       if(!verified.has(file.id)){
         await this.files.read(workspaceId,stillVisible);

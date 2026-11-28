@@ -265,6 +265,27 @@ it('preserves omitted originals and does not widen inherited visual pages via fa
  expect(scope.pdfRanges.get(scan.id)).toEqual({from:2,to:2});
  expect(scope.excludedFileIds?.has(other.id)).toBe(true);
  expect(explicitPdfVisualPages(text,scope.pdfRanges,scope.pdfVisualRanges,inherited)).toEqual([]);
+ const twice=retryAttachmentReadScope(scan,[scan,other],text,[],inherited)!;
+ expect(twice).toEqual({fileId:'scan',pages:{from:2,to:2},visual:null});
+ const second=requestedTaskAttachmentScope([scan],text,[],[twice]);
+ expect(explicitPdfVisualPages(text,second.pdfRanges,second.pdfVisualRanges,[twice])).toEqual([]);
+ const denied=retryAttachmentReadScope(scan,[scan],'核对 scan.pdf。不要目视。')!;
+ expect(denied).toEqual({fileId:'scan',visual:null});
+ const declared=requestedTaskAttachmentScope([scan],text,[],[denied]);
+ expect(explicitPdfVisualPages(text,declared.pdfRanges,declared.pdfVisualRanges,[denied])).toEqual([]);
+});
+it('does not inherit a conflicting retry request as an expanded page or worksheet range',()=>{
+ const scan={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200};
+ const previous=[{fileId:scan.id,pages:{from:3,to:3}}];
+ const bad='请只读取 scan.pdf 第 1 页。';
+ expect(requestedTaskAttachmentScope([scan],bad,[],previous).pdfScopeConflict).toBe(true);
+ expect(retryAttachmentReadScope(scan,[scan],bad,[],previous)).toEqual(previous[0]);
+ const first={id:'a',name:'a.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:1200};
+ const second={...first,id:'b',name:'b.xlsx'};
+ const sheets=[{fileId:'a',sheet:'报价',rows:[{from:2,to:2}]},{fileId:'b',sheet:'报价',rows:[{from:3,to:3}]}];
+ expect(requestedTaskAttachmentScope([first,second],'核对资料。',[],sheets).worksheet?.rowScopeConflict).toBe(true);
+ expect(retryAttachmentReadScope(first,[first,second],'核对资料。',[],sheets)).toEqual(sheets[0]);
+ expect(retryAttachmentReadScope(second,[first,second],'核对资料。',[],sheets)).toEqual(sheets[1]);
 });
 it('accepts common page and row phrasing within the matching bounded range',()=>{
  const prompt={sourceQuestionId:'answer',fileId:'file',kind:'pdf' as const,allowed:[{from:2,to:4},{from:6,to:6}]};

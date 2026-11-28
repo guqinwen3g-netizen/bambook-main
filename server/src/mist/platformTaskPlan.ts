@@ -265,21 +265,24 @@ const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|nev
  * Explicit negatives apply to the entire task attachment set. A page or worksheet limit on
  * its own still allows the task to check other requested sources.
  */
+const deniesPdfVisual=(text:string)=>/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(text);
 function requestedPdfVisualRanges(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>,pdfVisualRanges:ReadonlyMap<string,PdfPageScope>,
   inherited:readonly TaskAttachmentReadScope[]=[]){
   const request=splitTaskRequest(instructions);
-  if(/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request))
-    return new Map<string,PdfPageScope>();
+  if(deniesPdfVisual(request))return new Map<string,PdfPageScope>();
   const requested=pdfVisualRanges.size?pdfVisualRanges
     :/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)&&pdfRanges.size===1
       ?pdfRanges:new Map<string,PdfPageScope>();
   if(!inherited.length)return requested;
   const ranges=new Map(requested);
   for(const limit of inherited){
-    if('excluded' in limit){ranges.delete(limit.fileId);continue;}
+    if('excluded' in limit||'visual' in limit&&limit.visual===null){ranges.delete(limit.fileId);continue;}
     const current=ranges.get(limit.fileId);
-    if(!current||!('pages' in limit)||!limit.visual)continue;
-    const permitted=intersectRanges(current.windows??[current],limit.visual.windows??[limit.visual]);
+    if(!current||'sheet' in limit)continue;
+    const text=pdfRanges.get(limit.fileId);
+    const withinVisual='visual' in limit&&limit.visual
+      ?intersectRanges(current.windows??[current],limit.visual.windows??[limit.visual]):current.windows??[current];
+    const permitted=text?intersectRanges(withinVisual,text.windows??[text]):withinVisual;
     if(permitted.length)ranges.set(limit.fileId,mergePdfRanges(permitted));
     else ranges.delete(limit.fileId);
   }
@@ -396,7 +399,7 @@ function narrowWorksheet(original:ReturnType<typeof requestedWorkbookWorksheet>,
 }
 
 export type TaskAttachmentReadScope = {fileId:string} & (
-  {excluded:true} | {pages:PdfPageScope;visual?:PdfPageScope} | {sheet:string;rows?:readonly PdfPageRange[]}
+  {excluded:true} | {pages?:PdfPageScope;visual?:PdfPageScope|null} | {sheet:string;rows?:readonly PdfPageRange[]}
 );
 
 export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[],
@@ -418,24 +421,20 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   const inheritedExclusions=new Set<string>();
   for(const limit of inherited){
     if('excluded' in limit){inheritedExclusions.add(limit.fileId);continue;}
-    if('pages' in limit){
-      const current=pdfRanges.get(limit.fileId),previous=limit.pages;
-      const pages=current?intersectRanges(current.windows??[current],previous.windows??[previous]):previous.windows??[previous];
-      if(!pages.length){pdfScopeConflict=true;continue;}
-      pdfRanges.set(limit.fileId,mergePdfRanges(pages));
-      const currentVisual=pdfVisualRanges.get(limit.fileId),previousVisual=limit.visual;
-      const visual=currentVisual??previousVisual;
-      if(visual){
-        const bound=currentVisual&&previousVisual
-          ?intersectRanges(currentVisual.windows??[currentVisual],previousVisual.windows??[previousVisual]):visual.windows??[visual];
-        const permitted=intersectRanges(pages,bound);
-        if(permitted.length)pdfVisualRanges.set(limit.fileId,mergePdfRanges(permitted));
-        else pdfVisualRanges.delete(limit.fileId);
-      }
-    }else{
+    if('sheet' in limit){
       worksheet=narrowWorksheet(worksheet,{fileId:limit.fileId,worksheet:limit.sheet,rows:limit.rows,
         workbookIds:[limit.fileId],worksheetQuestion:undefined,needsWorksheetChoice:false,rowScopeConflict:false});
+      continue;
     }
+    const current=pdfRanges.get(limit.fileId),prior=limit.pages;
+    if(prior){
+      const pages=current?intersectRanges(current.windows??[current],prior.windows??[prior]):prior.windows??[prior];
+      if(!pages.length)pdfScopeConflict=true;
+      // Even from a failed retry, a later retry must inherit the actual prior bound.
+      pdfRanges.set(limit.fileId,pages.length?mergePdfRanges(pages):prior);
+    }
+    if(limit.visual===null){pdfVisualRanges.delete(limit.fileId);continue;}
+    if(limit.visual&&!pdfVisualRanges.has(limit.fileId))pdfVisualRanges.set(limit.fileId,limit.visual);
   }
   // A correction in a supplement applies only to the files delivered with
   // that answer. It can narrow the task's original bounds, never expand them.
@@ -513,12 +512,21 @@ export function retryAttachmentReadScope(file:NonNullable<AgentTaskView['attachm
   const pages=scope.pdfRanges.get(fileId);
   if(scope.allowedFiles&&!scope.allowedFiles.has(fileId)||scope.excludedFileIds?.has(fileId)
     ||scope.pdfChoice?.ids.includes(fileId)||scope.pdfVisualCandidates?.some(candidate=>candidate.fileId===fileId)
-    ||isTaskPdf(file)&&scope.pdfScopeConflict&&!pages
-    ||sheet?.workbookIds.includes(fileId)&&(sheet.fileId!==fileId||sheet.rowScopeConflict||!sheet.worksheet))
+    ||isTaskPdf(file)&&scope.pdfScopeConflict&&!pages)
     return {fileId,excluded:true};
-  if(pages){
-    const visual=requestedPdfVisualRanges(instructions,scope.pdfRanges,scope.pdfVisualRanges,inherited).get(fileId);
-    return {fileId,pages,...(visual?{visual}:{})};
+  // A failed single-workbook resolution must not discard any individual workbook's bounds.
+  if(sheet?.rowScopeConflict){
+    const prior=inherited?.find(limit=>limit.fileId===fileId&&'sheet' in limit);
+    if(prior)return prior;
+  }
+  if(sheet?.workbookIds.includes(fileId)&&(sheet.fileId!==fileId||sheet.rowScopeConflict||!sheet.worksheet))return {fileId,excluded:true};
+  if(isTaskPdf(file)){
+    const denied=deniesPdfVisual(splitTaskRequest(instructions))||questions?.some(question=>
+      question.answeredAt&&question.answer&&question.attachmentIds?.includes(fileId)&&deniesPdfVisual(question.answer));
+    const bounded=inherited?.some(limit=>limit.fileId===fileId&&'visual' in limit&&limit.visual!==undefined);
+    const requested=requestedPdfVisualRanges(instructions,scope.pdfRanges,scope.pdfVisualRanges,inherited).get(fileId);
+    const visual=denied?null:requested??(bounded?null:undefined);
+    if(pages||visual!==undefined)return {fileId,...(pages?{pages}:{}),...(visual!==undefined?{visual}:{})};
   }
   if(sheet?.fileId===fileId)return {fileId,sheet:sheet.worksheet,...(sheet.rows?{rows:sheet.rows}:{})};
 }

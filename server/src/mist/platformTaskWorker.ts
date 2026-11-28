@@ -409,7 +409,7 @@ export class MistPlatformTaskWorker{
                   :question===selected?[{...question,question:WORKSHEET_NAME_QUESTION,answer:worksheetScope.worksheet}]:[]);
               }
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
-              if(allowedFiles||excludedFileIds||pdfRanges.size||worksheetScope?.rows)modelTask.instructions=splitTaskRequest(modelTask.instructions);
+              if(allowedFiles||excludedFileIds||pdfRanges.size||worksheetScope)modelTask.instructions=splitTaskRequest(modelTask.instructions);
               const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'
