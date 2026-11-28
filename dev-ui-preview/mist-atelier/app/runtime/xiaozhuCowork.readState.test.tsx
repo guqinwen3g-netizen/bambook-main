@@ -15,6 +15,103 @@ const loaded=async(url:string)=>url.includes('/agent-identities')?{items:[{id:'i
 function View({workspace='workspace',conversationId}:{workspace?:string;conversationId?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true,conversationId);return <div>{channel.tasks.length}</div>}
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();api.mockReset();});
 
+it.each(['online','focus'])('refreshes task creation capability on %s without reloading existing history',async(eventName)=>{
+ let reads=0,restore:(value:unknown)=>void=()=>{};
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-task-capabilities')){
+   if(++reads===1)return {platformAvailable:false};
+   return new Promise(resolve=>{restore=resolve;});
+  }
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ expect(channel.available).toBe(false);
+ await act(async()=>{
+  window.dispatchEvent(new Event(eventName));
+  window.dispatchEvent(new Event(eventName));
+ });
+ expect(reads).toBe(2);
+ await act(async()=>restore({platformAvailable:true}));
+ expect(channel.available).toBe(true);
+ expect(channel.tasks.map(item=>item.id)).toEqual([task.id]);
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+ expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it('replaces an interrupted capability check on reconnect and ignores its late result',async()=>{
+ let connected=true,reads=0;
+ const online=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>connected);
+ const probes:{signal:AbortSignal;resolve:(value:unknown)=>void}[]=[];
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-task-capabilities')){
+    if(++reads===1)return {platformAvailable:false};
+    return new Promise(resolve=>probes.push({signal:init!.signal!,resolve}));
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  await act(async()=>window.dispatchEvent(new Event('focus')));
+  await act(async()=>{
+   connected=false;window.dispatchEvent(new Event('offline'));
+   connected=true;window.dispatchEvent(new Event('online'));
+  });
+  expect(probes[0].signal.aborted).toBe(true);
+  expect(probes).toHaveLength(2);
+  await act(async()=>probes[1].resolve({platformAvailable:true}));
+  await act(async()=>probes[0].resolve({platformAvailable:false}));
+  expect(channel.available).toBe(true);
+  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+ }finally{online.mockRestore();}
+});
+
+it('does not move receipt recovery from a superseded reconnect to a later focus',async()=>{
+ const scope='account:workspace';
+ savePendingSubmissions(scope,new Map([['receipt',{requestId:'01234567-0123-4567-89ab-0123456789ab',instructions:'待核对',locale:'zh-CN',draftKey:'draft',hasAttachments:false}]]));
+ let reads=0,receipts=0;
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.endsWith('/agent-task-capabilities')){
+    if(++reads===2)return new Promise(()=>{});
+    return {platformAvailable:false};
+   }
+   if(url.includes('/tasks/receipt/')){
+    receipts++;throw Object.assign(new Error('暂未找回回执'),{status:404});
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  expect(receipts).toBe(1);
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(reads).toBe(2);
+  await act(async()=>channel.reload());
+  expect(receipts).toBe(2);
+  await act(async()=>window.dispatchEvent(new Event('focus')));
+  expect(reads).toBe(4);
+  expect(receipts).toBe(2);
+ }finally{savePendingSubmissions(scope,new Map());}
+});
+
+it('clears task history when the capability recheck returns a permission denial',async()=>{
+ let reads=0;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-task-capabilities')){
+   if(++reads===1)return {platformAvailable:false};
+   throw Object.assign(new Error('权限不足'),{status:403});
+  }
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>window.dispatchEvent(new Event('online')));
+ expect(channel.available).toBe(false);
+ expect(channel.error).toBe('权限不足');
+ expect(channel.tasks).toEqual([]);
+});
+
 it('looks up the visible paused task on focus even when the model is unavailable',async()=>{
  const paused={...task,id:'visible-paused',state:'paused',conversationId:'c_focus',version:5,result:''};
  const offscreen={...paused,id:'offscreen-paused',conversationId:'c_other'};
