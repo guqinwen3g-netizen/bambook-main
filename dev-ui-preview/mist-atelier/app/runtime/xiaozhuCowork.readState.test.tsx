@@ -481,6 +481,45 @@ it('retries an unconfirmed answer with the same operation ID and keeps the rest 
  expect(channel.tasks[0].questions?.[0]?.answer).toBe('1 月 18 日');
  expect(channel.controls.task.error).toBe('');
 });
+it('keeps an original task recovered while an older task-list request is pending',async()=>{
+ const conversationId='c_recovered_during_list';
+ const recovered={...task,id:'recovered',conversationId,version:2,result:'原报告已找回'};
+ let requestId='',holdList=false,omitOld=false,releaseList:((value:unknown)=>void)|undefined;
+ api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(init?.method==='POST'&&url.endsWith('/personal-agent/tasks')){
+   requestId=JSON.parse(String(init.body)).requestId;
+   throw new Error('回执连接断开');
+  }
+  if(url.includes('/personal-agent/tasks/receipt/')){
+   expect(url.endsWith(requestId)).toBe(true);
+   return {item:recovered};
+  }
+  if(url.endsWith('/agent-tasks')){
+   if(holdList)return new Promise(resolve=>{releaseList=resolve;});
+   return {items:omitOld?[]:[task],nextCursor:null};
+  }
+  if(url.includes('/personal-agent/task-access?'))return {restrictedIds:[]};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId={conversationId}/>));
+ await act(async()=>{await channel.send('核对原问题',[],conversationId);});
+ expect(channel.hasPendingSubmission).toBe(true);
+ holdList=true;
+ let loading:Promise<void>|undefined;
+ await act(async()=>{loading=channel.reload();});
+ expect(releaseList).toBeTypeOf('function');
+ await act(async()=>window.dispatchEvent(new Event('online')));
+ expect(channel.tasks.map(item=>item.id)).toContain(recovered.id);
+ await act(async()=>{releaseList?.({items:[],nextCursor:null});await loading;});
+ expect(channel.tasks.map(item=>item.id)).toEqual([recovered.id]);
+ expect(channel.hasPendingSubmission).toBe(false);
+ expect(api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
+ holdList=false;omitOld=true;
+ await act(async()=>channel.reload());
+ expect(channel.tasks).toEqual([]);
+});
+
 it('retains the known task channel and history after a failed refresh, blocks a new task, and recovers on a read retry',async()=>{
  api.mockImplementation(loaded);host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<View/>));expect(channel.available).toBe(true);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);
  api.mockRejectedValue(new Error('任务读取失败'));await act(async()=>channel.reload());expect(channel.available).toBe(true);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);expect(channel.error).toBe('任务读取失败');await act(async()=>{expect(await channel.send('不应创建任务')).toBeNull()});expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);

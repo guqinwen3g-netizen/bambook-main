@@ -289,6 +289,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     setMoreError('');
     if (!base || !enabled) { setLoading(false); setCheckingAvailability(false); setAvailable(false); return; }
     const controller = new AbortController(), capabilityController = new AbortController();
+    const knownTaskIds = new Set(currentTasks.current.map(task => task.id));
     historyRead.current = controller;
     capabilityRead.current = capabilityController;
     const current = () => run === version.current && live.current === bound;
@@ -305,17 +306,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       personalIdentity.current = own?.id;
       const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
+      const listedTaskIds = new Set(visible.map(task => task.id));
       setTasks(old => {
         const previous = new Map(old.map(task => [task.id, task]));
         const history = visible.map(task => {
           const prior = previous.get(task.id);
           return prior ? mergeTaskUpdate(prior, task) : task;
         });
-        // The exact source may be older than the bounded history, even on a successful list read.
+        // The page can omit an explicitly opened older task or a receipt recovered while it was in flight.
         const tracked = trackedOrigin.current;
-        const retained = tracked?.scope === bound && tracked.id === origin.current ? previous.get(tracked.id) : undefined;
-        return retained && (!own || retained.identityId === own.id) && !history.some(task => task.id === retained.id)
-          ? [...history, retained].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : history;
+        const originId = tracked?.scope === bound && tracked.id === origin.current ? tracked.id : undefined;
+        const retained = old.filter(task => task.executor === 'platform' && (!own || task.identityId === own.id)
+          && !listedTaskIds.has(task.id) && (task.id === originId || !knownTaskIds.has(task.id)));
+        return retained.length ? [...history, ...retained].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : history;
       });
       setMore(page.cursor);
       setLoading(false);
