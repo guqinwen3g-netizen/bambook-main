@@ -8,6 +8,19 @@ it('preserves current full-object access across ordinary values and new optional
  s.orders[0].amount=20;(s.orders[0]as any).newReview={state:'reviewed'};expect(taskSourcesVisible(refs,taskScopeHash(),s,s)).toBe(true);
  s.orders=[];expect(taskSourcesVisible(refs,taskScopeHash(),s,s)).toBe(false);
 });
+it('retains only the recorded historical read of a removed line while its parent remains visible',()=>{
+ const raw=state();
+ raw.orders.push({id:'order',code:'SO-1'} as any);
+ const historical={path:'orderLines',id:'line',partial:false,coverage:[],removedFromOrderId:'order'};
+ const scopeHash=taskScopeHash();
+ expect(taskSourcesVisible([historical],scopeHash,raw,raw)).toBe(true);
+ expect(taskSourcesVisible([historical],scopeHash,{...raw,orders:[]},raw)).toBe(false);
+ const recreated={...raw,orderLines:[{id:'line',orderId:'different-order'} as any]};
+ expect(taskSourcesVisible([historical],scopeHash,raw,recreated)).toBe(false);
+ expect(taskSourcesVisible([{...historical,removedFromOrderId:undefined}],scopeHash,raw,raw)).toBe(false);
+ expect(taskSourcesVisible([historical,{path:'customers',id:'unrelated',partial:false,coverage:[]}],scopeHash,raw,raw)).toBe(false);
+});
+
 it('rejects changed team/department data boundaries even when module permissions are unchanged',()=>{
  const s=state(),old={userIds:['u'],teamIds:['a']};expect(taskSourcesVisible([],taskScopeHash(old,s),s,s,{userIds:['u'],teamIds:['b']})).toBe(false);
 });
