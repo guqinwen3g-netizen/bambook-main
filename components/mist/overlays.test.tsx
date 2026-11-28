@@ -97,18 +97,24 @@ it('keeps a modal-owned portal menu focused, closes only the menu on Escape and 
   expect(document.activeElement).toBe(host.querySelector('[aria-label="下一字段"]')); expect(host.querySelector('[role="menu"]')).toBeNull();
 });
 
-it('dismisses only the top nested modal and restores focus to its parent trigger', () => {
+it.each(['drawer','dialog'] as const)('marks the nested %s surface and restores focus to its parent trigger', (kind) => {
   const parentClose = vi.fn();
   function Example() {
     const [child, setChild] = React.useState(false);
-    return <MistRoot><Dialog open onClose={parentClose} title="父任务"><button onClick={() => setChild(true)}>查看子任务</button>
-      <Dialog open={child} onClose={() => setChild(false)} title="子任务"><input aria-label="子字段" /></Dialog>
-    </Dialog></MistRoot>;
+    const Child = kind === 'drawer' ? Drawer : Dialog;
+    return <MistRoot><Drawer open onClose={parentClose} title="父任务"><button onClick={() => setChild(true)}>查看子任务</button>
+      <Child open={child} onClose={() => setChild(false)} title="子任务"><input aria-label="子字段" /></Child>
+    </Drawer></MistRoot>;
   }
   const host = render(<Example />), trigger = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === '查看子任务')!;
   act(() => trigger.focus()); click(trigger);
-  expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+  const [parent, child] = host.querySelectorAll('[role="dialog"]');
+  expect([parent, child].map(panel => panel.hasAttribute('data-nested'))).toEqual([false,true]);
+  expect([parent, child].map(panel => panel.hasAttribute('inert'))).toEqual([true,false]);
+  expect([parent, child].map(panel => panel.previousElementSibling?.hasAttribute('inert'))).toEqual([true,false]);
   key(document.activeElement!, 'Escape'); expect(parentClose).not.toHaveBeenCalled(); expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  expect(parent.hasAttribute('inert')).toBe(false);
+  expect(parent.previousElementSibling?.hasAttribute('inert')).toBe(false);
   expect(document.activeElement).toBe(trigger);
 });
 
@@ -119,8 +125,10 @@ it('resets a controlled search on opening and executes a real result after typin
     return <MistRoot><button onClick={() => setOpen(true)}>搜索</button><CommandPalette open={open} onClose={() => setOpen(false)} query={query} onQueryChange={setQuery}
       items={query === '订单' ? [{ id: 'order', group: '订单', label: '订单 SO-1', run }] : []} /></MistRoot>;
   }
-  const host = render(<Example />); click(host.querySelector<HTMLButtonElement>('button')!);
+  const host = render(<Example />), opener = host.querySelector<HTMLButtonElement>('button')!;
+  act(() => opener.focus()); click(opener);
   const input = host.querySelector<HTMLInputElement>('input')!;
+  expect(document.activeElement).toBe(input);
   expect(input.value).toBe('');
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '订单');
@@ -128,6 +136,7 @@ it('resets a controlled search on opening and executes a real result after typin
   });
   expect(host.querySelector('.mist-palette-it')?.textContent).toContain('订单 SO-1');
   key(input, 'Enter'); expect(run).toHaveBeenCalledTimes(1); expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(opener);
 });
 
 
