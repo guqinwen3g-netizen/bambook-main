@@ -226,6 +226,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   const controlKeys=savedControls??localControls;
   const restoredAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
+  const abortRestoredAnswerChecks=React.useCallback(()=>{
+    for(const controller of restoredAnswerChecks.values())controller?.abort();
+    restoredAnswerChecks.clear();
+  },[restoredAnswerChecks]);
   React.useEffect(()=>{
     let changed=false;
     for(const task of tasks){
@@ -246,9 +250,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if(pending?.action!=='answer'||!pending.hasAttachments||!pending.restoredFromStorage||task.contentRestricted
         ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt)
         ||restoredAnswerChecks.has(pending.requestId))continue;
-      const controller=new AbortController();
+      const controller=new AbortController(),authority=deniedHistory.current;
       restoredAnswerChecks.set(pending.requestId,controller);
-      const current=()=>live.current===scope&&restoredAnswerChecks.get(pending.requestId)===controller
+      const current=()=>navigator.onLine&&!controller.signal.aborted&&deniedHistory.current===authority
+        &&live.current===scope&&restoredAnswerChecks.get(pending.requestId)===controller
         &&controlKeys.get(task.id)===pending&&currentTasks.current.some(item=>item.id===task.id&&!item.contentRestricted);
       const forget=()=>{
         controlKeys.delete(task.id);
@@ -273,13 +278,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       for(const [id,controller] of restoredAnswerChecks)if(!controller)restoredAnswerChecks.delete(id);
       recoverRestoredAnswers();
     };
+    window.addEventListener('offline',abortRestoredAnswerChecks);
     window.addEventListener('online',reconnect);
     return()=>{
+      window.removeEventListener('offline',abortRestoredAnswerChecks);
       window.removeEventListener('online',reconnect);
-      for(const controller of restoredAnswerChecks.values())controller?.abort();
-      restoredAnswerChecks.clear();
+      abortRestoredAnswerChecks();
     };
-  },[recoverRestoredAnswers,restoredAnswerChecks]);
+  },[abortRestoredAnswerChecks,recoverRestoredAnswers,restoredAnswerChecks]);
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
@@ -343,10 +349,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const clearDeniedHistory = React.useCallback(()=>{
     deniedHistory.current++;trackedOrigin.current=undefined;
     receiptReconnectPending.current=false;receiptRead.current?.abort();
-    abortOlderRead();moreRecovery.current=undefined;
+    abortRestoredAnswerChecks();abortOlderRead();moreRecovery.current=undefined;
     setLoadingMore(false);setMoreError('');
     setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
-  },[abortOlderRead]);
+  },[abortOlderRead,abortRestoredAnswerChecks]);
   const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
     historyRecovery.current=mode==='reconnect'?'pending':undefined;
