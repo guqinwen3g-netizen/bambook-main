@@ -32,7 +32,17 @@ function ownedMenu(node: HTMLElement, target: Node | null) {
     .find(menu => menu.dataset.mistOwner === node.id && !!target && menu.contains(target));
 }
 
-/** 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 */
+function setModalCovered(node: HTMLElement, covered: boolean) {
+  node.toggleAttribute('inert', covered);
+  const scrim = node.previousElementSibling;
+  if (scrim?.classList.contains('mist-scrim')) scrim.toggleAttribute('inert', covered);
+  if (!node.id) return;
+  for (const menu of document.querySelectorAll<HTMLElement>('[data-mist-owner]')) {
+    if (menu.dataset.mistOwner === node.id) menu.toggleAttribute('inert', covered);
+  }
+}
+
+/** 顶层浮层独占交互，关闭后回到触发器；允许自身的 portal 菜单。 */
 export function useModalFocus(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>) {
   const target = useMistPortalTarget();
   const cb = React.useRef(onClose);
@@ -41,6 +51,8 @@ export function useModalFocus(open: boolean, onClose: () => void, ref: React.Ref
     const node = ref.current;
     if (!open || !node) return;
     const prev = document.activeElement as HTMLElement | null;
+    const previousTop = modalStack.at(-1);
+    if (previousTop) setModalCovered(previousTop, true);
     modalStack.push(node);
     const isTop = () => modalStack.at(-1) === node;
     const focusFirst = () => (focusableIn(node)[0] ?? node).focus();
@@ -61,7 +73,12 @@ export function useModalFocus(open: boolean, onClose: () => void, ref: React.Ref
     return () => {
       document.removeEventListener('keydown', h, true);
       document.removeEventListener('focusin', onFocus);
+      const wasTop = isTop();
       const i = modalStack.indexOf(node); if (i >= 0) modalStack.splice(i, 1);
+      setModalCovered(node, false);
+      if (!wasTop) return;
+      const nextTop = modalStack.at(-1);
+      if (nextTop) setModalCovered(nextTop, false);
       if (prev?.isConnected) prev.focus();
       // React's close commit may subsequently restore its old BODY selection.
       // Retry only while focus is unclaimed; never override a new page or modal.

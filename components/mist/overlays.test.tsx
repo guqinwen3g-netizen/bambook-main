@@ -108,8 +108,13 @@ it.each(['drawer','dialog'] as const)('marks the nested %s surface and restores 
   }
   const host = render(<Example />), trigger = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === '查看子任务')!;
   act(() => trigger.focus()); click(trigger);
-  expect(Array.from(host.querySelectorAll('[role="dialog"]'), panel => panel.hasAttribute('data-nested'))).toEqual([false,true]);
+  const [parent, child] = host.querySelectorAll('[role="dialog"]');
+  expect([parent, child].map(panel => panel.hasAttribute('data-nested'))).toEqual([false,true]);
+  expect([parent, child].map(panel => panel.hasAttribute('inert'))).toEqual([true,false]);
+  expect([parent, child].map(panel => panel.previousElementSibling?.hasAttribute('inert'))).toEqual([true,false]);
   key(document.activeElement!, 'Escape'); expect(parentClose).not.toHaveBeenCalled(); expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  expect(parent.hasAttribute('inert')).toBe(false);
+  expect(parent.previousElementSibling?.hasAttribute('inert')).toBe(false);
   expect(document.activeElement).toBe(trigger);
 });
 
