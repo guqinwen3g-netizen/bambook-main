@@ -130,6 +130,46 @@ it.each(['PDF','Excel'])('corrects a conflicting supplemental %s range on the sa
  }
 });
 
+it.each(['model','attachment'])('closes one platform task when a %s question would exceed the limit',async(kind)=>{
+ const asksForFile=kind==='attachment';
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'question',question:'请确认下一项资料。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const item=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),
+  name:'核对交付资料',instructions:'只用我提供的资料。'+(asksForFile?'请只读取 scope.pdf 第 2 页。':'请确认交付。'),
+ }).expect(201)).body.item;
+ const endpoint=f.base+'/agent-tasks/'+item.id+'/answer';
+ let uploadResponse:any;
+ for(let index=0;index<10;index++){
+  await f.drain();
+  const waiting=await f.current(item.id);
+  expect(waiting.state).toBe('waiting_human');
+  const body={requestId:randomUUID(),version:waiting.version,questionId:waiting.questions.at(-1).id,answer:'第 '+(index+1)+' 项已确认。'};
+  if(asksForFile&&index===9){
+   const bytes=pdf('Question limit fixture',3);
+   const response=await f.human.post(endpoint).field('answer',JSON.stringify({...body,answer:'请只读取 scope.pdf 第 3 页。'}))
+    .attach('attachments',bytes,'scope.pdf').expect(200);
+   uploadResponse={requestId:body.requestId,files:response.body.item.attachments};
+  }else await f.human.post(endpoint).send(body).expect(200);
+ }
+ const read=vi.spyOn(f.repository,'fileText');
+ await f.drain();
+ const closed=await f.current(item.id);
+ expect(closed).toMatchObject({id:item.id,state:'failed',canControl:false,result:expect.stringContaining('提问已达上限')});
+ expect(closed.questions).toHaveLength(10);
+ expect(closed.questions.every((question:{answeredAt?:string})=>!!question.answeredAt)).toBe(true);
+ expect(read).not.toHaveBeenCalled();
+ if(uploadResponse){
+  const receipt=(await f.human.get(endpoint+'/receipt/'+uploadResponse.requestId).expect(200)).body;
+  expect(receipt).toMatchObject({item:{id:item.id,state:'failed'},attachmentIds:[uploadResponse.files[0].id]});
+  await f.human.get(f.base+'/agent-tasks/'+item.id+'/attachments/'+uploadResponse.files[0].id).expect(200);
+ }
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(asksForFile?10:11);
+ expect(await f.current(item.id)).toEqual(closed);
+});
+
 it('checks cumulative attachment limits before completing the original question',async()=>{
  const f=await fixture(async()=>tool('bambook_task',{action:'question',question:'请补充资料。'}));
  f.worker.start(3_600_000);
