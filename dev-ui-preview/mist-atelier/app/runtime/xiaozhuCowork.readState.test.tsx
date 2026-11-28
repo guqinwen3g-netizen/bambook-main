@@ -827,6 +827,121 @@ it('aborts a hanging first history request on disconnect and ignores its reply a
  } finally { status.mockRestore(); }
 });
 
+it('retries the same older-page cursor once after an in-flight disconnect',async()=>{
+ const older={...task,id:'recovered-older'};
+ const reads:{signal:AbortSignal;resolve:(value:unknown)=>void}[]=[];
+ let connected=true;
+ const online=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>connected);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks'))return {items:[task],nextCursor:'2'};
+   if(url.endsWith('cursor=2'))return {items:[],nextCursor:'3'};
+   if(url.endsWith('cursor=3'))return {items:[],nextCursor:'4'};
+   if(url.endsWith('cursor=4'))return new Promise(resolve=>reads.push({signal:init!.signal!,resolve}));
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  await act(async()=>{void channel.loadMore();});
+  expect(reads).toHaveLength(1);
+  await act(async()=>{
+   connected=false;window.dispatchEvent(new Event('offline'));
+   connected=true;window.dispatchEvent(new Event('online'));window.dispatchEvent(new Event('online'));
+  });
+  expect(reads[0].signal.aborted).toBe(true);
+  expect(reads).toHaveLength(2);
+  await act(async()=>reads[1].resolve({items:[older],nextCursor:null}));
+  await act(async()=>reads[0].resolve({items:[{...older,id:'late'}],nextCursor:'stale'}));
+  expect(channel.tasks.map(item=>item.id)).toEqual([older.id,task.id]);
+  expect(channel.hasMore).toBe(false);
+  expect(channel.moreError).toBe('');
+  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+ }finally{online.mockRestore();}
+});
+
+it.each([503,403])('only reopens a failed older page automatically for a transient response (%s)',async(status)=>{
+ const older={...task,id:'older-page'};
+ let available=false,reads=0;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-tasks'))return {items:[task],nextCursor:'2'};
+  if(url.endsWith('cursor=2'))return {items:[],nextCursor:'3'};
+  if(url.endsWith('cursor=3'))return {items:[],nextCursor:'4'};
+  if(url.endsWith('cursor=4')){
+   reads++;
+   if(!available)throw Object.assign(new Error('旧对话读取失败'),{status});
+   return {items:[older],nextCursor:null};
+  }
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>channel.loadMore());
+ expect(channel.moreError).toBe('旧对话读取失败');
+ available=true;
+ await act(async()=>window.dispatchEvent(new Event('online')));
+ expect(reads).toBe(status===503?2:1);
+ expect(channel.tasks.map(item=>item.id)).toEqual(status===503?[older.id,task.id]:[task.id]);
+ expect(channel.error).toBe('');
+});
+
+it('keeps the pagination cursor while the first history load also recovers after disconnect',async()=>{
+ const older={...task,id:'older-page'},alreadyLoaded={...task,id:'already-loaded'};
+ const pages:{signal:AbortSignal;resolve:(value:unknown)=>void}[]=[];
+ let connected=true,capabilities=0;
+ const online=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>connected);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-task-capabilities')&&++capabilities===1)return new Promise(()=>{});
+   if(url.endsWith('/agent-tasks'))return {items:[task],nextCursor:'2'};
+   if(url.endsWith('cursor=2'))return {items:[],nextCursor:'3'};
+   if(url.endsWith('cursor=3'))return {items:[],nextCursor:'4'};
+   if(url.endsWith('cursor=4'))return {items:[alreadyLoaded],nextCursor:'5'};
+   if(url.endsWith('cursor=5'))return new Promise(resolve=>pages.push({signal:init!.signal!,resolve}));
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  expect(channel.checkingAvailability).toBe(true);
+  await act(async()=>channel.loadMore());
+  expect(channel.tasks.map(item=>item.id)).toEqual([alreadyLoaded.id,task.id]);
+  await act(async()=>{void channel.loadMore();});
+  await act(async()=>{
+   connected=false;window.dispatchEvent(new Event('offline'));
+   connected=true;window.dispatchEvent(new Event('online'));
+  });
+  expect(pages[0].signal.aborted).toBe(true);
+  expect(pages).toHaveLength(2);
+  await act(async()=>pages[1].resolve({items:[older],nextCursor:null}));
+  expect(channel.tasks.map(item=>item.id)).toEqual([older.id,task.id,alreadyLoaded.id]);
+ }finally{online.mockRestore();}
+});
+
+it('ignores an older page that comes back after the initial permission check is denied',async()=>{
+ let deny:(error:unknown)=>void=()=>{},deliver:(value:unknown)=>void=()=>{};
+ let signal:AbortSignal|undefined;
+ api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-task-capabilities'))return new Promise((_,reject)=>{deny=reject;});
+  if(url.endsWith('/agent-tasks'))return {items:[task],nextCursor:'2'};
+  if(url.endsWith('cursor=2'))return {items:[],nextCursor:'3'};
+  if(url.endsWith('cursor=3'))return {items:[],nextCursor:'4'};
+  if(url.endsWith('cursor=4')){
+   signal=init?.signal??undefined;
+   return new Promise(resolve=>{deliver=resolve;});
+  }
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{void channel.loadMore();});
+ await act(async()=>deny(Object.assign(new Error('权限不足'),{status:403})));
+ expect(channel.tasks).toEqual([]);
+ expect(signal?.aborted).toBe(true);
+ await act(async()=>deliver({items:[{...task,id:'late-report'}],nextCursor:'5'}));
+ expect(channel.tasks).toEqual([]);
+ expect(channel.hasMore).toBe(false);
+ expect(channel.loadingMore).toBe(false);
+});
+
 it('times out an older page without blocking composition and ignores a page from the previous workspace', async () => {
   vi.useFakeTimers();
   let sendLate: (value: unknown) => void = () => {};
