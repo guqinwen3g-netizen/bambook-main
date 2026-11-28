@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
-import { AgentProposalDialog } from './AgentProposalDialog';
+import { AgentProposalDialog, proposalFieldChanges } from './AgentProposalDialog';
 
 function reopenProposalFixture(){
  const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00Z',actorName:'业务员'},'empty');
@@ -50,6 +50,29 @@ it('identifies a contract proposal by its order and original filename without pr
   expect(getConfirm(host).disabled).toBe(false);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it('compares order draft payment notes and blocks confirmation when the draft note changes',()=>{
+ const{state,proposal}=contractProposalFixture();
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const order=state.orders[0],original=order.governance!.contract;
+ proposal.command.payload.input={...original,paymentNote:'拟改的付款说明'};
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  expect(host.textContent).toContain('当前付款说明 · T/T 100% 预付');
+  expect(host.textContent).toContain('拟改付款说明 · 拟改的付款说明');
+  expect(host.textContent).not.toContain('交货地点 · 上海');
+  expect(getConfirm(host).disabled).toBe(false);
+  original.paymentNote='另一会话最新付款说明';render();
+  expect(host.textContent).toContain('订单付款说明已更新，请重新提出提议');
+  expect(host.textContent).toContain('当前付款说明 · 另一会话最新付款说明');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it.each(['order','file'])('blocks a saved contract proposal after its %s source becomes invisible',kind=>{
  const{state,proposal}=contractProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);
@@ -62,10 +85,139 @@ it('identifies the assigned owner and priced line, permits new proposed lines, a
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();
   expect(host.textContent).toContain('负责人 · 沈禾');expect(host.textContent).toContain('单价 · 2.25 GBP');expect(host.textContent).not.toContain('line-private');expect(host.textContent).not.toContain('owner-private');expect(host.textContent).not.toContain('img ·');
-  state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(false);expect(host.textContent).toContain('HLB-T01');expect(host.textContent).not.toContain('line-private');
+  proposal.id='fresh-new-line-proposal';state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(false);expect(host.textContent).toContain('HLB-T01');expect(host.textContent).not.toContain('line-private');
   state.orderLines=[{id:'line-private',orderId:'another-order',style:'OTHER'} as any];render();expect(getConfirm(host).disabled).toBe(true);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it.each(['line','currency'] as const)('disables stale order draft confirmation when its %s basis changes',kind=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.currency='USD';
+ const line={id:'keep',orderId:order.id,name:'模拟外套',style:'SIM-A',qty:10,unit:'件',price:12};
+ const other={...line,id:'other-line',orderId:'another-order'};
+ state.orderLines=[line,other] as typeof state.orderLines;
+ if(kind==='line')proposal.command.payload.lines=[{...line,price:14}];
+ else proposal.command.payload.orderPatch={currency:'EUR'};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  expect(getConfirm(host).disabled).toBe(false);
+  other.price=50;render();
+  expect(getConfirm(host).disabled).toBe(false);
+  if(kind==='line')line.price=15;else order.currency='GBP';
+  render();
+  expect(host.textContent).toContain('订单条目或币种已更新，请重新提出提议');
+  expect(host.textContent).toContain('当前订单金额 · '+(kind==='line'?'150.00 USD':'120.00 GBP'));
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+it('shows which current draft lines will be removed before listing replacement lines',()=>{
+ const{state,proposal}=contractProposalFixture(),order=state.orders[0];
+ const kept={id:'line-kept',orderId:order.id,name:'样衣',style:'SIM-KEEP',qty:10,unit:'件',price:1.95};
+ const removed={...kept,id:'line-remove',name:'量产外套',style:'SIM-REMOVE',qty:24};
+ state.orderLines=[kept,removed] as typeof state.orderLines;
+ proposal.command.payload.lines=[{...kept,price:2.15}];
+ const changes=proposalFieldChanges(proposal.command,true,state);
+ expect(changes.rows).toContainEqual(expect.objectContaining({field:'拟移除条目',value:'SIM-REMOVE · 量产外套 · 24 件'}));
+ expect(changes.rows.findIndex(row=>row.field==='拟移除条目')).toBeLessThan(changes.rows.findIndex(row=>row.path==='lines.1.id'));
+ expect(changes.rows.filter(row=>row.field==='拟移除条目')).toHaveLength(1);
+ delete proposal.command.payload.lines;
+ expect(proposalFieldChanges(proposal.command,true,state).rows.some(row=>row.field==='拟移除条目')).toBe(false);
+});
+
+it('compares exact order totals using quantities from the proposed breakdown',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.type='fabric';
+ order.currency='USD';
+ state.orderLines=[
+  {id:'keep',orderId:order.id,name:'量产面料',style:'SIM-A',qty:10,unit:'米',price:12},
+  {id:'remove',orderId:order.id,name:'旧面料',style:'SIM-B',qty:24,unit:'米',price:14},
+ ] as typeof state.orderLines;
+ proposal.command.payload.orderPatch={currency:'eur'};
+ proposal.command.payload.lines=[{...state.orderLines[0],qty:undefined,price:12.35,
+  breakdown:{kind:'fabric',composition:'涤纶',width:150,weight:110,rows:[{color:'Blue',quantity:10.25}]}}];
+ const rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows).toContainEqual(expect.objectContaining({field:'当前订单金额',value:'456.00 USD'}));
+ expect(rows).toContainEqual(expect.objectContaining({field:'拟改订单金额',value:'126.59 EUR'}));
+ expect(rows.find(row=>row.path==='lines.1.price')?.value).toBe('12.35 EUR');
+ proposal.command.payload.lines[0].price=12.345;
+ expect(proposalFieldChanges(proposal.command,true,state).rows.find(row=>row.path==='order.total.after')?.value).toBe('金额无效');;
+});
+
+it('uses the active order currency when the new draft omits a currency change',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.type='garment';
+ order.currency='USD';
+ const active={id:'keep',orderId:order.id,name:'打样外套',style:'SIM-A',qty:10,unit:'件',price:12};
+ state.orderLines=[active] as typeof state.orderLines;
+ order.governance!.changeDraft={contract:order.governance!.contract,orderPatch:{season:'AW',due:'2027-01-28',currency:'EUR'},
+  lines:[{...active,price:14}] as any,reason:'旧变更草稿',status:'draft'};
+ proposal.command.payload.lines=[active];
+ const rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows).toContainEqual(expect.objectContaining({field:'当前订单金额',value:'140.00 EUR'}));
+ expect(rows).toContainEqual(expect.objectContaining({field:'拟改订单金额',value:'120.00 USD'}));
+ expect(rows.find(row=>row.path==='lines.1.price')?.value).toBe('12.00 USD');
+});
+
+it('keeps a long replacement review focused on the one removed line',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.currency='USD';
+ state.orderLines=Array.from({length:35},(_,index)=>({
+  id:'line-'+index,orderId:order.id,name:'模拟外套',style:'SIM-'+index,qty:10,unit:'件',price:12,img:'coat',made:0,qc:0,
+  fulfillmentMode:'cmt',cmtIncludedItems:[],
+ }));
+ proposal.command.payload.lines=state.orderLines.slice(0,-1).map(({orderId,made,qc,img,...line})=>line);
+ const {rows,omitted}=proposalFieldChanges(proposal.command,true,state);
+ expect(rows.filter(row=>row.path.startsWith('lines.'))).toEqual([
+  expect.objectContaining({field:'拟移除条目',value:'SIM-34 · 模拟外套 · 10 件'}),
+ ]);
+ expect(omitted).toBe(0);
+ const host=document.createElement('div'),root=createRoot(host);
+ document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  expect(getConfirm(host).disabled).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+it('keeps reordered and structurally changed retained lines in the review',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.currency='USD';
+ const first={id:'line-a',orderId:order.id,name:'模拟外套',nameEn:'Coat',style:'SIM-A',qty:10,unit:'件',price:12,img:'coat'};
+ const second={...first,id:'line-b',style:'SIM-B'};
+ state.orderLines=[first,second] as typeof state.orderLines;
+ proposal.command.payload.lines=[second,first];
+ let rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows.filter(row=>row.path.endsWith('.id')).map(row=>row.value)).toEqual(['SIM-B','SIM-A']);
+ const {nameEn,...withoutEnglishName}=first;
+ proposal.command.payload.lines=[withoutEnglishName,second];
+ rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows.filter(row=>row.path.endsWith('.id')).map(row=>row.value)).toEqual(['SIM-A']);
+ expect(rows.find(row=>row.path==='lines.1.nameEn')?.value).toBe('未填写');
+});
+
+it('blocks an order draft replacement when all its line changes cannot be reviewed',()=>{
+ const{state,proposal}=contractProposalFixture(),order=state.orders[0];
+ state.orderLines=Array.from({length:200},(_,i)=>({id:'line-'+i,orderId:order.id,name:'模拟样衣',style:'SIM-'+i,qty:10,unit:'件',price:1.95})) as typeof state.orderLines;
+ proposal.command.payload.lines=[state.orderLines[0],{...state.orderLines[1],name:'修改保留条目'}];
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  expect(host.textContent).toContain('内容过多，无法在此完整核对');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it('presents an order draft as named business objects, full terms and an exact currency total',()=>{
  const{state,proposal}=orderProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const text=host.textContent!;
@@ -105,7 +257,7 @@ it.each([false,true])('keeps a rejected confirmation local while preserving an u
 it('keeps a missing receipt open for read-only retry and closes only after confirmation',async()=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const proposal:any={id:'p',ownerId:'u',owner:'User',summary:['Update customer'],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}}};
- const run=vi.fn(),onClose=vi.fn(),onDone=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+ const run=vi.fn(),onClose=vi.fn(),onDone=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValueOnce('missing').mockResolvedValueOnce('confirmed');
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  try{
   act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} pendingRequestId="original-receipt" onRecoverOriginal={onRecoverOriginal} run={run} onClose={onClose} onDone={onDone}/></MistRoot>));
@@ -122,12 +274,12 @@ it('keeps a missing receipt open for read-only retry and closes only after confi
  }finally{act(()=>root.unmount());host.remove();}
 });
 
-it.each(['ordinary','protected','blocked'])('offers explicit replay only when the original confirmation is eligible (%s)',async(mode)=>{
+it.each(['ordinary','protected','blocked','unknown'])('offers explicit replay only when the original confirmation is eligible (%s)',async(mode)=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const proposal:any={id:'p',ownerId:'u',owner:'User',summary:['Update'],state:'pending',createdAt:'2026-11-15T00:00:00Z',
   command:mode==='protected'?{type:'payable.payment.register',payload:{requestId:'r',amount:10}}:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}},
   ...(mode==='blocked'?{taskBlocked:'原任务已停止'}:{})};
- const run=vi.fn(),onClose=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValue(false);
+ const run=vi.fn(),onClose=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValue(mode==='unknown'?'unknown':'missing');
  const onReplayOriginal=vi.fn().mockResolvedValue(true);
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  const find=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===name);
@@ -317,6 +469,31 @@ it('shows quotation business references and exact version, and blocks missing so
   for(const [owner,key]of [[state.market,'quotations'],[state,'customers'],[state,'devs'],[state,'versions'],[state,'files']] as const){const rows=owner[key as keyof typeof owner];(owner as any)[key]=[];render();expect(host.textContent).toContain('报价或来源资料已不可见，请重新核对');expect(confirmButton().disabled).toBe(true);(owner as any)[key]=rows;}
  }
  finally{act(()=>root.unmount());host.remove();}
+});
+
+it.each(['customer.update','market.customer.update'])('compares current and proposed payment terms for %s',type=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const state=createMistState({id:()=> 'id',now:'2026-11-28T04:00:00Z',actorName:'Test'},'empty');
+ state.customers=[{id:'customer-private',code:'CUS-SIM',name:'Birchline',terms:'T/T 20% 预付',creditLimit:0,currency:'GBP'} as any];
+ const proposal:any={id:'terms-proposal',ownerId:'u',owner:'Manager',summary:['变更付款条件'],state:'pending',createdAt:'2026-11-28',
+  command:{type,payload:{id:'customer-private',patch:{terms:'T/T 40% 预付'}}}};
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  const changes=document.querySelector('[data-agent-proposal-changes]')?.textContent;
+  expect(changes).toContain('当前付款条件 · T/T 20% 预付');
+  expect(changes).toContain('拟改付款条件 · T/T 40% 预付');
+  expect(changes).not.toContain('customer-private');
+  state.customers[0].city='Manchester';render();
+  expect(getConfirm(host).disabled).toBe(false);
+  state.customers[0].terms='由另一会话修改的条款';render();
+  expect(document.body.textContent).toContain('客户付款条件已更新，请重新提出提议');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
 });
 
 it('shows a customer credit grant with the exact old/new currency values and requires the existing high-risk password',()=>{

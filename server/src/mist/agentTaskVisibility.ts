@@ -5,7 +5,7 @@ import { AGENT_OBJECT_TYPES } from './agentRead';
 import { MIST_READ_SECTIONS } from './access';
 import { fail } from './errors';
 
-export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number>; fullReadHash?:string };
+export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number>; fullReadHash?:string; removedFromOrderId?:string };
 const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'devs.sampleReferences','customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages','email.drafts','email.sends'])];
 const PARTIAL: Record<string,string> = { 'orderCosts.expenses':'partialExpenses','payables.bills':'partialPayableBills','receipts':'partialReceipts','customerStatements':'partialStatements','letterOfCredits':'partialLettersOfCredit' };
 const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -62,7 +62,17 @@ export function knownCommandSourcesVisible(raw:MistState,current:MistState,withd
 export function taskSourcesVisible(refs: TaskSourceRef[], scopeHash: string, current: MistState, raw: MistState, scope?: MistDataScope) {
   if(scopeHash!==taskScopeHash(scope,raw))return false;
   const visible=index(current);
-  return refs.every(ref=>{const item=visible.byPath.get(ref.path)?.get(ref.id);if(!item||!ref.partial&&item.partial)return false;if(!item.partial)return true;const allowed=new Set(coverage(item.row));return ref.coverage.every(id=>allowed.has(id));});
+  return refs.every(ref=>{
+    if(ref.path==='orderLines'&&ref.removedFromOrderId){
+      const order=visible.byPath.get('orders')?.get(ref.removedFromOrderId);
+      return !!order&&!order.partial&&!raw.orderLines.some(line=>line.id===ref.id);
+    }
+    const item=visible.byPath.get(ref.path)?.get(ref.id);
+    if(!item||!ref.partial&&item.partial)return false;
+    if(!item.partial)return true;
+    const allowed=new Set(coverage(item.row));
+    return ref.coverage.every(id=>allowed.has(id));
+  });
 }
 /** Required typed object references are rechecked; incidental IDs inside a visible email are not authority. */
 export function collectTaskSources(data: unknown, current: MistState, previous: TaskSourceRef[]): TaskSourceRef[] {
