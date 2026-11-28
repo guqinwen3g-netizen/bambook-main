@@ -335,13 +335,15 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
  const begin=(next:Plan)=>{
   const saved=next.kind==='answer'?answerPlans.current.get(answerPlanKey(next)):undefined;
   const retained=next.kind==='answer'&&saved&&saved.plan.row.version===next.row.version&&next.row.canSupplementAttachments===true?saved:undefined;
-  const pending=next.kind==='answer'?taskControlRequests.get(next.row.id):undefined;
+  const pending=next.kind==='answer'||next.kind==='cancel'?taskControlRequests.get(next.row.id):undefined;
+  const originalStop=next.kind==='cancel'&&pending?.action==='cancel'&&pending.version===next.row.version
+   ?{...next,requestId:pending.requestId}:undefined;
   const restored:AnswerPlan|undefined=next.kind==='answer'&&!retained&&next.row.canSupplementAttachments===true
    &&pending?.action==='answer'&&pending.hasAttachments&&pending.version===next.row.version&&pending.questionId===next.questionId
    ?{...next,requestId:pending.requestId,receiptOnly:true}:undefined;
   if(next.kind==='answer'&&!retained)answerPlans.current.delete(answerPlanKey(next));
-  setFailure('');setUncertain(!!restored||(retained?.uncertain??false));setCredential(null);
-  setPlan(retained&&next.kind==='answer'?{...retained.plan,row:next.row}:restored??next);
+  setFailure('');setUncertain(!!originalStop||!!restored||(retained?.uncertain??false));setCredential(null);
+  setPlan(retained&&next.kind==='answer'?{...retained.plan,row:next.row}:restored??originalStop??next);
  };
  const closePlan=()=>{
   if(busy)return;
@@ -363,6 +365,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
   const current=()=>alive.current&&epoch===writeGeneration.current;
   const attached=plan.kind==='answer'&&(!!plan.files?.length||plan.receiptOnly===true);
   const checkingAttachmentReceipt=attached&&(uncertain||plan.receiptOnly===true);
+  const checkingStop=plan.kind==='cancel'&&uncertain;
   try{
    let requestId=plan.requestId;
    if(attached&&!checkingAttachmentReceipt&&controlStorageScope){
@@ -377,16 +380,40 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     taskControlRequests.set(plan.row.id,{action:'answer',requestId,version:plan.row.version,questionId:plan.questionId,fingerprint,hasAttachments:true});
     saveTaskControls(controlStorageScope,taskControlRequests);
    }
+   if(plan.kind==='cancel'&&!checkingStop){
+    taskControlRequests.set(plan.row.id,{action:'cancel',requestId,version:plan.row.version});
+    if(controlStorageScope)saveTaskControls(controlStorageScope,taskControlRequests);
+   }
    const body=plan.kind==='answer'?answerRequestBody({requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer},plan.files)
     :JSON.stringify(plan.kind==='create'?{requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:{requestId,version:plan.row.version});
-   const result=checkingAttachmentReceipt
+   const result=checkingStop
+    ? await withRequestDeadline(abort,8000,'任务暂时无法核对',signal=>
+      mistApiRequest(base+'/'+encodeURIComponent(plan.row.id),{signal,cache:'no-store'}))
+    : checkingAttachmentReceipt
     ? await withRequestDeadline(abort,8000,'提交结果暂时无法核对',signal=>
      mistApiRequest(url+'/receipt/'+encodeURIComponent(plan.requestId),{signal,cache:'no-store'}))
     : attached
       ? await withRequestDeadline(abort,45_000+Math.ceil(plan.files!.reduce((bytes,file)=>bytes+file.size,0)/65_536)*1000,'提交结果待核对',
        signal=>mistApiRequest(url,{method:'POST',body,signal}))
-      : await mistApiRequest(url,{method:'POST',body,signal:abort.signal});
+      : plan.kind==='cancel'
+        ? await withRequestDeadline(abort,8000,'停止结果未确认，可重试',signal=>mistApiRequest(url,{method:'POST',body,signal}))
+        : await mistApiRequest(url,{method:'POST',body,signal:abort.signal});
    if(!current())return;
+   if(plan.kind==='cancel'){
+    const item:AgentTaskView|undefined=result.item;
+    if(item?.id!==plan.row.id||checkingStop&&(contentRestricted(item)||item.state==='access_changed'))
+     throw new Error('任务暂时无法核对');
+    if(checkingStop&&item.version===plan.row.version&&item.canControl
+     &&!['cancelled','succeeded','failed','expired','budget_exhausted'].includes(item.state)){
+     setPlan({...plan,row:item});setUncertain(false);setFailure('任务尚未停止');
+     return;
+    }
+    const saved=taskControlRequests.get(plan.row.id);
+    if(saved?.action==='cancel'&&saved.requestId===requestId){
+     taskControlRequests.delete(plan.row.id);
+     if(controlStorageScope)saveTaskControls(controlStorageScope,taskControlRequests);
+    }
+   }
    if(attached&&(checkingAttachmentReceipt&&!Array.isArray(result.attachmentIds)
      ||!confirmsAttachedAnswer(result.item,plan,checkingAttachmentReceipt?result.attachmentIds:undefined)))
     throw new Error('提交结果暂时无法核对');
@@ -418,7 +445,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     return;
    }
    setFailure(e instanceof Error?e.message:'操作未完成，请重试');
-   setUncertain(checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
+   setUncertain(checkingStop||checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
   }
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };
