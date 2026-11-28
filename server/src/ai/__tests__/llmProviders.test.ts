@@ -83,6 +83,21 @@ it('skips a cooling provider across agent turns and isolates a replaced credenti
  }finally{time.mockRestore();}
 });
 
+it('honors a streaming Retry-After without immediately retrying the same provider in non-streaming mode',async()=>{
+ process.env.ARK_API_KEY='fixture-flash-key';
+ process.env.BAMBOOK_MODEL_BASE_URL='https://ark.cn-beijing.volces.com/api/plan/v3';
+ process.env.BAMBOOK_MODEL_NAME='deepseek-v4.1-flash';
+ const cancelBody=vi.fn();
+ const fetchMock=vi.fn().mockResolvedValueOnce(new Response(new ReadableStream({cancel:cancelBody}),{
+  status:429,headers:{'Retry-After':'60'},
+ })).mockResolvedValueOnce(okCompletion('unexpected early retry'));
+ vi.stubGlobal('fetch',fetchMock);
+ const complete=createLlmCompleter({platformProviders:{chain:()=>[]}});
+ await expect(complete({...BASE_INPUT,onDelta:vi.fn()})).rejects.toMatchObject({retryNotBefore:expect.any(Number)});
+ expect(fetchMock).toHaveBeenCalledOnce();
+ expect(cancelBody).toHaveBeenCalledOnce();
+});
+
 it('rechecks authority before using a ready fallback when the primary is cooling down',async()=>{
  process.env.ARK_API_KEY='primary-key';
  process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
