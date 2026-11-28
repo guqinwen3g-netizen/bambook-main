@@ -11,7 +11,7 @@ import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
 import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,shortDisjointPdfContinuationPlan,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
-import{nextTaskIntentRead}from'./agentTaskIntentRefs';
+import{nextTaskIntentRead,taskIntentReadTargets}from'./agentTaskIntentRefs';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 
 class PlatformModelTimeout extends Error {}
@@ -210,11 +210,13 @@ export class MistPlatformTaskWorker{
         if(!step||step.result!==undefined){
           const decided=context.proposalReadBack;
           const freshDecisionSteps=decided?context.steps.slice(decided.stepOffset):[];
+          const decisionTarget=decided?taskIntentReadTargets([decided.ref])[0]:undefined;
+          const decisionSource=decided?.ref.kind==='orders'?'订单草稿':'客户档案';
           const intentRead=decided&&context.requiresRead
             ? nextTaskIntentRead([decided.ref],freshDecisionSteps,true)
             : nextTaskIntentRead(context.taskReadRefs,context.steps);
           if(intentRead.failed){
-            const result=decided&&context.requiresRead?'本人决定已记录，客户档案暂未能回读。请回原客户核对当前条款。':'引用资料未能读取，请回原记录核对后重新安排。';
+            const result=decided&&context.requiresRead?`本人决定已记录，${decisionSource}暂未能回读。请打开原记录核对。`:'引用资料未能读取，请回原记录核对后重新安排。';
             await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-intent-read-'+job.taskId,outcome:'failed',result});return;
           }
           if(context.steps.length>=PLATFORM_TASK_TURN_LIMIT){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-limit-'+job.taskId,outcome:'failed',result:'本次执行已达轮次上限，请核对原业务和已办记录后接续。'});return;}
@@ -261,14 +263,14 @@ export class MistPlatformTaskWorker{
               const pdfTextRangeRule=history.pdfTextPageRanges
                 ? '\nhistory.pdfTextPageRanges 只列本轮有分段正文证据的页。摘要、明细和末段概括统一按同一原件的 ranges 描述文字。若用一个较大的页段概括正文，在同一句明示排除无可提取文字的页，不能把这些页也写成有文字。没有业务必要时，省略与问题无关的页段概括。'
                 : '';
-              const reviewed=decided&&[...freshDecisionSteps].reverse().find(step=>{
+              const reviewed=decisionTarget&&[...freshDecisionSteps].reverse().find(step=>{
                 const read=step.result as {error?:boolean;object?:{type?:string;id?:string;truncated?:boolean}}|undefined;
                 return step.plan.name==='bambook_get'&&!step.compacted&&!read?.error
-                  &&read?.object?.type==='customer'&&read.object.id===decided.ref.id&&read.object.truncated===false;
+                  &&read?.object?.type===decisionTarget.type&&read.object.id===decisionTarget.id&&read.object.truncated===false;
               });
               const proposalReadBack=reviewed&&decided&&!context.requiresRead&&history.recent.some(step=>step.operationId===reviewed.id)?{proposalId:decided.proposalId,outcome:decided.outcome,operationId:reviewed.id}:undefined;
               const decisionRule=proposalReadBack
-                ? '\nproposalReadBack 指向本人决定之后已取得的客户完整回执。只为核对这项变更时，按该回执报告实际状态；本人拒绝则用 outcome=stopped 结束，不重复读取同一客户。'
+                ? `\nproposalReadBack 指向本人决定之后已取得的${decisionSource}完整回执。只为核对这项变更时，按该回执报告实际状态；本人拒绝则用 outcome=stopped 结束，不重复读取同一记录。`
                 : '';
               const customerCommandRule=!proposalReadBack&&context.task.mode==='operate'&&CUSTOMER_UPDATE
                 &&context.taskReadRefs.some(ref=>ref.kind==='customers')

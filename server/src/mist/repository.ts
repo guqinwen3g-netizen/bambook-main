@@ -342,8 +342,12 @@ export class MistRepository {
       const proposals=(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId);
       const decision=c.lastProposalDecision;
       const decided=decision&&proposals.find(p=>p.id===decision.proposalId&&p.state===decision.outcome);
-      const ref=decided&&['customer.update','market.customer.update'].includes(decided.command.type)
-        ? c.intentRefs?.find(item=>item.kind==='customers'&&item.id===decided.command.payload.id) : undefined;
+      const command=decided?.command;
+      const ref=command?.type==='order.governance.saveDraft'
+        ? c.intentRefs?.find(item=>item.kind==='orders'&&item.id===command.payload.orderId)
+        : command&&['customer.update','market.customer.update'].includes(command.type)
+          ? c.intentRefs?.find(item=>item.kind==='customers'&&item.id===command.payload.id)
+          : undefined;
       const proposalReadBack=ref&&decision&&typeof decision.stepOffset==='number'&&!c.requiredRead
         ? {proposalId:decision.proposalId,outcome:decision.outcome,ref,stepOffset:decision.stepOffset}:undefined;
       return{task,taskReadRefs,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),proposalReadBack,steps:structuredClone(c.platform?.steps??[]),decisions:proposals.map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});

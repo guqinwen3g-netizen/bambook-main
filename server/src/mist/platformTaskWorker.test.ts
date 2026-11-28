@@ -939,6 +939,45 @@ it.each(['confirmed','rejected'] as const)('prefetches the explicitly referenced
  expect(prompt).toContain(updatedTerms);
 });
 
+it.each(['confirmed','rejected'] as const)('reads the selected order draft before asking the model to report a %s decision',async outcome=>{
+ const proposed='T/T 30% 定金，收到装箱单后核对';
+ const current=outcome==='confirmed'?proposed:'T/T 30% 定金，收到商业发票后核对';
+ let orderId:string,contract:Record<string,unknown>;
+ const complete=vi.fn(async(input:LlmCompletionInput):Promise<string>=>{
+  if(complete.mock.calls.length===1)return tool('bambook_execute',{
+   command:{type:'order.governance.saveDraft',payload:{orderId,input:{...contract,paymentNote:proposed}}},
+  });
+  const prompt=input.messages[0].content;
+  const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
+  const reviewed=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.proposalReadBack?.operationId);
+  expect(facts.proposalReadBack?.outcome).toBe(outcome);
+  expect(reviewed).toMatchObject({name:'bambook_get',result:{object:{id:orderId,type:'order',truncated:false,
+   data:{governance:{status:'draft',contract:{paymentNote:current}}}}}});
+  return tool('bambook_task',{action:'finish',outcome:outcome==='confirmed'?'succeeded':'stopped',result:'已回读 '+current});
+ });
+ const f=await fixture(complete);
+ const created=await f.command('order.create',{
+  type:'garment',customerId:f.workspace.state.customers[0].id,season:'AW26',currency:'USD',due:'2027-01-28',ownerId:'local-operator',
+  governance:{kind:'external',poNumber:'SIM-READBACK',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'TT',
+   depositPercent:30,preShipmentPercent:30,paymentNote:'T/T 30% 定金，余款见提单副本',incoterm:'FOB',deliveryPlace:'上海'},
+  lines:[{fulfillmentMode:'cmt',cmtIncludedItems:[],name:'模拟外套',style:'SIM-READBACK',img:'coat',qty:10,unit:'件',price:12}],
+ });
+ orderId=created.body.receipt.result.orderId;
+ contract=created.body.workspace.state.orders.find((order:{id:string})=>order.id===orderId).governance.contract;
+ f.worker.start(3_600_000);
+ const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对订单草稿付款说明',instructions:'拟修改引用订单草稿的付款说明。',intentRefs:[{kind:'orders',id:orderId}],
+ }).expect(201);
+ await f.drain();
+ const pending=await f.current(task.id);
+ expect(pending.state).toBe('waiting_human');
+ if(outcome==='rejected')await f.command('order.governance.saveDraft',{orderId,input:{...contract,paymentNote:current}});
+ await f.command(outcome==='confirmed'?'agent.proposal.confirm':'agent.proposal.reject',{id:pending.waitingProposalIds[0]});
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:outcome==='confirmed'?'succeeded':'cancelled',result:'已回读 '+current});
+ expect(complete).toHaveBeenCalledTimes(2);
+});
+
 it('turns a business command the model executes into an owner proposal, waits for confirmation and then continues',async()=>{
  // customer.update 属中风险：平台执行器经 bambook_execute 只能得到 awaiting_confirmation 提议，本人确认后任务继续，不能直接改客户。
  let index=0,customer='';const complete=vi.fn(async()=>[
