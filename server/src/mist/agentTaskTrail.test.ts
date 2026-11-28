@@ -87,18 +87,20 @@ it('opens only the original confirmed by a read within the current task attachme
     {...read(taskFile.id,taskFile),compacted:true},
     read(workspaceFile.id,workspaceFile),
   ],[taskFile]);
-  expect(entries[0]).toMatchObject({taskAttachmentId:taskFile.id,taskAttachmentPage:22,failed:true});
+  expect(entries[0]).toMatchObject({taskAttachmentId:taskFile.id,taskAttachmentPage:22,taskAttachmentPageRange:{from:21,to:23},failed:true});
   expect(entries.slice(1).every(entry=>!entry.taskAttachmentId&&!('taskAttachmentPage' in entry))).toBe(true);
 });
 
 it('names image-only PDF pages even when other pages in the window were readable',()=>{
-  const [final,more]=platformTrail([
+  const [final,more,uncertain]=platformTrail([
     step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:false,range:{pageFrom:21,pageTo:23},pagesWithoutText:[22,22,99,'fixture-secret']}),
-    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
+    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,pages:26,nextPageFrom:21,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
+    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,pages:26,nextPageFrom:22,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
   ]);
   expect(final).toMatchObject({label:'读取附件 mixed.pdf',detail:'提取范围第 21 至 23 页；第 22 页无可提取文字'});
   expect(final.failed).toBeUndefined();
-  expect(more.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
+  expect(more.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；本次未读第 21 至 26 页');
+  expect(uncertain.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
 });
 
 it('links a completed relationship lookup to its source and indicates partial counts', () => {
@@ -127,4 +129,18 @@ it('shows the physical page range when a PDF window has no readable text', () =>
   ], [{ id: 'scan', name: 'scan.pdf' }]);
   expect(last).toMatchObject({ label: '读取附件 scan.pdf', detail: '第 21 至 23 页无可提取文字', failed: true });
   expect(more).toMatchObject({ detail: '第 21 页无可提取文字；还有后续内容', failed: true });
+});
+
+it('distinguishes an in-flight attachment continuation and keeps completed attachment links stable',()=>{
+ const uploads=[{id:'pdf',name:'原报价.pdf'}];
+ const continued={fileId:'pdf',cursor:'aft1.example'};
+ const [first,next,done]=platformTrail([
+  step('bambook_file_text',{fileId:'pdf'}),
+  step('bambook_file_text',continued),
+  step('bambook_file_text',continued,{file:{id:'pdf',name:'原报价.pdf'},text:'模拟说明'}),
+ ],uploads);
+ expect(first).toMatchObject({label:'读取附件 原报价.pdf',completed:false});
+ expect(next).toMatchObject({label:'续读附件 原报价.pdf',completed:false});
+ expect(next).not.toHaveProperty('taskAttachmentId');
+ expect(done).toMatchObject({label:'读取附件 原报价.pdf',completed:true,taskAttachmentId:'pdf'});
 });
