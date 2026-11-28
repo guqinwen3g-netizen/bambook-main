@@ -532,7 +532,15 @@ export class MistPlatformTaskWorker{
               if(reservation!=='reserved'){issue=reservation==='limit'?'daily_limit':'quota_pending';return;}
               if(context.hasTaskHistory)await checkModelAuthority(false);
               phase='model';
-              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:sourceRules+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+              const response=await this.model({
+                images,
+                beforeFirstProvider:()=>checkModelAuthority(false),
+                beforeFallback:()=>checkModelAuthority(true),
+                systemPrompt:sourceRules+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),
+                messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],
+                temperature:0.1,
+                jsonMode:true,
+              },abort.signal);
               if(abort.signal.aborted)return;
               const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);
               phase='store';

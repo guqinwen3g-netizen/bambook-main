@@ -92,6 +92,29 @@ it('uses the saved cooldown when an independent task completer starts', async ()
   }
 });
 
+it('rechecks authority after reading the persisted cooldown before the first provider request', async () => {
+  process.env.ARK_API_KEY = 'fixture-key';
+  let signalReadStarted!: () => void;
+  const readStarted = new Promise<void>(resolve => { signalReadStarted = resolve; });
+  let finishRead!: (result: ReadonlyMap<string, number>) => void;
+  const diskRead = new Promise<ReadonlyMap<string, number>>(resolve => { finishRead = resolve; });
+  const upstream = vi.fn().mockResolvedValue(okCompletion('synthetic'));
+  vi.stubGlobal('fetch', upstream);
+  const complete = createLlmCompleter({ platformProfile: 'agent-task', platformProviders: { chain: () => [] },
+    cooldownStore: { active: () => { signalReadStarted(); return diskRead; }, remember: vi.fn() } });
+  let authorized = true;
+  const beforeFirstProvider = vi.fn(async () => { if (!authorized) throw new Error('source access withdrawn'); });
+  const beforeFallback = vi.fn();
+  const result = complete({ ...BASE_INPUT, beforeFirstProvider, beforeFallback });
+  await readStarted;
+  authorized = false;
+  finishRead(new Map());
+  await expect(result).rejects.toThrow('source access withdrawn');
+  expect(beforeFirstProvider).toHaveBeenCalledTimes(1);
+  expect(beforeFallback).not.toHaveBeenCalled();
+  expect(upstream).not.toHaveBeenCalled();
+});
+
 it('defers without sending when a persisted cooldown cannot be checked', async () => {
   process.env.ARK_API_KEY = 'fixture-key';
   const active = vi.fn().mockRejectedValueOnce(new Error('private data unavailable')).mockResolvedValue(new Map());

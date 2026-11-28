@@ -852,6 +852,38 @@ it('does not read or call a model after referenced record permission is revoked 
  const get=vi.spyOn(f.repository,'getForAgent');ceiling.value=['ai:chat'];await f.drain();expect(get).not.toHaveBeenCalled();expect(complete).not.toHaveBeenCalled();expect(await f.current(created.id)).toMatchObject({state:'access_changed',instructions:''});expect((await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value.sources).toEqual([]);
  const hidden=await f.current(created.id);await f.human.post(f.base+'/agent-tasks/'+created.id+'/cancel').send({requestId:randomUUID(),version:hidden.version}).expect(200);
 });
+
+it('blocks the first provider request when referenced record permission is withdrawn during cooldown lookup', async () => {
+ vi.stubEnv('ARK_API_KEY','fixture-key');
+ const ceiling:{value:string[]|null}={value:null};
+ let signalReadStarted!:()=>void;
+ const readStarted=new Promise<void>(resolve=>{signalReadStarted=resolve;});
+ let finishRead!:(result:ReadonlyMap<string,number>)=>void;
+ const diskRead=new Promise<ReadonlyMap<string,number>>(resolve=>{finishRead=resolve;});
+ const completion=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'Synthetic report'});
+ const upstream=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({choices:[{message:{content:completion}}]})));
+ vi.stubGlobal('fetch',upstream);
+ try{
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},
+   subscriptions:{isConnected:()=>false,complete:async()=>''},
+   cooldownStore:{active:()=>{signalReadStarted();return diskRead;},remember:vi.fn()}});
+  const f=await fixture(complete,{ceiling,pulseMs:60_000}),order=f.workspace.state.orders[0];
+  f.worker.start(3_600_000);
+  const task=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对原件',
+   instructions:'核对所选资料。',intentRefs:[{kind:'orders',id:order.id}]}).expect(201)).body.item;
+  await f.worker.tick();
+  await readStarted;
+  expect(upstream).not.toHaveBeenCalled();
+  ceiling.value=['ai:chat'];
+  finishRead(new Map());
+  await f.worker.settled();
+  expect(upstream).not.toHaveBeenCalled();
+  expect(await f.current(task.id)).toMatchObject({state:'access_changed',instructions:'',result:''});
+ } finally {
+  finishRead(new Map());
+  vi.unstubAllGlobals();
+ }
+});
 it('retains owner rejection of an existing proposal after an intent record becomes unreadable',async()=>{
  const ceiling:{value:string[]|null}={value:null};let customer='';const complete=vi.fn(async()=>tool('bambook_execute',{command:{type:'customer.update',payload:{id:customer,patch:{terms:'T/T 30% 预付'}}}})),f=await fixture(complete,{ceiling});customer=f.workspace.state.customers[0].id;f.worker.start(3_600_000);
  const created=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'客户条款草案',instructions:'修改客户条款，先交本人确认。',intentRefs:[{kind:'customers',id:customer}]}).expect(201)).body.item;await f.drain();const waiting=await f.current(created.id);expect(waiting.state).toBe('waiting_human');const proposal=waiting.waitingProposalIds[0];expect(proposal).toBeTruthy();

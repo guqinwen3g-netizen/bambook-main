@@ -87,6 +87,8 @@ export type LlmCompletionInput = {
   signal: AbortSignal;
   jsonMode?: boolean;
   onDelta?: (chunk: string) => void;
+  /** Recheck caller authority before the first provider after an asynchronous cooldown lookup. */
+  beforeFirstProvider?: () => Promise<void>;
   /** Recheck caller authority before sending the same input to another provider. */
   beforeFallback?: () => Promise<void>;
 };
@@ -208,9 +210,11 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       ? createHash('sha256').update(JSON.stringify([step.provider.baseUrl, input.model || step.provider.model, step.provider.apiKey])).digest('hex')
       : undefined;
     let storeReadRetryAt = 0;
+    let checkedPersistedCooldowns = false;
     if (store) {
       const keys = [...new Set(steps.map(cooldownKey).filter((key): key is string => key !== undefined))];
       if (keys.length) {
+        checkedPersistedCooldowns = true;
         try {
           const saved = await store.active(keys, now);
           for (const key of keys) {
@@ -238,8 +242,10 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
         retryNotBefore = Math.max(retryNotBefore ?? 0, until);
         continue;
       }
-      if ((attemptedProvider || retryNotBefore !== undefined) && input.beforeFallback) {
-        await input.beforeFallback();
+      const beforeDispatch = attemptedProvider || retryNotBefore !== undefined
+        ? input.beforeFallback : checkedPersistedCooldowns ? input.beforeFirstProvider : undefined;
+      if (beforeDispatch) {
+        await beforeDispatch();
         input.signal.throwIfAborted();
         const refreshed = coolingUntil(key);
         if (refreshed > Date.now()) {
