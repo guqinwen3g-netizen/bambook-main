@@ -118,6 +118,28 @@ it.each(['两页均无 PDF 可提取文字','这两页没有可提取的文字�
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('binds spreadsheet table row citations to the exact file, worksheet, and observed row',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const first={id:'one',name:'first.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const second={...first,id:'two',name:'second.xlsx'};
+ const reads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:first.id,taskAttachmentObservedSheetRows:[{sheet:'报价',row:23}]},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:second.id,taskAttachmentObservedSheetRows:[{sheet:'报价',row:47}]},
+ ];
+ const text=[
+  '### first.xlsx\n\n| 工作表 | 行号 | 金额 |\n| --- | --- | --- |\n| 报价 | 23 | USD 1800 |\n| 报价 | 47 | 未核对 |',
+  '### 报价对比\n\n| 原件 | 工作表 | 原表行号 |\n| --- | --- | --- |\n| second.xlsx | 报价 | 第 47 行 |\n| first.xlsx | 报价 | 99 |\n| unknown.xlsx | 报价 | 23 |',
+ ].join('\n\n');
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const anchors=[...host.querySelectorAll('td button[title]')];
+  expect(anchors.map(button=>button.getAttribute('title'))).toEqual(['工作表 报价 第 23 行','工作表 报价 第 47 行']);
+  await act(async()=>anchors.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first,{sheet:'报价',row:23}],[second,{sheet:'报价',row:47}]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet rows and keeps other rows at worksheet level',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

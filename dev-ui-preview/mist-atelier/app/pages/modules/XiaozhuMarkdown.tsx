@@ -2,7 +2,7 @@
 import React from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Link, Paragraph, Root, Text } from 'mdast';
+import type { Link, Paragraph, Root, Table, Text } from 'mdast';
 import type { Node, Parent } from 'unist';
 import { ui } from '../../../../../services/interfaceLanguage';
 import { escapeSourceLabel, linkRecords, type RecordRef } from '../../runtime/xiaozhuRecords';
@@ -59,7 +59,7 @@ const PDF_PAGE_REFERENCE = /^(?:第[ \t]*([1-9]\d*)[ \t]*页|page[ \t]+([1-9]\d*
 function singleLabel(node: Node): string {
   if ('value' in node && (node.type === 'text' || node.type === 'inlineCode') && typeof node.value === 'string') return node.value;
   if ('children' in node && Array.isArray(node.children) && node.children.length === 1
-    && ['heading', 'paragraph', 'strong', 'emphasis'].includes(node.type)) return singleLabel(node.children[0]);
+    && ['heading', 'paragraph', 'tableCell', 'strong', 'emphasis'].includes(node.type)) return singleLabel(node.children[0]);
   return '';
 }
 
@@ -100,12 +100,17 @@ function observedWorksheet(text:string,file:TaskAttachment,reads:readonly AgentT
 
 const SHEET_ROW_REFERENCE=/^[ \t]*(?:[，,：:·][ \t]*)?(?:第[ \t]*([1-9]\d*)[ \t]*行|row[ \t]+([1-9]\d*)\b)/i;
 
+function observedWorksheetRow(file:TaskAttachment,sheet:string,row:number,reads:readonly AgentTaskTrailItem[]){
+  return reads.some(read=>read.taskAttachmentId===file.id
+    &&read.taskAttachmentObservedSheetRows?.some(item=>item.sheet===sheet&&item.row===row));
+}
+
 function sheetRowTarget(sheet:string,following:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]){
   const ref=SHEET_ROW_REFERENCE.exec(following);
   if(!ref||/^[ \t]*(?:至|到|[-~–—、]|和|或|及|and\b|to\b)[ \t]*(?:第[ \t]*|row[ \t]+)?\d/i.test(following.slice(ref[0].length)))return;
   const row=Number(ref[1]??ref[2]);
   if(!Number.isSafeInteger(row)||row>1_048_576)return;
-  if(reads.some(read=>read.taskAttachmentId===file.id&&read.taskAttachmentObservedSheetRows?.some(item=>item.sheet===sheet&&item.row===row)))
+  if(observedWorksheetRow(file,sheet,row,reads))
     return {target:{sheet,row},length:ref[0].length};
 }
 
@@ -174,6 +179,29 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
   const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
+  const linkWorksheetTable = (table:Table, headingFile?:number) => {
+    const [header,...rows]=table.children;
+    if(!header)return;
+    const columns=header.children.map(cell=>singleLabel(cell).trim().toLowerCase());
+    const matching=(label:RegExp)=>columns.flatMap((column,index)=>label.test(column)?[index]:[]);
+    const fileColumns=matching(/^(?:文件|文件名|原件|附件|workbook|file|attachment)$/);
+    const sheetColumns=matching(/^(?:工作表|worksheet|sheet)$/);
+    const rowColumns=matching(/^(?:行号|原行号|原表行号|原始行号|原工作表行号|row|row number)$/);
+    if(fileColumns.length>1||sheetColumns.length!==1||rowColumns.length!==1)return;
+    if(!fileColumns.length&&headingFile===undefined)return;
+    for(const {children} of rows){
+      const fileCell=children[fileColumns[0]],sheetCell=children[sheetColumns[0]],rowCell=children[rowColumns[0]];
+      if(!sheetCell||!rowCell)continue;
+      const index=fileColumns.length?(fileCell?byName.get(singleLabel(fileCell).trim()):undefined):headingFile;
+      if(index===undefined)continue;
+      const file=files[index],sheet=singleLabel(sheetCell).trim(),label=singleLabel(rowCell).trim();
+      const value=/^(?:第[ \t]*([1-9]\d*)[ \t]*行|row[ \t]+([1-9]\d*)|([1-9]\d*))$/i.exec(label);
+      if(!sheet||!value||rowCell.children.length!==1)continue;
+      const row=Number(value[1]??value[2]??value[3]);
+      if(!Number.isSafeInteger(row)||row>1_048_576||!observedWorksheetRow(file,sheet,row,reads))continue;
+      rowCell.children=[toAttachment(index,rowCell.children[0],'',{sheet,row})];
+    }
+  };
   const readLead = (heading:Root['children'][number]) => {
     if (heading.type !== 'paragraph') return;
     const parts=heading.children.map(singleLabel);
@@ -266,6 +294,12 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
             linkSectionReference(paragraph,index,lead?.range);
           }
         }
+      }
+      for(const [position,node] of tree.children.entries()){
+        if(node.type!=='table')continue;
+        const heading=tree.children[position-1];
+        const label=heading&&(heading.type==='heading'||heading.type==='paragraph')?singleLabel(heading).trim().replace(/[：:]$/,'').trim():'';
+        linkWorksheetTable(node,byName.get(label));
       }
       const visit = (parent: Parent, following='') => {
         const children=parent.children;
