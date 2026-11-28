@@ -17,6 +17,7 @@ import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
 import type { OrderGovernanceInput } from '../../../../server/src/shared/mistOrderGovernance';
+import { lineQuantityFromBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
 import { emailLinkTarget } from '../../../../server/src/shared/mistEmail';
 import { orderAmounts } from './orderAmounts';
@@ -108,12 +109,37 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
   const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save',rfqCommand=command.type.startsWith('rfq.');
   const orderCreate=command.type==='order.create',orderContract=command.type==='order.governance.saveDraft';
   const currentOrder=orderContract?state?.orders.find(order=>order.id===command.payload.orderId):undefined;
-  const currentContract=currentOrder?.governance?.changeDraft?.contract??currentOrder?.governance?.contract;
+  const currentChange=currentOrder?.governance?.changeDraft;
+  const currentContract=currentChange?.contract??currentOrder?.governance?.contract;
   const contractPatch=command.payload.orderPatch as {currency?:unknown}|undefined;
+  const proposedCurrency=typeof contractPatch?.currency==='string'?contractPatch.currency.trim().toUpperCase():currentOrder?.currency;
+  const activeLines=currentOrder&&state?state.orderLines.filter(line=>line.orderId===currentOrder.id):[];
+  const currentLines=currentChange?.lines??activeLines;
+  const proposedLines=orderContract&&Array.isArray(command.payload.lines)?command.payload.lines:undefined;
   if(orderCreate){
     const lines=command.payload.lines,contract=command.payload.governance as Partial<OrderGovernanceInput>|undefined;
     const total=orderAmounts(Array.isArray(lines)?lines.map(line=>({qty:line?.qty,price:line?.price})):[]);
     rows.push({field:contract?.kind==='internal'?'内部预算':'订单总金额',path:'order.total',value:total.total===null||!Array.isArray(lines)||!lines.length?'金额无效':total.total.toFixed(2)+' '+String(command.payload.currency||'')});
+  }
+  if(currentOrder&&(proposedLines||contractPatch?.currency!==undefined||currentChange)){
+    const previous=orderAmounts(currentLines).total;
+    let proposed:number|null=null;
+    try{
+      const lines=proposedLines?.map(line=>({
+        qty:lineQuantityFromBreakdown(currentOrder.type,line??{},'订单条目').qty??line?.qty,
+        price:line?.price,
+      }))??activeLines;
+      proposed=orderAmounts(lines).total;
+    }catch{/* Keep invalid quantities visible as an invalid amount. */}
+    const previousCurrency=currentChange?.orderPatch.currency??currentOrder.currency;
+    if(proposedLines||previous!==proposed||previousCurrency!==proposedCurrency){
+      const proposedKind=(command.payload.input as Partial<OrderGovernanceInput>|undefined)?.kind??currentContract?.kind;
+      const text=(amount:number|null,currency?:string)=>amount===null||!currency?uiText('金额无效'):`${amount.toFixed(2)} ${currency}`;
+      rows.push(
+        {field:uiText(currentContract?.kind==='internal'?'当前内部预算':'当前订单金额'),path:'order.total.before',value:text(previous,previousCurrency)},
+        {field:uiText(proposedKind==='internal'?'拟改内部预算':'拟改订单金额'),path:'order.total.after',value:text(proposed,proposedCurrency)},
+      );
+    }
   }
   const rfq=rfqCommand?state?.rfqs?.find(r=>r.id===command.payload.id):undefined;
   const customerUpdate=['market.customer.update','customer.update'].includes(command.type),customer=customerUpdate?state?.customers.find(c=>c.id===command.payload.id):undefined;
@@ -124,8 +150,25 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     rows.push({field:'客户',path:'customer',value:customer!.name+' · '+customer!.code},{field:'原信用额度',path:'credit.before',value:money(customer!.creditLimit,customer!.currency)},{field:'拟设信用额度',path:'credit.after',value:money(amount,denomination)});
   }
   let omitted = 0;
+  if(currentOrder&&proposedLines){
+    const retainedIds=new Set(proposedLines.map(line=>line?.id));
+    for(const line of currentLines){
+      if(retainedIds.has(line.id))continue;
+      if(rows.length>=limit){omitted++;continue;}
+      const names=[...new Set([line.style,line.name].filter(Boolean))];
+      rows.push({field:uiText('拟移除条目'),path:'lines.removed.'+line.id,value:[...names,`${line.qty} ${line.unit}`].join(' · ')});
+    }
+  }
   const walk = (value: unknown, path: string) => {
     if(creditChange&&['id','patch.creditLimit','patch.currency'].includes(path))return;
+    if(customer&&path==='patch.terms'&&typeof value==='string'){
+      if(rows.length+2>limit){omitted+=2;return;}
+      rows.push(
+        {field:uiText('当前付款条件'),path:'terms.before',value:customer.terms||uiText('未填写')},
+        {field:uiText('拟改付款条件'),path:'terms.after',value:value||uiText('未填写')},
+      );
+      return;
+    }
     // mistMarket#sourceLine/save derives these from saved data; the input cannot set them.
     if(quotation&&/^(input\.(approvalHistory|requiresApproval)|input\.lines\.\d+\.(costBasis|family|marginFloor))(\.|$)/.test(path))return;
     // Image tokens select decoration, not a commercial term or a source object.
@@ -133,6 +176,14 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     if(orderContract&&currentContract&&path.startsWith('input.')){
       const key=path.slice(6).split('.')[0];
       if(stableJson((command.payload.input as Record<string,unknown>)[key])===stableJson((currentContract as unknown as Record<string,unknown>)[key]))return;
+      if(path==='input.paymentNote'&&typeof value==='string'){
+        if(rows.length+2>limit){omitted+=2;return;}
+        rows.push(
+          {field:uiText('当前付款说明'),path:'paymentNote.before',value:currentContract.paymentNote||uiText('未填写')},
+          {field:uiText('拟改付款说明'),path:'paymentNote.after',value:value||uiText('未填写')},
+        );
+        return;
+      }
     }
     if (value && typeof value === 'object') {
       const entries = Array.isArray(value) ? value.map((child, i) => [String(i + 1), child] as const) : Object.entries(value);
@@ -153,7 +204,8 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
         text=line?.style||line?.name||proposedName||'新增条目';
       }
       else if(key==='ownerId'||key==='receiverId')text=state?.members?.find(m=>m.userId===value)?.name||'负责人已不可见';
-      else if(orderContract&&/^lines\.\d+\.price$/.test(path))text=typeof value==='number'&&Number.isFinite(value)?value.toFixed(2)+' '+String(contractPatch?.currency||currentOrder?.governance?.changeDraft?.orderPatch?.currency||currentOrder?.currency||''):'金额无效';
+      else if(orderContract&&/^lines\.\d+\.price$/.test(path))text=typeof value==='number'&&Number.isFinite(value)
+        ? value.toFixed(2)+(proposedCurrency?' '+proposedCurrency:'') : '金额无效';
       else if(/^(governance|input)\.confirmationFileIds\.\d+$/.test(path))text=state?.files.find(f=>f.id===value)?.name||'附件已不可见';
       else if(key==='sourceProductId')text=value?state?.market.products.find(p=>p.id===value)?.name||'产品已不可见':'未指定';
       else if(key==='sourceDevId')text=value?state?.devs.find(d=>d.id===value)?.code||'开发案已不可见':'未指定';
@@ -242,23 +294,39 @@ export function proposalAccountRows(command: AgentProposal['command'], state?: M
  * 本人确认 Agent 提议：确认后由服务端按本人身份执行提议里的原命令（完整权限与业务校验），失败时提议保持待确认。
  * 中、高风险都列出将要执行的具体内容；高风险另须本人密码。拒绝只记录结论，不改业务。
  */
-export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection, pendingRequestId, pendingDecision, onRecoverOriginal, onReplayOriginal }: {
-  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void; pendingRequestId?:string; pendingDecision?:'confirm'|'reject'; onRecoverOriginal?:(requestId:string)=>Promise<boolean>; onReplayOriginal?:(requestId:string)=>Promise<boolean>;
+export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection, pendingRequestId, pendingDecision, missingOriginalReceipt, onRecoverOriginal, onReplayOriginal }: {
+  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void; pendingRequestId?:string; pendingDecision?:'confirm'|'reject'; missingOriginalReceipt?:boolean; onRecoverOriginal?:(requestId:string)=>Promise<'confirmed'|'missing'|'unknown'>; onReplayOriginal?:(requestId:string)=>Promise<boolean>;
 }) {
   const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
   const [pendingFailure,setPendingFailure]=React.useState(false),failureRef=React.useRef<HTMLDivElement>(null),alive=React.useRef(true);
-  const [missingReceiptId,setMissingReceiptId]=React.useState<string>();
   const active=React.useRef({scope:scopeKey,id:proposal?.id});
   if(active.current.scope!==scopeKey||active.current.id!==proposal?.id)active.current={scope:scopeKey,id:proposal?.id};
+  const pendingReceipt=React.useRef({proposal:active.current,requestId:pendingRequestId,decision:pendingDecision});
+  if(pendingReceipt.current.proposal!==active.current||pendingReceipt.current.requestId!==pendingRequestId||pendingReceipt.current.decision!==pendingDecision)
+    pendingReceipt.current={proposal:active.current,requestId:pendingRequestId,decision:pendingDecision};
+  const [missingReceipt,setMissingReceipt]=React.useState<typeof pendingReceipt.current>();
+  const checkedMissing=!!pendingRequestId&&(missingOriginalReceipt||missingReceipt===pendingReceipt.current);
+  const failureMessage=failure||(checkedMissing?'暂未查到原回执':'');
   React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
-  React.useLayoutEffect(()=>{if(failure)failureRef.current?.scrollIntoView?.({block:'nearest'});},[failure]);
-  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setMissingReceiptId(undefined);setBusy(false); }, [proposal?.id,scopeKey]);
+  React.useLayoutEffect(()=>{if(failureMessage)failureRef.current?.scrollIntoView?.({block:'nearest'});},[failureMessage]);
+  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setMissingReceipt(undefined);setBusy(false); }, [proposal?.id,scopeKey]);
   const incoming=proposal?incomingProposalDetails(proposal.command,state,incomingAccess,businessNow().toISOString()):null;
   const sourceReview=proposal?(developmentReferenceProposalDetails(proposal.command,state,referenceAccess,businessNow().toISOString())||commercialSampleProposalDetails(proposal.command,state,commercialSampleLoanSources,canConfirmShippingBasis,businessNow().toISOString())||developmentTaskProposalDetails(proposal.command,state,taskClosePlans)||shippingSampleProposalDetails(proposal.command,state,canConfirmShippingBasis)):null;
+  const patch=proposal?.command.payload.patch as {terms?:unknown}|undefined;
+  const changesCustomerTerms=!!proposal&&['customer.update','market.customer.update'].includes(proposal.command.type)
+    &&typeof patch?.terms==='string';
+  const termsCustomer=changesCustomerTerms?state?.customers.find(customer=>customer.id===proposal?.command.payload.id):undefined;
+  const draftInput=proposal?.command.payload.input as {paymentNote?:unknown}|undefined;
+  const suppliesOrderPaymentNote=proposal?.command.type==='order.governance.saveDraft'&&typeof draftInput?.paymentNote==='string';
+  const noteOrder=suppliesOrderPaymentNote?state?.orders.find(order=>order.id===proposal?.command.payload.orderId):undefined;
+  const currentDraft=noteOrder?.governance?.changeDraft?.contract??noteOrder?.governance?.contract;
+  const sourceFingerprint=sourceReview?.fingerprint??(termsCustomer?stableJson([termsCustomer.id,termsCustomer.terms])
+    :currentDraft?stableJson([noteOrder!.id,currentDraft.paymentNote]):'');
+  const sourceReason=sourceReview?.reason??(changesCustomerTerms&&state&&!termsCustomer?'客户已不可见，请重新核对':'');
   const sourceBasis=React.useRef({key:'',fingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
   if(sourceBasis.current.key!==sourceKey)sourceBasis.current={key:sourceKey,fingerprint:''};
-  if(sourceReview&&!sourceReview.reason&&!sourceBasis.current.fingerprint)sourceBasis.current.fingerprint=sourceReview.fingerprint;
-  const sourceChanged=!!sourceReview?.fingerprint&&!!sourceBasis.current.fingerprint&&sourceReview.fingerprint!==sourceBasis.current.fingerprint;
+  if(sourceFingerprint&&!sourceReason&&!sourceBasis.current.fingerprint)sourceBasis.current.fingerprint=sourceFingerprint;
+  const sourceChanged=!!sourceFingerprint&&!!sourceBasis.current.fingerprint&&sourceFingerprint!==sourceBasis.current.fingerprint;
   const incomingBasis=React.useRef({key:'',fingerprint:''}),incomingKey=scopeKey+':'+proposal?.id;
   if(incomingBasis.current.key!==incomingKey)incomingBasis.current={key:incomingKey,fingerprint:''};
   if(incoming&&!incoming.reason&&!incomingBasis.current.fingerprint)incomingBasis.current.fingerprint=incoming.fingerprint;
@@ -269,8 +337,8 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   // 风险等级与服务端共用 agentProposalRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
   const risk = agentProposalRisk(proposal, state), detailed = risk !== 'low' && !mail;
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
-  const orderCreate=proposal.command.type==='order.create';
-  const fields = incoming?{rows:incoming.rows,omitted:0}:sourceReview?{rows:sourceReview.rows,omitted:0}:detailed ? proposalFieldChanges(proposal.command, risk === 'high'||orderCreate, state) : { rows: [], omitted: 0 };
+  const requiresFullReview=risk==='high'||['order.create','order.governance.saveDraft'].includes(proposal.command.type);
+  const fields = incoming?{rows:incoming.rows,omitted:0}:sourceReview?{rows:sourceReview.rows,omitted:0}:detailed ? proposalFieldChanges(proposal.command,requiresFullReview,state) : { rows: [], omitted: 0 };
   const draftSourceMissing=proposal.command.type==='development.saveDraft'&&state&&(
     proposal.command.payload.draftId&&!state.drafts.some(d=>d.id===proposal.command.payload.draftId)
     ||Array.isArray(proposal.command.payload.fileIds)&&proposal.command.payload.fileIds.some(id=>!state.files.some(f=>f.id===id)));
@@ -279,29 +347,33 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   const orderSourceUnavailable=orderSourceMissing(proposal.command,state);
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
   const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
-  const incomplete = (risk === 'high'||orderCreate) && fields.omitted > 0;
+  const incomplete = requiresFullReview && fields.omitted > 0;
   // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
   const signing = commandRequiresSignature(proposal.command);
   const awaitingReceipt=pendingFailure||!!pendingRequestId;
-  const confirmBlocked=!!mail?.reason||!!reopening?.reason||!!incoming?.reason||incomingChanged||!!sourceReview?.reason
+  const confirmBlocked=!!mail?.reason||!!reopening?.reason||!!incoming?.reason||incomingChanged||!!sourceReason
     ||sourceChanged||!!proposal.taskBlocked||!!proposal.unavailable||!!draftSourceMissing||quoteSourceMissing||rfqSourceUnavailable
     ||orderSourceUnavailable||incomplete||(risk==='high'&&!password)||(signing&&!signature);
-  const canReplay=!!pendingRequestId&&missingReceiptId===pendingRequestId&&!!onReplayOriginal
+  const canReplay=checkedMissing&&!!onReplayOriginal
     &&(pendingDecision==='reject'||pendingDecision==='confirm'&&risk!=='high'&&!signing&&!confirmBlocked);
   const recoverOriginal=async(replay=false)=>{
     const action=replay?onReplayOriginal:onRecoverOriginal;
     if(!pendingRequestId||!action||busy||replay&&!canReplay)return;
     const operation=active.current;
+    const binding=pendingReceipt.current;
     const current=()=>alive.current&&active.current.scope===operation.scope&&(active.current===operation||active.current.id===undefined);
     setBusy(true);
     setFailure('');
+    setMissingReceipt(undefined);
     try {
-      const confirmed=await action(pendingRequestId);
+      const outcome=await action(pendingRequestId);
       if(!current())return;
-      if(confirmed){setPendingFailure(false);setPassword('');setSignature(null);onDone('已核对原请求');onClose();}
-      else {setMissingReceiptId(pendingRequestId);setFailure('暂未查到原回执');}
+      if(outcome===true||outcome==='confirmed'){
+        if(pendingReceipt.current!==binding&&pendingReceipt.current.requestId!==undefined)return;
+        setPendingFailure(false);setPassword('');setSignature(null);onDone('已核对原请求');onClose();
+      } else if(outcome==='missing'&&pendingReceipt.current===binding)setMissingReceipt(binding);
     } catch (problem) {
-      if(current())setFailure(problem instanceof Error?problem.message:'原请求仍待核对');
+      if(current()&&pendingReceipt.current===binding)setFailure(problem instanceof Error?problem.message:'原请求仍待核对');
     } finally { if(current())setBusy(false); }
   };
   const decide = async (command: MistCommand, message: string, reauth?: { password: string }, signed?: { svg: string }) => {
@@ -321,13 +393,14 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
       <Button disabled={busy||awaitingReceipt} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
       <Button variant={canReplay?'quiet':'primary'} loading={busy&&!awaitingReceipt} disabled={busy||awaitingReceipt||confirmBlocked} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col" data-agent-proposal-dialog>
-      {(failure||awaitingReceipt) && <div ref={failureRef}><Banner tone={awaitingReceipt?'warn':'bad'} title={uiText(awaitingReceipt?'结果待核对':'没有执行')}>{uiText(failure)}</Banner></div>}
+      {(failureMessage||awaitingReceipt) && <div ref={failureRef}><Banner tone={awaitingReceipt?'warn':'bad'} title={uiText(awaitingReceipt?'结果待核对':'没有执行')}>{uiText(failureMessage)}</Banner></div>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
       {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
       {orderSourceUnavailable&&<Banner tone="warn" title={uiText('订单或来源资料已不可见，请重新核对')} />}
       {(incoming?.reason||incomingChanged)&&<Banner tone="warn" title={uiText(incoming?.reason||'来样或工厂任务已变化，请重新提出提议')} />}
-      {(sourceReview?.reason||sourceChanged)&&<Banner tone="warn" title={uiText(sourceReview?.reason||'办理资料已变化，请重新提出提议')}/>}
+      {(sourceReason||sourceChanged&&(!(changesCustomerTerms||suppliesOrderPaymentNote)||!awaitingReceipt))&&<Banner tone="warn"
+        title={uiText(sourceReason||(changesCustomerTerms?'客户付款条件已更新，请重新提出提议':suppliesOrderPaymentNote?'订单付款说明已更新，请重新提出提议':'办理资料已变化，请重新提出提议'))}/>}
       {reopening?.reason&&<Banner tone="warn" title={uiText(reopening.reason)} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{(incoming?[incoming.title]:sourceReview?[sourceReview.title]:reopening?['恢复开发案']:proposal.summary).map((line, i) => <span key={i}>{incoming||sourceReview||reopening?uiText(line):line}</span>)}</div>

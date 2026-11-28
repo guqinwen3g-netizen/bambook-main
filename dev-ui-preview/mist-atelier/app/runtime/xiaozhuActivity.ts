@@ -1,5 +1,5 @@
 import React from 'react';
-import type { AgentTaskActivity } from '../../../../server/src/shared/mistAgentTasks';
+import type { AgentTaskActivity, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import { withRequestDeadline } from './requestDeadline';
 import { mistApiRequest } from './workspace';
 
@@ -21,7 +21,7 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
     let recheck = false;
     const refresh = async () => {
       window.clearTimeout(timer);
-      if (!live || document.hidden || request) return;
+      if (!live || document.hidden || !navigator.onLine || request) return;
       const controller = new AbortController();
       request = controller;
       let next = IDLE_INTERVAL;
@@ -37,26 +37,29 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
         if (live && !document.hidden) setSnapshot(undefined);
       } finally {
         request = undefined;
-        if (live && !document.hidden) timer = window.setTimeout(() => void refresh(), recheck ? 0 : next);
+        if (live && !document.hidden && navigator.onLine) timer = window.setTimeout(() => void refresh(), recheck ? 0 : next);
         recheck = false;
       }
     };
     const update = () => {
-      if (document.hidden) return;
+      if (document.hidden || !navigator.onLine) return;
       if (request) recheck = true;
       else void refresh();
     };
+    const suspend = () => {
+      window.clearTimeout(timer);
+      recheck = false;
+      request?.abort();
+      setSnapshot(undefined);
+    };
     const wake = () => {
-      if (document.hidden) {
-        window.clearTimeout(timer);
-        request?.abort();
-        setSnapshot(undefined);
-      } else {
-        update();
-      }
+      if (document.hidden) suspend();
+      else update();
     };
     window.addEventListener('bambook:agent-task-update', update);
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('offline', suspend);
+    window.addEventListener('online', update);
     void refresh();
     return () => {
       live = false;
@@ -64,16 +67,34 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
       request?.abort();
       window.removeEventListener('bambook:agent-task-update', update);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('offline', suspend);
+      window.removeEventListener('online', update);
     };
   }, [path, scope, enabled]);
   return enabled && snapshot?.scope === scope ? snapshot.items : [];
 }
 
+export function activeModelFallbackSince(task: Pick<AgentTaskView, 'state' | 'executionStage' | 'runnerStatus' | 'modelFallbackSince'>) {
+  const since = task.modelFallbackSince;
+  if (task.state === 'running' && task.executionStage === 'model' && !task.runnerStatus
+    && typeof since === 'string' && Number.isFinite(Date.parse(since))) return since;
+}
+
 export function xiaozhuActivityLabel(task: AgentTaskActivity) {
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
-  if (task.retrying) return '模型重试中';
+  if (task.retrying) return '等待模型重试';
   if (task.state === 'queued') return '待执行';
-  if (task.executionStage === 'model') return '正在等待模型';
+  if (task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
   return task.currentStep || '办理中';
+}
+
+
+export function xiaozhuModelWaitLabel(task: AgentTaskView): string | undefined {
+  if (task.state === 'queued' && task.executionIssue?.retryAt) {
+    return task.executionIssue.code === 'model_timeout' ? '模型响应超时，等待重试' : '等待模型重试';
+  }
+  if (task.state !== 'running' || task.executionStage !== 'model') return;
+  if (activeModelFallbackSince(task)) return '正在等待备用模型';
+  return task.executionIssue?.code === 'model_timeout' ? '正在重试模型' : '正在等待模型';
 }
