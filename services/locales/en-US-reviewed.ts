@@ -5,6 +5,9 @@ import { mailReceivingEnglish } from './en-US-mail-receiving';
 import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
+  '输入工作表名称': 'Enter a worksheet name',
+  '选择工作表': 'Choose a worksheet',
+  '工作表名称': 'Worksheet name',
   '工作表 {0} 第 {1} 行': 'Worksheet {0}, row {1}',
   '显示第 {0} 至 {1} 行，最多 {2} 列。完整内容请下载原件。': 'Showing rows {0} to {1}, up to {2} columns. Download the original for the full worksheet.',
   '选择要核对的页码（最多 3 页）': 'Select up to 3 pages to review',

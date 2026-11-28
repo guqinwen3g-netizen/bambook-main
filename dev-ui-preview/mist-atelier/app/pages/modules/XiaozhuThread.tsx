@@ -13,7 +13,7 @@ import { commandRequiresSignature } from '../../runtime/signatureRules';
 import { XiaozhuPhaseTimer } from './XiaozhuPhaseTimer';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 import { agentQuestionCopy } from '../agentQuestionCopy';
-import { XiaozhuAttachmentChoices, XiaozhuVisualPageChoices } from './XiaozhuAttachmentChoices';
+import { XiaozhuAttachmentChoices, XiaozhuVisualPageChoices, XiaozhuWorksheetChoices } from './XiaozhuAttachmentChoices';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
@@ -120,9 +120,12 @@ function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnsw
     </> : <>
       {visualPages.length
         ? <XiaozhuVisualPageChoices choices={visualPages} value={text} disabled={busy} onChange={change} />
-        : <p className="mist-xz-question-copy">{agentQuestionCopy(open.question)}</p>}
+        : open.worksheetChoiceNames?.length
+          ? <XiaozhuWorksheetChoices names={open.worksheetChoiceNames} disabled={busy}
+              onChoose={name=>onAnswer(task,open.id,name)} />
+          : <p className="mist-xz-question-copy">{agentQuestionCopy(open.question)}</p>}
       <div className={visualPages.length?"mist-row":"mist-xz-answer"}>
-        {!visualPages.length&&<input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />}
+        {!visualPages.length&&<input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText(open.worksheetChoiceNames?.length?'输入工作表名称':'输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />}
         <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button>
       </div>
     </>}

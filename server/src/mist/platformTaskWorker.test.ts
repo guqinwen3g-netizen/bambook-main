@@ -2002,6 +2002,7 @@ it('asks for the worksheet before reading unnamed Excel rows',async()=>{
  expect(waiting.questions.at(-1).question).toContain('工作表名称');
  expect(waiting.questions.at(-1).question).toContain('报价');
  expect(waiting.questions.at(-1).question).not.toContain('封存');
+ expect(waiting.questions.at(-1).worksheetChoiceNames).toEqual(['报价','内部']);
  expect(complete).not.toHaveBeenCalled();
  const answer=async(current:any,value:string)=>{
   await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({

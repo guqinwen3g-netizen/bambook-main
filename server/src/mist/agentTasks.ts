@@ -174,6 +174,11 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
     }
     if(pdfChoice)questions=questions.map(q=>q.question===pdfChoice.question&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoice.ids}:q);
     if(pdfVisualChoice&&pdfVisualCandidates)questions=questions.map(q=>q.question===pdfVisualChoice&&!q.answeredAt?{...q,pdfVisualCandidates}:q);
+    if(worksheet?.needsWorksheetChoice&&worksheet.fileId)questions=questions.map(q=>{
+      if(q.answeredAt||!isWorksheetNameQuestion(q.question))return q;
+      const worksheetChoiceNames=q.question.split('\n').slice(1,21).filter(name=>name.trim()&&name.length<=31);
+      return worksheetChoiceNames.length?{...q,worksheetChoiceNames}:q;
+    });
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),

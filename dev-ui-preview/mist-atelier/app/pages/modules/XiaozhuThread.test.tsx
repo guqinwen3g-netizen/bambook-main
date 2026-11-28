@@ -259,6 +259,15 @@ it('offers the server-selected PDF originals and answers with the task-wide labe
  expect(f.onAnswer).toHaveBeenCalledExactlyOnceWith(waiting,'pdf-question','报价.pdf（3）');
 });
 
+it('selects a verified Excel worksheet in the existing question',async()=>{
+ const f=fns();
+ const question={id:'q1',question:'请回复要核对的工作表名称。\n报价\n进度',askedAt:'',worksheetChoiceNames:['报价','进度']};
+ await paint([task({state:'waiting_human',questions:[question]})],f);
+ expect(queryByRole(host,'textbox',{name:'回答小竹'})).not.toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'报价',exact:true}).click());
+ expect(f.onAnswer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({id:'t1'}),'q1','报价');
+});
+
 it('selects up to three authorized PDF pages and submits the answer for the existing question',async()=>{
  const f=fns();
  const file={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:123};

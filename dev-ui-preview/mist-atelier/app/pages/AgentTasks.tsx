@@ -2,7 +2,7 @@ import { agentQuestionCopy } from './agentQuestionCopy';
 import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
-import {XiaozhuAttachmentChoices,XiaozhuVisualPageChoices} from './modules/XiaozhuAttachmentChoices';
+import {XiaozhuAttachmentChoices,XiaozhuVisualPageChoices,XiaozhuWorksheetChoices} from './modules/XiaozhuAttachmentChoices';
 import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
@@ -358,8 +358,11 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
      <XiaozhuAttachmentChoices {...answerPicker} selected={answer.answer} disabled={busy||uncertain} onChoose={label=>setPlan({...answer,answer:label})} />
     </> : visualPages.length ? <XiaozhuVisualPageChoices choices={visualPages} value={answer.answer}
       disabled={busy||uncertain} onChange={value=>setPlan({...answer,answer:value})}/> : <>
-     <p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(answerQuestion?.question??'')}</p>
-     <Field label={uiText('答复')} required><TextArea value={answer.answer} disabled={uncertain} onChange={e=>setPlan({...answer,answer:e.target.value})} maxLength={4000} rows={5}/></Field>
+     {answerQuestion?.worksheetChoiceNames?.length
+       ? <XiaozhuWorksheetChoices names={answerQuestion.worksheetChoiceNames} selected={answer.answer}
+           disabled={busy||uncertain} onChoose={value=>setPlan({...answer,answer:value})}/>
+       : <p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(answerQuestion?.question??'')}</p>}
+     <Field label={uiText(answerQuestion?.worksheetChoiceNames?.length?'工作表名称':'答复')} required><TextArea value={answer.answer} disabled={uncertain} onChange={e=>setPlan({...answer,answer:e.target.value})} maxLength={4000} rows={5}/></Field>
     </>}
    </>:plan&&'row'in plan?<><KeyValue items={[{label:uiText('任务'),value:plan.row.name},{label:uiText('当前状态'),value:uiText(statusLabel(plan.row))}]} />{plan.kind==='cancel'&&<p className="mist-sub">{uiText('停止后不再续办，已办理的业务保留。')}</p>}{plan.kind==='issue'&&plan.row.state==='running'&&<p className="mist-sub">{uiText('重新连接将中断当前执行器。')}</p>}</>:null}
    </div>

@@ -45,3 +45,19 @@ export function XiaozhuVisualPageChoices({choices,value,disabled,onChange}:{
     </Field>)}
   </div>;
 }
+
+export function XiaozhuWorksheetChoices({names,selected,disabled,onChoose}:{
+  names:readonly string[];
+  selected?:string;
+  disabled?:boolean;
+  onChoose:(value:string)=>void;
+}){
+  return <div className="mist-xz-attachment-choices" role="group" aria-label={uiText('选择工作表')}>
+    {names.map(name=>{
+      const value=name===name.trim()?name:'「'+name+'」';
+      const pressed=selected===undefined?undefined:selected===value;
+      return <Button key={name} size="sm" variant={pressed?'ai':'secondary'} aria-pressed={pressed}
+        disabled={disabled} onClick={()=>onChoose(value)}><span>{name}</span></Button>;
+    })}
+  </div>;
+}
