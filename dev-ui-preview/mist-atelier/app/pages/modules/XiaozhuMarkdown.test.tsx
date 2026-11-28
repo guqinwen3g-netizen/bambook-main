@@ -139,6 +139,31 @@ it.each(['两页均无 PDF 可提取文字','这两页没有可提取的文字�
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('follows inline PDF references across emphasis and code while keeping ranges, other lines, and ambiguous files unbound',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const first={id:'first',name:'inspection.pdf',mimeType:'application/pdf',size:100};
+ const second={...first,id:'second',name:'shipment.pdf'};
+ const others=[{...first,id:'duplicate-a',name:'duplicate.pdf'},{...first,id:'duplicate-b',name:'duplicate.pdf'}];
+ const reads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:first.id,taskAttachmentObservedPages:[3,5]},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:second.id,taskAttachmentObservedPages:[5]},
+ ];
+ const text=[
+  '**inspection.pdf** 的 **第 3 页**；`shipment.pdf` 的第 5 页；inspection.pdf的第3页。',
+  '`inspection.pdf` 的 **第 3 页** 至 **第 5 页**；`shipment.pdf` 的第 3 页；`duplicate.pdf` 的第 3 页。',
+  '**inspection.pdf**\n的第 3 页用于对照。',
+ ].join('\n\n');
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second,...others]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const links=[...host.querySelectorAll<HTMLButtonElement>('button.mist-xz-ref')];
+  expect(links.map(button=>button.title)).toEqual(['第 3 页','第 5 页','第 3 页','']);
+  expect(links[1].querySelector('code')?.textContent).toBe('shipment.pdf');
+  await act(async()=>links.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first,3],[second,5],[first,3],[first]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('stops inheriting a PDF heading when a report list mentions another original',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
