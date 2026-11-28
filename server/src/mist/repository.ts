@@ -51,7 +51,7 @@ import { taskHistoryReadRefs, taskIntentRefsVisible, validateTaskIntentRefs } fr
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
 import {parseTaskAccessIds,personalTaskActivity,personalTaskActivityCandidates,UNFINISHED_TASK_STATES} from './agentTasks';
 import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTasks';
-import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
+import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,reservePlatformModelTurn} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import {requestedTaskAttachmentScope,explicitPdfVisualPages,requestsProvidedMaterialsOnly,retryAttachmentReadScope,type PlatformTaskContext,type PlatformTaskPlan,type TaskAttachmentReadScope} from './platformTaskPlan';
@@ -393,8 +393,14 @@ export class MistRepository {
   }
   async savePlatformTaskPlan(prior:AgentActor,plan:PlatformTaskPlan,prefetched=false){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat');return savePlatformPlan(db,{...prior,...actor},prior.agentTaskLease!,plan,Date.now(),prefetched);});}
   async acknowledgePlatformTaskStep(prior:AgentActor,id:string,result:unknown){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat');return acknowledgePlatformStep(db,{...prior,...actor},prior.agentTaskLease!,id,result,Date.now());});}
-  /** 执行器每次调用模型前核对今日用量；超出时返回 false，由执行器暂停任务。 */
-  async platformTaskDailyRoom(prior:AgentActor):Promise<boolean>{if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);try{assertDailyRoom(await agentDailyUsage(db,prior.agentTaskLease!.workspaceId,actor.userId,Date.now()),false);return true;}catch(e:any){if(e?.code==='AGENT_DAILY_LIMIT')return false;throw e;}});}
+  async reservePlatformModelTurn(prior:AgentActor){
+    const lease=prior.agentTaskLease;
+    if(prior.agentExecutor!=='platform'||!lease)fail('FORBIDDEN','请使用平台任务执行器',403);
+    return this.connectionTransaction(async db=>{
+      const{actor}=await this.own(db,prior,lease.workspaceId,'ai:chat');
+      return reservePlatformModelTurn(db,{...prior,...actor},lease,Date.now());
+    });
+  }
   async releasePlatformTask(prior:AgentActor,issue?:PlatformTaskReleaseIssue,providerRetryAt?:number){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);return releasePlatformTask(db,{...prior,...actor},prior.agentTaskLease!,issue,Date.now(),providerRetryAt);});}
   private mailStateWake?: () => void;
   setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
