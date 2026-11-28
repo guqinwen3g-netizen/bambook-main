@@ -275,7 +275,32 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.post('/workspaces/:id/agent-tasks/:taskId/claim',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.claimAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','workerId']),delegation.makeTaskCredential));}));
   router.post('/workspaces/:id/agent-tasks/:taskId/issue',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.issueAgentTaskControl(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']),delegation.makeTaskControl));}));
   for(const action of ['pause','resume'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.changeAgentTask(actor(req),req.params.id,req.params.taskId,action,exactBody(req.body,['requestId','version']))});}));
-  router.post('/workspaces/:id/agent-tasks/:taskId/answer',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.answerAgentTaskQuestion(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version','questionId','answer']))});}));
+  router.post('/workspaces/:id/agent-tasks/:taskId/answer',(req:Request,res:Response,next:NextFunction)=>{
+    if(!req.is('multipart/form-data'))return next();
+    void repository.authorizeTaskAnswerUpload(actor(req),req.params.id,req.params.taskId).then(()=>taskUpload(req,res,error=>{
+      if(error){publicError(res,new MistApiError('INVALID_UPLOAD','最多 6 个附件，单个不超过 8 MiB',400));return;}
+      next();
+    })).catch(error=>publicError(res,error));
+  },run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    const files=Array.isArray(req.files)?req.files:[];
+    let body=req.body;
+    if(req.is('multipart/form-data')){
+      const form=exactBody(req.body,['answer']);
+      if(typeof form.answer!=='string'||!files.length)fail('INVALID_UPLOAD','请求缺少答复或附件',400);
+      try{body=JSON.parse(form.answer as string);}catch{fail('INVALID_INPUT','补充资料请求无效',400);}
+    }
+    const answer=exactBody(body,['requestId','version','questionId','answer']);
+    const attachments=files.map(file=>({bytes:file.buffer,name:file.originalname,mimeType:file.mimetype,multipartFilename:true}));
+    const item=attachments.length
+      ?await repository.answerAgentTaskQuestion(actor(req),req.params.id,req.params.taskId,answer,attachments)
+      :await repository.answerAgentTaskQuestion(actor(req),req.params.id,req.params.taskId,answer);
+    res.json({item});
+  }));
+  router.get('/workspaces/:id/agent-tasks/:taskId/answer/receipt/:requestId',run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    res.json(await repository.getTaskAnswerAttachmentReceipt(actor(req),req.params.id,req.params.taskId,req.params.requestId));
+  }));
   router.post('/workspaces/:id/agent-tasks/:taskId/cancel',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');await repository.cancelAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']));res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId)});}));
   for(const action of ['heartbeat','checkpoint','wait','finish'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{if(!isAgentActor(actor(req))||(actor(req) as any).agentTaskLease?.taskId!==req.params.taskId)fail('FORBIDDEN','请使用本任务执行连接',403);const body=exactBody(req.body,action==='heartbeat'?['sequence']:action==='checkpoint'?['requestId','summary']:action==='wait'?['requestId','summary','delaySeconds','until','condition']:['requestId','outcome','result']);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.agentTaskRuntime(actor(req),req.params.id,action,body)});}));
   // ChatGPT 订阅连接：凭据只留在服务器，响应只含连接状态与设备验证码。

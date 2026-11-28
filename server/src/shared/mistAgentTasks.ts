@@ -21,7 +21,7 @@ export const AGENT_TASK_ISSUE_LABEL = {
 } as const;
 export type AgentTaskIssueCode = keyof typeof AGENT_TASK_ISSUE_LABEL;
 export type AgentTaskState = 'queued' | 'running' | 'waiting_time' | 'waiting_condition' | 'waiting_human' | 'paused' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'budget_exhausted' | 'access_changed';
-export type AgentTaskQuestion = {id:string;question:string;askedAt:string;attachmentChoiceIds?:string[];pdfVisualCandidates?:PdfVisualCandidate[];worksheetChoiceNames?:string[];answer?:string;answeredAt?:string};
+export type AgentTaskQuestion = {id:string;question:string;askedAt:string;attachmentChoiceIds?:string[];pdfVisualCandidates?:PdfVisualCandidate[];worksheetChoiceNames?:string[];answer?:string;answeredAt?:string;attachmentIds?:string[]};
 type AgentTaskTrailSource = { type: string; id: string; label: string; /** 读取结果给出的页面与锚点；id 为页面要打开的编号（可能是上级单据）。 */ view?: string; section?: string };
 export type AgentTaskTrailItem = {
   at: string; kind: 'read' | 'write' | 'ask' | 'wait' | 'note'; label: string;
@@ -48,6 +48,7 @@ export type AgentTaskView = {
   stepsUsed: number; stepLimit: number; runtimeUsedMs: number; runtimeLimitMs: number;
   lastHeartbeatAt: string | null; checkpoint: string; waitingProposalIds: string[]; result: string;
   canControl: boolean;
+  canSupplementAttachments?: boolean;
   /** Current server authorization withheld the original task contents. */
   contentRestricted?: true;
   /** Only the server can record that this terminal stop follows a real owner refusal. */

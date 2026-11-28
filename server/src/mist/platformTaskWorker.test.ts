@@ -31,6 +31,66 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('appends a supplied original with an exact, replayable answer receipt on the same task',async()=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对补交的原件。'});
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>finish)
+  .mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请补交确认报价。'}));
+ const ceiling={value:null as string[]|null};
+ const f=await fixture(complete,{ceiling});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对报价附件',instructions:'只用我提供的资料。核对本轮报价。'}))
+  .attach('attachments',Buffer.from('ORIGINAL-SUPPLIED-2723'),'draft.txt').expect(201)).body.item;
+ await f.drain();
+ const waiting=await f.current(task.id);
+ expect(waiting).toMatchObject({state:'waiting_human',canSupplementAttachments:true});
+ const questionId=waiting.questions[0].id;
+ const body={requestId:randomUUID(),version:waiting.version,questionId,answer:''};
+ const endpoint=f.base+'/agent-tasks/'+task.id+'/answer';
+ const receipt=endpoint+'/receipt/'+body.requestId;
+ const upload=(text:string)=>f.human.post(endpoint).field('answer',JSON.stringify(body)).attach('attachments',Buffer.from(text),'confirmed.txt');
+ const text='SUPPLEMENT-SUPPLIED-3310';
+ await f.human.get(receipt).expect(404);
+ const answered=(await upload(text).expect(200)).body.item;
+ expect(answered.attachments).toHaveLength(2);
+ const supplemental=answered.attachments[1].id;
+ expect(answered.attachments[0].id).toBe(task.attachments[0].id);
+ expect(answered.questions[0]).toMatchObject({id:questionId,answer:'已补交附件。',attachmentIds:[supplemental]});
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded'});
+ expect(complete.mock.calls.at(-1)?.[0].messages[0].content).toContain(text);
+ await upload(text).expect(200);
+ await upload('Changed bytes on same file name').expect(409);
+ const recovered=(await f.human.get(receipt).expect('Cache-Control','private, no-store').expect(200)).body;
+ expect(recovered).toMatchObject({attachmentIds:[supplemental],item:{id:task.id,state:'succeeded'}});
+ expect((await f.current(task.id)).attachments).toHaveLength(2);
+ await f.human.get(f.base+'/agent-tasks/'+task.id+'/attachments/'+supplemental).expect(200);
+ ceiling.value=[];
+ await f.human.get(receipt).expect(404);
+});
+
+it('checks cumulative attachment limits before completing the original question',async()=>{
+ const f=await fixture(async()=>tool('bambook_task',{action:'question',question:'请补充资料。'}));
+ f.worker.start(3_600_000);
+ let create=f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify({
+  requestId:randomUUID(),name:'待补报价',instructions:'只用我提供的资料。还缺一份真实报价依据。',
+ }));
+ for(let i=1;i<=5;i++)create=create.attach('attachments',Buffer.from('fixture '+i),'quote-'+i+'.txt');
+ const item=(await create.expect(201)).body.item;
+ await f.drain();
+ const waiting=await f.current(item.id);
+ const body={requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'补交原件。'};
+ const endpoint=f.base+'/agent-tasks/'+item.id+'/answer';
+ await f.human.post(endpoint).field('answer',JSON.stringify(body))
+  .attach('attachments',Buffer.from('six'),'six.txt').attach('attachments',Buffer.from('seven'),'seven.txt').expect(400);
+ expect(await f.current(item.id)).toMatchObject({state:'waiting_human',version:waiting.version});
+ expect((await f.current(item.id)).attachments).toHaveLength(5);
+ await f.human.get(endpoint+'/receipt/'+body.requestId).expect(404);
+ const answered=(await f.human.post(endpoint).field('answer',JSON.stringify(body))
+  .attach('attachments',Buffer.from('six'),'six.txt').expect(200)).body.item;
+ expect(answered.attachments).toHaveLength(6);
+});
+
 it('uses only current supplied text and attachments, even if the planner asks to search business records', async()=>{
  const finish=(result:string)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result});
  const complete=vi.fn(async(_input:LlmCompletionInput)=>finish('本人提供的交期是十二月十日。'))

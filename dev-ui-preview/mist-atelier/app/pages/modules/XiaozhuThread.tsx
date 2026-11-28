@@ -14,6 +14,7 @@ import { XiaozhuPhaseTimer } from './XiaozhuPhaseTimer';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 import { agentQuestionCopy } from '../agentQuestionCopy';
 import { XiaozhuAttachmentChoices, XiaozhuVisualPageChoices, XiaozhuWorksheetChoices } from './XiaozhuAttachmentChoices';
+import { XiaozhuAnswerFiles } from './XiaozhuAnswerFiles';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
@@ -104,15 +105,22 @@ function Trail({ task, items, active, activeLabel, since, retryAt, recovering, w
   </div>;
 }
 
-function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void; busy?: boolean;draft?:ThreadActions['answerDraft'] }) {
+function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnswer: ThreadActions['onAnswer']; busy?: boolean;draft?:ThreadActions['answerDraft'] }) {
   const [localText, setLocalText] = React.useState('');
+  const [localFiles, setLocalFiles] = React.useState<readonly File[]>([]);
   const open = (task.questions ?? []).find(q => !q.answeredAt);
   if (!open || !task.canControl) return null;
   const picker = taskAttachmentChoicesForQuestion(open, task.attachments);
   const text = draft?.read(task.id,open.id) ?? localText;
   const visualPages=taskVisualPdfPageChoices(open,task.attachments,text);
+  const canAttach = task.canSupplementAttachments === true && !picker?.choices.length && !visualPages.length && !open.worksheetChoiceNames?.length;
+  const files = canAttach ? draft?.readFiles?.(task.id, open.id) ?? localFiles : [];
   const change=(value:string)=>draft?draft.write(task.id,open.id,value):setLocalText(value);
-  const send = () => { if (text.trim()&&!busy) onAnswer(task, open.id, text); };
+  const send = () => {
+    if (busy) return;
+    if (files.length) onAnswer(task, open.id, text, files);
+    else if (text.trim()) onAnswer(task, open.id, text);
+  };
   return <div className="mist-xz-card" data-tone="ask"><div className="mist-xz-card-h"><Icon icon={HelpCircle} size="sm" /><b>{uiText('小竹想先确认')}</b></div>
     {picker?.choices.length ? <>
       <p>{uiText(picker.prompt)}</p>
@@ -124,16 +132,22 @@ function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnsw
           ? <XiaozhuWorksheetChoices names={open.worksheetChoiceNames} disabled={busy}
               onChoose={name=>onAnswer(task,open.id,name)} />
           : <p className="mist-xz-question-copy">{agentQuestionCopy(open.question)}</p>}
+      {canAttach && <XiaozhuAnswerFiles existing={task.attachments} files={files} disabled={busy}
+        onChange={next => draft?.writeFiles ? draft.writeFiles(task.id, open.id, next) : setLocalFiles(next)} />}
       <div className={visualPages.length?"mist-row":"mist-xz-answer"}>
         {!visualPages.length&&<input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText(open.worksheetChoiceNames?.length?'输入工作表名称':'输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />}
-        <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button>
+        <Button size="sm" variant="ai" loading={busy} disabled={busy||(!text.trim()&&!files.length)} onClick={send}>{uiText('回答')}</Button>
       </div>
     </>}
   </div>;
 }
 
-function AnsweredQuestions({questions}: {questions:AgentTaskView['questions']}) {
-  const answered=questions?.flatMap(({id,question,answer,answeredAt})=>answeredAt&&answer?[{id,question,answer,answeredAt}]:[])??[];
+function AnsweredQuestions({questions, renderAttachments}: {
+  questions:AgentTaskView['questions'];
+  renderAttachments:(fileIds:readonly string[])=>React.ReactNode;
+}) {
+  const answered=questions?.flatMap(question=>question.answeredAt && (question.answer||question.attachmentIds?.length)
+    ? [{...question,answeredAt:question.answeredAt}] : [])??[];
   if(!answered.length)return null;
   return <div className="mist-xz-card">
     <div className="mist-xz-card-h"><Icon icon={Check} size="sm"/><b>{uiText('资料已补充')}</b></div>
@@ -141,7 +155,8 @@ function AnsweredQuestions({questions}: {questions:AgentTaskView['questions']}) 
       <p className="mist-xz-question-copy">{agentQuestionCopy(question.question)}</p>
       <div><span className="mist-label">{uiText('本人答复')}</span>
         <time className="mist-xz-time" dateTime={question.answeredAt}>{clock(question.answeredAt)}</time></div>
-      <p className="mist-xz-question-copy">{question.answer}</p>
+      {question.answer && <p className="mist-xz-question-copy">{question.answer}</p>}
+      {!!question.attachmentIds?.length && renderAttachments(question.attachmentIds)}
     </div>)}
   </div>;
 }
@@ -187,13 +202,18 @@ function ProgressRecheck({taskId,onRead}:{taskId:string;onRead:(taskId:string)=>
 }
 
 export type ThreadActions = {
-  onAnswer: (task: AgentTaskView, id: string, text: string) => void;
+  onAnswer: (task: AgentTaskView, id: string, text: string, files?: readonly File[]) => void;
   onCheckAnswer?: (task: AgentTaskView, questionId: string) => void;
   onCancel: (task: AgentTaskView) => void;
   onResume?: (task: AgentTaskView) => void;
   onCheckStop?: (task: AgentTaskView) => void;
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
-  answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
+  answerDraft?: {
+    read:(taskId:string,questionId:string)=>string;
+    write:(taskId:string,questionId:string,text:string)=>void;
+    readFiles?:(taskId:string,questionId:string)=>readonly File[];
+    writeFiles?:(taskId:string,questionId:string,files:readonly File[])=>void;
+  };
   controls?: Record<string,TaskControlState>;
   staleProgressIds?: ReadonlySet<string>;
   onRecheckProgress?: (taskId: string) => Promise<void>;
@@ -276,20 +296,26 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const status = progressStale && !working ? <span role="status"><Pill tone="warn">{uiText('执行进度暂未更新')}</Pill></span>
       : t.state === 'waiting_human' && !asking && !pending.length ? <span role="status"><Pill tone="warn">{uiText('待我确认')}</Pill></span>
       : !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
-    return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
-      {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
-      <div className="mist-xz-user">{request}
-        {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
-          {t.attachments.map((file,attachmentIndex) => <span className="mist-xz-source" key={file.id} data-attachment><span title={attachmentLabels[attachmentIndex]}>{attachmentLabels[attachmentIndex]}</span>
+    const answerFileIds = new Set(t.questions?.flatMap(question => question.attachmentIds ?? []));
+    const renderAttachments = (include: (id: string) => boolean) => {
+      if (!t.attachments?.some(file => include(file.id))) return null;
+      return <div className="mist-xz-sources" aria-label={uiText('附件')}>
+        {t.attachments.map((file, attachmentIndex) => !include(file.id) ? null :
+          <span className="mist-xz-source" key={file.id} data-attachment><span title={attachmentLabels[attachmentIndex]}>{attachmentLabels[attachmentIndex]}</span>
             {actions.onPreviewAttachment&&<PreviewOriginal name={attachmentLabels[attachmentIndex]} onPreview={()=>actions.onPreviewAttachment?.(t,file)}/>}
             {actions.onDownloadAttachment&&<DownloadOriginal name={attachmentLabels[attachmentIndex]} onDownload={()=>actions.onDownloadAttachment!(t,file)}/>}
             {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+attachmentLabels[attachmentIndex]} onClick={() => actions.onReuseAttachment?.(t,file)} />}
           </span>)}
-        </div>}
+      </div>;
+    };
+    return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
+      {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
+      <div className="mist-xz-user">{request}
+        {renderAttachments(id=>!answerFileIds.has(id))}
       </div>
       <XiaozhuTurnShell status={status}>
         {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} workLog={actions.workLog} recovering={progressStale || !!t.runnerStatus} since={since} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
-        <AnsweredQuestions questions={t.questions}/>
+        <AnsweredQuestions questions={t.questions} renderAttachments={ids=>renderAttachments(id=>ids.includes(id))}/>
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments} attachmentReads={t.trail}
           onOpenAttachment={actions.onPreviewAttachment ? (file,target) => target===undefined?actions.onPreviewAttachment?.(t,file):actions.onPreviewAttachment?.(t,file,target) : undefined} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
