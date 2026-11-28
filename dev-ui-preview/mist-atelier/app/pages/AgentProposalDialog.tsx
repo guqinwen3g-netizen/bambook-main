@@ -124,6 +124,16 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     rows.push({field:'客户',path:'customer',value:customer!.name+' · '+customer!.code},{field:'原信用额度',path:'credit.before',value:money(customer!.creditLimit,customer!.currency)},{field:'拟设信用额度',path:'credit.after',value:money(amount,denomination)});
   }
   let omitted = 0;
+  if(state&&currentOrder&&Array.isArray(command.payload.lines)){
+    const currentLines=currentOrder.governance?.changeDraft?.lines??state.orderLines.filter(line=>line.orderId===currentOrder.id);
+    const retainedIds=new Set(command.payload.lines.map(line=>line?.id));
+    for(const line of currentLines){
+      if(retainedIds.has(line.id))continue;
+      if(rows.length>=limit){omitted++;continue;}
+      const names=[...new Set([line.style,line.name].filter(Boolean))];
+      rows.push({field:uiText('拟移除条目'),path:'lines.removed.'+line.id,value:[...names,`${line.qty} ${line.unit}`].join(' · ')});
+    }
+  }
   const walk = (value: unknown, path: string) => {
     if(creditChange&&['id','patch.creditLimit','patch.currency'].includes(path))return;
     if(customer&&path==='patch.terms'&&typeof value==='string'){
@@ -301,8 +311,8 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   // 风险等级与服务端共用 agentProposalRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
   const risk = agentProposalRisk(proposal, state), detailed = risk !== 'low' && !mail;
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
-  const orderCreate=proposal.command.type==='order.create';
-  const fields = incoming?{rows:incoming.rows,omitted:0}:sourceReview?{rows:sourceReview.rows,omitted:0}:detailed ? proposalFieldChanges(proposal.command, risk === 'high'||orderCreate, state) : { rows: [], omitted: 0 };
+  const requiresFullReview=risk==='high'||['order.create','order.governance.saveDraft'].includes(proposal.command.type);
+  const fields = incoming?{rows:incoming.rows,omitted:0}:sourceReview?{rows:sourceReview.rows,omitted:0}:detailed ? proposalFieldChanges(proposal.command,requiresFullReview,state) : { rows: [], omitted: 0 };
   const draftSourceMissing=proposal.command.type==='development.saveDraft'&&state&&(
     proposal.command.payload.draftId&&!state.drafts.some(d=>d.id===proposal.command.payload.draftId)
     ||Array.isArray(proposal.command.payload.fileIds)&&proposal.command.payload.fileIds.some(id=>!state.files.some(f=>f.id===id)));
@@ -311,7 +321,7 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   const orderSourceUnavailable=orderSourceMissing(proposal.command,state);
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
   const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
-  const incomplete = (risk === 'high'||orderCreate) && fields.omitted > 0;
+  const incomplete = requiresFullReview && fields.omitted > 0;
   // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
   const signing = commandRequiresSignature(proposal.command);
   const awaitingReceipt=pendingFailure||!!pendingRequestId;

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
-import { AgentProposalDialog } from './AgentProposalDialog';
+import { AgentProposalDialog, proposalFieldChanges } from './AgentProposalDialog';
 
 function reopenProposalFixture(){
  const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00Z',actorName:'业务员'},'empty');
@@ -89,6 +89,36 @@ it('identifies the assigned owner and priced line, permits new proposed lines, a
   state.orderLines=[{id:'line-private',orderId:'another-order',style:'OTHER'} as any];render();expect(getConfirm(host).disabled).toBe(true);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it('shows which current draft lines will be removed before listing replacement lines',()=>{
+ const{state,proposal}=contractProposalFixture(),order=state.orders[0];
+ const kept={id:'line-kept',orderId:order.id,name:'样衣',style:'SIM-KEEP',qty:10,unit:'件',price:1.95};
+ const removed={...kept,id:'line-remove',name:'量产外套',style:'SIM-REMOVE',qty:24};
+ state.orderLines=[kept,removed] as typeof state.orderLines;
+ proposal.command.payload.lines=[kept];
+ const changes=proposalFieldChanges(proposal.command,true,state);
+ expect(changes.rows).toContainEqual(expect.objectContaining({field:'拟移除条目',value:'SIM-REMOVE · 量产外套 · 24 件'}));
+ expect(changes.rows.findIndex(row=>row.field==='拟移除条目')).toBeLessThan(changes.rows.findIndex(row=>row.path==='lines.1.id'));
+ expect(changes.rows.filter(row=>row.field==='拟移除条目')).toHaveLength(1);
+ delete proposal.command.payload.lines;
+ expect(proposalFieldChanges(proposal.command,true,state).rows.some(row=>row.field==='拟移除条目')).toBe(false);
+});
+
+it('blocks an order draft replacement when all its line changes cannot be reviewed',()=>{
+ const{state,proposal}=contractProposalFixture(),order=state.orders[0];
+ state.orderLines=Array.from({length:200},(_,i)=>({id:'line-'+i,orderId:order.id,name:'模拟样衣',style:'SIM-'+i,qty:10,unit:'件',price:1.95})) as typeof state.orderLines;
+ proposal.command.payload.lines=[state.orderLines[0],{...state.orderLines[1],name:'修改保留条目'}];
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  expect(host.textContent).toContain('内容过多，无法在此完整核对');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it('presents an order draft as named business objects, full terms and an exact currency total',()=>{
  const{state,proposal}=orderProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const text=host.textContent!;
