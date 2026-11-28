@@ -1,0 +1,51 @@
+export type TaskControlIntent = {action:'answer';questionId:string;answer:string} | {action:'cancel'|'resume'};
+type ControlRecord = {version:number;requestId:string};
+export type TaskControlRequest = ControlRecord & (
+  | {action:'answer';questionId:string;answer?:string;fingerprint?:string}
+  | {action:'cancel'|'resume'}
+);
+
+const storageKey = (scope:string) => 'mist.xiaozhu.controls:' + scope;
+const uuidPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+const fingerprintPattern = /^[a-f0-9]{64}$/;
+const isId = (value:unknown): value is string => typeof value==='string'&&value.length>0&&value.length<=100;
+
+/** Keep answer text in the page. The tab only stores a digest to match a verified read or exact retry. */
+export async function answerFingerprint(taskId:string,questionId:string,answer:string): Promise<string|undefined> {
+  try {
+    const bytes = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([taskId,questionId,answer])));
+    return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
+  } catch { return; }
+}
+
+export function readTaskControls(scope:string): Map<string,TaskControlRequest> {
+  const entries = new Map<string,TaskControlRequest>();
+  if (!scope) return entries;
+  try {
+    const stored:unknown = JSON.parse(sessionStorage.getItem(storageKey(scope))??'[]');
+    if (!Array.isArray(stored)) return entries;
+    for (const [id,entry] of stored.slice(-90).filter(Array.isArray)) {
+      if (!isId(id)||typeof entry?.requestId!=='string'||!uuidPattern.test(entry.requestId)
+        ||!Number.isSafeInteger(entry.version)||entry.version<0) continue;
+      const base={version:entry.version,requestId:entry.requestId};
+      if(entry.action==='cancel'||entry.action==='resume') entries.set(id,{...base,action:entry.action});
+      else if(entry.action==='answer'&&isId(entry.questionId)&&typeof entry.fingerprint==='string'&&fingerprintPattern.test(entry.fingerprint))
+        entries.set(id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint});
+    }
+  } catch { /* The page still supports in-memory recovery. */ }
+  return entries;
+}
+
+export function saveTaskControls(scope:string, entries:ReadonlyMap<string,TaskControlRequest>) {
+  if (!scope) return;
+  try {
+    const stored=[...entries].slice(-90).flatMap<[string,TaskControlRequest]>(([id,entry])=>{
+      const base={requestId:entry.requestId,version:entry.version};
+      if(entry.action!=='answer') return [[id,{...base,action:entry.action}]];
+      if(!entry.fingerprint) return [];
+      return [[id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint}]];
+    });
+    if(stored.length) sessionStorage.setItem(storageKey(scope),JSON.stringify(stored));
+    else sessionStorage.removeItem(storageKey(scope));
+  } catch { /* Storage can be unavailable. */ }
+}
