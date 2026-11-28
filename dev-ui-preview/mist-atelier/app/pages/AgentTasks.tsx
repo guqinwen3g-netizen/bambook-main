@@ -96,7 +96,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
  const [historyLoading,setHistoryLoading]=React.useState(false),[historyError,setHistoryError]=React.useState<{message:string;cursor?:string|null}|null>(null);
  const [detailNeedsRead,setDetailNeedsRead]=React.useState(false);
  const detailRef=React.useRef<AgentTaskView|null>(null);
- const setCurrentDetail=(item:AgentTaskView|null)=>{detailRef.current=item;setDetail(item);};
+ const setCurrentDetail=React.useCallback((item:AgentTaskView|null)=>{detailRef.current=item;setDetail(item);},[]);
  const onTaskUpdateRef=React.useRef(onTaskUpdate);onTaskUpdateRef.current=onTaskUpdate;
  const alive=React.useRef(false),readGeneration=React.useRef(0),writeGeneration=React.useRef(0),detailGeneration=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
  const listAbort=React.useRef<AbortController|null>(null);
@@ -142,16 +142,22 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
    }
   }
  },[base]);
+ const hideDetailContents=React.useCallback((id:string,item:AgentTaskView|null,message='')=>{
+  detailAbort.current?.abort();detailAbort.current=null;
+  historyAbort.current?.abort();historyAbort.current=null;historyRefreshPending.current=false;
+  for(const [key,saved] of answerPlans.current)if(saved.plan.row.id===id)answerPlans.current.delete(key);
+  setPlan(plan=>plan&&'row' in plan&&plan.row.id===id?null:plan);
+  setAnswerPreview(preview=>preview?.taskId===id?undefined:preview);
+  setCredential(credential=>credential?.item.id===id?null:credential);
+  setCurrentDetail(item);setDetailError(message);setDetailNeedsRead(false);setOpening(false);
+  setHistory({items:[],nextCursor:null});setHistoryLoading(false);setHistoryError(null);
+  setPage(page=>({...page,items:page.items.flatMap(row=>row.id===id?(item?[item]:[]):[row])}));
+  if(item)onTaskUpdateRef.current?.(item);
+ },[setCurrentDetail]);
  const readDetail=React.useCallback(async(id:string,opening=false)=>{
   if(detailAbort.current&&!opening)return;
   const epoch=detailGeneration.current,abort=new AbortController();detailAbort.current=abort;
   const current=()=>alive.current&&epoch===detailGeneration.current&&detailAbort.current===abort;
-  const clearDetailActions=()=>{
-   for(const [key,saved] of answerPlans.current)if(saved.plan.row.id===id)answerPlans.current.delete(key);
-   setPlan(plan=>plan&&'row' in plan&&plan.row.id===id?null:plan);
-   setAnswerPreview(preview=>preview?.taskId===id?undefined:preview);
-   setCredential(credential=>credential?.item.id===id?null:credential);
-  };
   try{
    const result=await withRequestDeadline(abort,8_000,'任务详情读取超时',signal=>
     mistApiRequest(base+'/'+encodeURIComponent(id),{signal,cache:'no-store'}));
@@ -160,7 +166,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
    const item:AgentTaskView=result.item;
    const previous=detailRef.current;
    if(previous?.id===id&&item.version<previous.version)return;
-   if(contentRestricted(item))clearDetailActions();
+   if(contentRestricted(item)){hideDetailContents(id,item);return;}
    for(const [key,saved] of answerPlans.current){
     if(saved.plan.row.id===id&&item.questions?.some(question=>question.id===saved.plan.questionId&&question.answeredAt))
      answerPlans.current.delete(key);
@@ -172,15 +178,13 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     ||contentRestricted(previous)!==contentRestricted(item))onTaskUpdateRef.current?.(item);
   }catch(error){
    if(!current())return;
-   if(accessDenied(error)){
-    setCurrentDetail(null);clearDetailActions();
-    setPage(page=>({...page,items:page.items.filter(row=>row.id!==id)}));
-   }
-   setDetailError(error instanceof Error?error.message:'任务详情读取失败');
+   const message=error instanceof Error?error.message:'任务详情读取失败';
+   if(accessDenied(error))hideDetailContents(id,null,message);
+   else setDetailError(message);
   }finally{
    if(current()){detailAbort.current=null;if(opening)setOpening(false);}
   }
- },[base,readDetailHistory]);
+ },[base,readDetailHistory,hideDetailContents,setCurrentDetail]);
  const load=React.useCallback(async(append=false,refreshConnections=true)=>{
   if(append&&(listAbort.current||!page.nextCursor))return;
   const epoch=++readGeneration.current;
@@ -405,8 +409,11 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
    if(!current())return;
    if(isStatePlan(plan)){
     const item:AgentTaskView|undefined=result.item;
-    if(item?.id!==plan.row.id||checkingState&&(contentRestricted(item)||item.state==='access_changed'))
-     throw new Error('任务暂时无法核对');
+    if(item?.id!==plan.row.id)throw new Error('任务暂时无法核对');
+    if(checkingState&&(contentRestricted(item)||item.state==='access_changed')){
+     hideDetailContents(item.id,contentRestricted(item)?item:null,'任务暂时无法核对');
+     return;
+    }
     if(checkingState&&item.version===plan.row.version&&item.canControl
      &&!['cancelled','succeeded','failed','expired','budget_exhausted'].includes(item.state)){
      setPlan({...plan,row:item});setUncertain(false);setFailure(TASK_STATE_UNCHANGED[plan.kind]);
@@ -442,6 +449,10 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
   }catch(e){
    if(!current()||(!attached&&abort.signal.aborted))return;
    const status=(e as {status?:number})?.status;
+   if(checkingState&&accessDenied(e)){
+    hideDetailContents(plan.row.id,null,e instanceof Error?e.message:'任务暂时无法核对');
+    return;
+   }
    if(checkingAttachmentReceipt&&status===404){
     setFailure('暂未查到原提交回执');
     if(plan.receiptOnly)setPlan({...plan,receiptOnly:undefined,requestId:crypto.randomUUID()});
@@ -531,8 +542,10 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     </div>)}
     {detail.state==='waiting_human'&&detail.waitingProposalIds.length>0&&<Button onClick={()=>nav.go('cockpit')}>{uiText('查看待确认事项')}</Button>}
     <Button variant="quiet" icon={Copy} onClick={()=>void copy(detail.id)}>{uiText('复制任务编号')}</Button>
-    {history.items.map((event,i)=><div className="mist-row" key={i}><span>{uiText(ACTION[event.action]??event.action)}</span><span className="mist-spacer"/><span className="mist-sub">{event.actorName} · {time(event.at)}</span></div>)}{historyError&&<FailureNotice title="任务记录读取失败" detail={historyError.message} retry={()=>void readDetailHistory(detail.id,historyError.cursor?{cursor:historyError.cursor}:{refresh:true})}/>}
-    {history.nextCursor&&<Button disabled={historyLoading} onClick={()=>void readDetailHistory(detail.id,{cursor:history.nextCursor})}>{uiText('更多记录')}</Button>}
+    {!contentRestricted(detail)&&detail.state!=='access_changed'&&<>
+     {history.items.map((event,i)=><div className="mist-row" key={i}><span>{uiText(ACTION[event.action]??event.action)}</span><span className="mist-spacer"/><span className="mist-sub">{event.actorName} · {time(event.at)}</span></div>)}{historyError&&<FailureNotice title="任务记录读取失败" detail={historyError.message} retry={()=>void readDetailHistory(detail.id,historyError.cursor?{cursor:historyError.cursor}:{refresh:true})}/>}
+     {history.nextCursor&&<Button disabled={historyLoading} onClick={()=>void readDetailHistory(detail.id,{cursor:history.nextCursor})}>{uiText('更多记录')}</Button>}
+    </>}
    </div>}
   </Drawer>
   <Dialog open={!!plan} onClose={closePlan} title={uiText(create?'新建任务':answer?'补充资料':plan?.kind==='issue'?'连接Agent':plan?.kind==='pause'?'暂停任务':plan?.kind==='resume'?'继续任务':'停止任务')} footer={<><Button disabled={busy} onClick={closePlan}>{uiText(uncertain?'关闭':'取消')}</Button><Button variant={plan?.kind==='cancel'?'danger':'primary'} loading={busy} disabled={busy||!!create&&(!create.identityId||!create.name.trim()||!create.instructions.trim()||create.executor==='platform'&&!platformAvailable)||!!answer&&!uncertain&&!answer.answer.trim()&&!answer.files?.length} onClick={()=>void submit()}>{uiText(uncertain?'核对原操作':create?'安排任务':answer?'提交答复':plan?.kind==='issue'?'生成任务连接':'确认')}</Button></>}>
