@@ -398,6 +398,83 @@ it('reads the original submitted answer after a lost receipt without sending a n
  expect(api.mock.calls.filter(([url])=>url.endsWith('/task/answer'))).toHaveLength(1);
 });
 
+it.each([true,false])('checks the exact uploaded answer receipt after a lost response (%s)',async committed=>{
+ const original={...task,id:'task',conversationId:'c_attachment_answer',state:'waiting_human',version:2,canControl:true,
+  questions:[{id:'q1',question:'请补充原件。'}]};
+ const supplied={id:'file-supplement',name:'quote.txt',mimeType:'text/plain',size:3};
+ const other={...supplied,id:'file-other'};
+ const answered={...original,state:'succeeded',version:3,attachments:[committed?supplied:other],
+  questions:[{id:'q1',question:'请补充原件。',answer:'附件见本轮。',answeredAt:'2026-11-17T04:02:00Z'}]};
+ let submitted='';
+ const file=new File(['abc'],'quote.txt',{type:'text/plain'});
+ Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode('abc').buffer});
+ const notified=vi.fn();
+ window.addEventListener('bambook:agent-task-update',notified);
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks'))return {items:[original],nextCursor:null};
+   if(url.endsWith('/answer')&&init?.method==='POST'){
+    expect(init.body).toBeInstanceOf(FormData);
+    const form=init.body as FormData;
+    expect((form.get('attachments') as File).name).toBe(supplied.name);
+    const payload=JSON.parse(String(form.get('answer')));
+    expect(payload).toMatchObject({questionId:'q1',answer:'附件见本轮。'});
+    submitted=payload.requestId;
+    throw Object.assign(new Error('连接中断'),{status:0});
+   }
+   if(url.includes('/answer/receipt/')){
+    expect(url.endsWith(submitted)).toBe(true);
+    if(!committed)throw Object.assign(new Error('无原始回执'),{status:404});
+    return {item:answered,attachmentIds:[supplied.id]};
+   }
+   if(url.endsWith('/agent-tasks/task'))return {item:submitted?answered:original};
+   if(url.includes('/personal-agent/task-access?'))return {restrictedIds:[]};
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View conversationId={original.conversationId}/>));
+  await act(async()=>{await channel.answer(channel.tasks[0], 'q1','附件见本轮。',[file]);});
+  expect(api.mock.calls.filter(([url])=>url.includes('/answer/receipt/'))).toHaveLength(1);
+  expect(api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
+  expect(channel.tasks[0].attachments).toEqual([committed?supplied:other]);
+  expect(notified).toHaveBeenCalledTimes(committed?1:0);
+ }finally{
+  window.removeEventListener('bambook:agent-task-update',notified);
+  vi.unstubAllGlobals();
+ }
+});
+
+it('keeps the same upload request id on a byte-identical retry and changes it for a different file',async()=>{
+ const waiting={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请补交文件。'}]};
+ const requests:string[]=[];
+ const attachment=(bytes:string)=>{
+  const file=new File([bytes],'quote.txt',{type:'text/plain'});
+  Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode(bytes).buffer});
+  return file;
+ };
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/agent-tasks'))return {items:[waiting],nextCursor:null};
+   if(url.endsWith('/answer')&&init?.method==='POST'){
+    requests.push(JSON.parse(String((init.body as FormData).get('answer'))).requestId);
+    throw Object.assign(new Error('连接中断'),{status:0});
+   }
+   if(url.includes('/answer/receipt/'))throw Object.assign(new Error('没有回执'),{status:404});
+   if(url.endsWith('/agent-tasks/task'))return {item:waiting};
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  for(const content of ['abc','abc','abd'])
+   await act(async()=>{await channel.answer(channel.tasks[0],'q1','',[attachment(content)]);});
+  expect(requests).toHaveLength(3);
+  expect(requests[0]).toBe(requests[1]);
+  expect(requests[2]).not.toBe(requests[0]);
+ }finally{vi.unstubAllGlobals();}
+});
+
 it('keeps the exact answer request after a fresh page without storing the answer',async()=>{
  const storageScope='["test-operator","workspace"]';
  const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给交期'}]};

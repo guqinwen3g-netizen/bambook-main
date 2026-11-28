@@ -8,7 +8,8 @@ export type AssistantReply = {
   revision?: number; truncated?: boolean; contextToken?: string;
 };
 export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
-type TaskAnswerDraft = {taskId:string;questionId:string;text:string};
+type TaskAnswerDraft = {taskId:string;questionId:string;text:string;files:readonly File[]};
+const emptyAnswerFiles:readonly File[]=[];
 export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
 type ComposerDraft = {
   question: string;
@@ -73,11 +74,14 @@ function useConversationState(scope: string, controlStorageScope?: string) {
   const setMessages = React.useCallback<React.Dispatch<React.SetStateAction<AssistantReply[]>>>(value => update('messages', value), [update]);
   const setFiles = React.useCallback<React.Dispatch<React.SetStateAction<File[]>>>(value => update('files', value), [update]);
   const setAttachmentRefs = React.useCallback<React.Dispatch<React.SetStateAction<AssistantAttachmentRef[]>>>(value => update('attachmentRefs', value), [update]);
-  const setAnswerDraft = React.useCallback((taskId:string,questionId:string,text:string)=>update('answerDrafts',old=>{
+  const updateAnswerDraft = React.useCallback((taskId:string,questionId:string,patch:Partial<Pick<TaskAnswerDraft,'text'|'files'>>)=>update('answerDrafts',old=>{
     const key=taskAnswerDraftKey(taskId,questionId), next=new Map(old);
-    if(text)next.set(key,{taskId,questionId,text});else next.delete(key);
+    const draft={taskId,questionId,text:'',files:emptyAnswerFiles,...old.get(key),...patch};
+    if(draft.text||draft.files.length)next.set(key,draft);else next.delete(key);
     return next;
   }),[update]);
+  const setAnswerDraft=React.useCallback((taskId:string,questionId:string,text:string)=>updateAnswerDraft(taskId,questionId,{text}),[updateAnswerDraft]);
+  const setAnswerFiles=React.useCallback((taskId:string,questionId:string,files:readonly File[])=>updateAnswerDraft(taskId,questionId,{files}),[updateAnswerDraft]);
   const setWorkLogExpanded = React.useCallback((taskId: string, expanded: boolean) =>
     update('workLogExpanded', previous => previous.get(taskId) === expanded
       ? previous : new Map(previous).set(taskId, expanded)), [update]);
@@ -108,7 +112,10 @@ function useConversationState(scope: string, controlStorageScope?: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests,controlStorageScope,setWorkLogExpanded,setReadOnlyQuestion,setReadOnlySelected };
+  const value=entry.scope===scope?entry.value:fresh;
+  const readAnswerFiles=React.useCallback((taskId:string,questionId:string)=>
+    value.answerDrafts.get(taskAnswerDraftKey(taskId,questionId))?.files??emptyAnswerFiles,[value.answerDrafts]);
+  return { scope, ...value, setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,readAnswerFiles,setAnswerFiles,discardAnswerDrafts,taskControlRequests,controlStorageScope,setWorkLogExpanded,setReadOnlyQuestion,setReadOnlySelected };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);

@@ -1,5 +1,5 @@
 import {withRequestDeadline} from './requestDeadline';
-import {answerFingerprint,saveTaskControls,type TaskControlIntent,type TaskControlRequest} from './xiaozhuControlRequests';
+import {answerFingerprint,answerRequestBody,saveTaskControls,type TaskControlIntent,type TaskControlRequest} from './xiaozhuControlRequests';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -778,11 +778,27 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     };
     const checkTask = async (request:TaskControlRequest) => {
       const denial = deniedHistory.current;
+      if(request.action==='answer'&&request.hasAttachments){
+        try{
+          const receipt=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal=>
+            mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/answer/receipt/'+encodeURIComponent(request.requestId),{signal,cache:'no-store'})) as {item:AgentTaskView;attachmentIds:string[]};
+          if(!isCurrent()||deniedHistory.current!==denial)return;
+          const question=receipt.item?.questions?.find(item=>item.id===request.questionId&&item.answeredAt);
+          if(receipt.item?.id!==task.id||receipt.item.contentRestricted||!question||!receipt.attachmentIds?.length
+            ||!receipt.attachmentIds.every(id=>receipt.item.attachments?.some(file=>file.id===id)))return;
+          clearStaleProgress(task.id);
+          accept(receipt.item);
+          error='';
+          return;
+        }catch(problem){
+          if((problem as {status?:number})?.status!==404)throw problem;
+        }
+      }
       const latest = await readCoworkTask(base,task.id,controller.signal);
       const answer=request.action==='answer'
         ? latest.questions?.find(question=>question.id===request.questionId&&question.answeredAt)?.answer : undefined;
       const confirmed = request.action==='answer'
-        ? answer!==undefined&&(request.answer!==undefined
+        ? !request.hasAttachments&&answer!==undefined&&(request.answer!==undefined
           ? answer===request.answer : !!request.fingerprint&&await answerFingerprint(task.id,request.questionId,answer)===request.fingerprint)
         : request.action==='resume' ? latest.version>request.version&&latest.state!=='paused'
         : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
@@ -799,22 +815,28 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         await checkTask(intent);
         return;
       }
-      const {action,...details}=intent;
       const existing=controlKeys.get(task.id);
-      const fingerprint=intent.action==='answer'?await answerFingerprint(task.id,intent.questionId,intent.answer):undefined;
+      const files=intent.action==='answer'?intent.files??[]:[];
+      const hasAttachments=files.length>0;
+      const fingerprint=intent.action==='answer'?await answerFingerprint(task.id,intent.questionId,intent.answer,files):undefined;
       if(!isCurrent())return;
+      if(hasAttachments&&!fingerprint)throw Error('附件无法核对，请重新选择后再试');
       const same=existing?.version===task.version&&(intent.action!=='answer'?existing.action===intent.action
         : existing.action==='answer'&&existing.questionId===intent.questionId
-          &&(existing.answer===intent.answer||!!fingerprint&&existing.fingerprint===fingerprint));
+          &&!!existing.hasAttachments===hasAttachments
+          &&(!hasAttachments&&existing.answer===intent.answer||!!fingerprint&&existing.fingerprint===fingerprint));
       const requestId=same?existing.requestId:crypto.randomUUID();
       submitted=intent.action==='answer'
-        ? {...intent,requestId,version:task.version,fingerprint}
+        ? {action:'answer',questionId:intent.questionId,answer:intent.answer,requestId,version:task.version,fingerprint,...(hasAttachments?{hasAttachments:true}:{})}
         : {...intent,requestId,version:task.version};
       controlKeys.set(task.id,submitted);
       if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
-      const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
+      const payload={requestId,version:task.version};
+      const body=intent.action==='answer'?answerRequestBody({...payload,questionId:intent.questionId,answer:intent.answer},files):JSON.stringify(payload);
+      const timeout=hasAttachments?TASK_SEND_TIMEOUT_MS+Math.ceil(files.reduce((bytes,file)=>bytes+file.size,0)/UPLOAD_BYTES_PER_SECOND)*1000:HISTORY_READ_TIMEOUT_MS;
+      const result = await withRequestDeadline(controller,timeout,failure,signal =>
         mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/'+action,{
-          method:'POST',body:JSON.stringify({requestId,version:task.version,...details}),signal,
+          method:'POST',body,signal,
         }) as Promise<{item:AgentTaskView}>);
       if (result.item?.id!==task.id) throw new Error(failure);
       accept(result.item);
@@ -833,8 +855,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const answer = (task:AgentTaskView,questionId:string,text:string) =>
-    controlTask(task,{action:'answer',questionId,answer:text.trim()});
+  const answer = (task:AgentTaskView,questionId:string,text:string,files?:readonly File[]) =>
+    controlTask(task,{action:'answer',questionId,answer:text.trim(),files});
   const checkAnswer = (task:AgentTaskView,questionId:string) => {
     const submitted=controlKeys.get(task.id);
     if (submitted?.action==='answer'&&submitted.questionId===questionId)return controlTask(task,submitted);
