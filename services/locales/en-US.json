@@ -6673,6 +6673,7 @@
   "移除不可用引用": "Remove unavailable reference",
   "向小竹提问": "Ask Xiaozhu",
   "等待模型重试": "Waiting to retry the model",
+  "等待模型额度": "Waiting for model quota",
   "最早 {0} 秒后重试": "Retry in at least {0} seconds",
   "办理过程": "Work log",
   "{0} 秒": "{0}s",

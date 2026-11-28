@@ -355,6 +355,21 @@ it('shows the active model and retry phases instead of the last completed read',
   expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('等待模型重试');
 });
 
+it('shows quota waiting without either timer and preserves stale progress handling',async()=>{
+  const waiting = task({state:'queued',waitingForModelQuota:true,
+    executionIssue:{code:'model_timeout',retryAt:new Date(Date.now()+5000).toISOString()},
+    executionStageSince:new Date().toISOString()});
+  await paint([waiting]);
+  expect(getByRole(host,'status').textContent).toBe('等待模型额度');
+  expect(queryByRole(host,'timer')).toBeNull();
+  await paint([waiting],{...fns(),staleProgressIds:new Set([waiting.id])});
+  expect(getByRole(host,'status').textContent).toBe('执行进度暂未更新');
+  expect(queryByRole(host,'timer')).toBeNull();
+  await paint([task({state:'running',executionStage:'model',executionStageSince:new Date().toISOString()})]);
+  expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+  expect(getByRole(host,'timer')).toBeTruthy();
+});
+
 it('shows the scheduled retry delay until it elapses without implying a model is running',async()=>{
   vi.useFakeTimers();
   try {

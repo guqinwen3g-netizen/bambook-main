@@ -18,7 +18,7 @@ import { taskReportRecordIndex } from '../runtime/xiaozhuRecords';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
-import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../runtime/xiaozhuActivity';
+import { activeModelFallbackSince, isWaitingForModelQuota, xiaozhuModelWaitLabel } from '../runtime/xiaozhuActivity';
 import { useAssistantConversation } from '../runtime/assistantConversation';
 import { answerFingerprint, answerRequestBody, saveTaskControls } from '../runtime/xiaozhuControlRequests';
 
@@ -443,6 +443,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
    :undefined
   :undefined;
  const detailProgressUnavailable=detailNeedsRead||!!detailError||detail?.runnerStatus==='heartbeat_stale';
+ const detailIssue=detail&&!isWaitingForModelQuota(detail)?detail.executionIssue:undefined;
  const detailModelSince=detail&&!detailProgressUnavailable&&!detail.runnerStatus
   &&detail.state==='running'&&detail.executionStage==='model'
   ? activeModelFallbackSince(detail)??detail.executionStageSince : undefined;
@@ -482,7 +483,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     {(detail.waitingFor||detail.resumeAt||detail.wakeReason)&&<KeyValue items={[...(detail.waitingFor?[{label:uiText('等待资料'),value:detail.waitingFor.label}]:[]),...(detail.resumeAt?[{label:uiText(detail.waitingFor?'等待截止':'计划继续'),value:time(detail.resumeAt)}]:[]),...(detail.wakeReason?[{label:uiText('继续原因'),value:uiText(detail.wakeReason==='changed'?'资料已变化':'到达最晚时间')}]:[])]}/>}
     {detail.waitingFor?.link&&<Button onClick={openOriginal}>{uiText('查看原资料')}</Button>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
-    {detail.executionIssue&&<Banner tone="bad" title={uiText(AGENT_TASK_ISSUE_LABEL[detail.executionIssue.code])}>{!detailProgressUnavailable&&detail.state==='queued'&&detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
+    {detailIssue&&<Banner tone="bad" title={uiText(AGENT_TASK_ISSUE_LABEL[detailIssue.code])}>{!detailProgressUnavailable&&detail.state==='queued'&&detailIssue.retryAt?uiText('下次重试')+' '+time(detailIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
     {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}>
      <span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span>
      <p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(q.question)}</p>

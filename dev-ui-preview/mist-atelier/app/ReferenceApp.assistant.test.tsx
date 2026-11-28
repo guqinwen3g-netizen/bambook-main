@@ -64,6 +64,11 @@ it('shows live activity in the sidebar, opens its original task, and hides after
   expect(card()?.textContent).toContain('执行进度暂未更新');
   expect(card()?.textContent).not.toContain('正在等待备用模型');
   expect(queryByRole(card()!,'timer')).toBeNull();
+  bridge.activity.mockResolvedValue({items:[{...task,state:'queued',waitingForModelQuota:true,retrying:true}]});
+  await change();
+  expect(card()?.textContent).toContain('等待模型额度');
+  expect(card()?.textContent).not.toContain('等待模型重试');
+  expect(queryByRole(card()!,'timer')).toBeNull();
   await click(card()!);
   expect(Object.fromEntries(new URLSearchParams(location.search))).toMatchObject({view:'assistant',id:'task-a',section:'task-origin'});
   bridge.activity.mockResolvedValue({items:[]});

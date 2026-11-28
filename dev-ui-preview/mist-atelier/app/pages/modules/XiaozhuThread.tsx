@@ -6,7 +6,7 @@ import { activeAgentTaskStep, agentTaskActivityText, type AgentTaskTrailItem, ty
 import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, taskVisualPdfPageChoices, type TaskAttachmentTarget, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
-import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../../runtime/xiaozhuActivity';
+import { activeModelFallbackSince, isWaitingForModelQuota, xiaozhuModelWaitLabel } from '../../runtime/xiaozhuActivity';
 import { COWORK_ACTIVE, splitRequest, type TaskControlState } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
@@ -288,8 +288,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const retryable = done && !!request.trim() && t.state !== 'access_changed'
       && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
     const progressStale = active && actions.staleProgressIds?.has(t.id);
-    const retryAt = !progressStale && t.state === 'queued' && !t.runnerStatus ? t.executionIssue?.retryAt : undefined;
-    const since = progressStale ? undefined : t.runnerStatus === 'heartbeat_stale' ? t.lastHeartbeatAt ?? undefined
+    const quotaWait = isWaitingForModelQuota(t);
+    const retryAt = !progressStale && !quotaWait && t.state === 'queued' && !t.runnerStatus ? t.executionIssue?.retryAt : undefined;
+    const since = progressStale || quotaWait ? undefined : t.runnerStatus === 'heartbeat_stale' ? t.lastHeartbeatAt ?? undefined
       : activeModelFallbackSince(t) ?? t.executionStageSince;
     const hasSpecificStatus = t.runnerStatus || t.state === 'queued' || t.state === 'waiting_time'
       || t.state === 'waiting_condition' || (t.state === 'running' && t.executionStage === 'model');

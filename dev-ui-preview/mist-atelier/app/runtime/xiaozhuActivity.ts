@@ -6,6 +6,11 @@ import { mistApiRequest } from './workspace';
 const ACTIVE_INTERVAL = 2500;
 const IDLE_INTERVAL = 15_000;
 const REQUEST_TIMEOUT = 5000;
+const MODEL_QUOTA_WAIT_LABEL = '等待模型额度';
+
+export function isWaitingForModelQuota(task: Pick<AgentTaskView, 'state' | 'contentRestricted'> & { waitingForModelQuota?: true }) {
+  return task.state === 'queued' && task.waitingForModelQuota === true && !task.contentRestricted;
+}
 
 export function useXiaozhuActivity(workspaceId: string | undefined, scope: string, enabled: boolean) {
   const [snapshot, setSnapshot] = React.useState<{ scope: string; items: AgentTaskActivity[] }>();
@@ -83,6 +88,7 @@ export function activeModelFallbackSince(task: Pick<AgentTaskView, 'state' | 'ex
 export function xiaozhuActivityLabel(task: AgentTaskActivity) {
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
+  if (isWaitingForModelQuota(task)) return MODEL_QUOTA_WAIT_LABEL;
   if (task.retrying) return '等待模型重试';
   if (task.state === 'queued') return '待执行';
   if (task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
@@ -91,6 +97,7 @@ export function xiaozhuActivityLabel(task: AgentTaskActivity) {
 
 
 export function xiaozhuModelWaitLabel(task: AgentTaskView): string | undefined {
+  if (isWaitingForModelQuota(task)) return MODEL_QUOTA_WAIT_LABEL;
   if (task.state === 'queued' && task.executionIssue?.retryAt) {
     return task.executionIssue.code === 'model_timeout' ? '模型响应超时，等待重试' : '等待模型重试';
   }

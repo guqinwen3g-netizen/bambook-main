@@ -553,6 +553,22 @@ it.each(['queued','running'] as const)('shows the model timeout in task details 
  expect(dialog.textContent?.includes('下次重试')).toBe(state==='queued');
 });
 
+it('shows quota waiting in the task list and drawer without the previous model error',async()=>{
+ const detail={...row(),executor:'platform',waitingForModelQuota:true,checkpoint:'已核对原订单',
+  executionIssue:{code:'model_timeout',retryAt:new Date(Date.now()+5000).toISOString()}};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:detail}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[detail],nextCursor:null}));
+ act(paint);
+ await flush();
+ expect(getByText(host,'等待模型额度')).toBeTruthy();
+ await click(getByText(host,detail.name));
+ const dialog=getByRole(document.body,'dialog',{name:detail.name});
+ expect(getByText(dialog,'等待模型额度')).toBeTruthy();
+ expect(dialog.textContent).toContain('已核对原订单');
+ expect(dialog.textContent).not.toContain('模型响应超时');
+ expect(dialog.textContent).not.toContain('下次重试');
+});
+
 it('opens a report attachment from the task drawer and removes its preview on restriction', async () => {
  const pdf={id:'pdf-a',name:'发票.pdf',mimeType:'application/pdf',size:30};
  const sibling={...pdf,id:'pdf-b'};
