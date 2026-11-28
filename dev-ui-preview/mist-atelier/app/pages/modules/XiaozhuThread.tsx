@@ -323,6 +323,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {!!produced.length && actions.onOpenFile && <ProducedFiles proposals={produced} onOpen={actions.onOpenFile} />}
         {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy} draft={actions.answerDraft}/>}
         {control?.error&&(active||t.state==='paused')&&<p className="mist-xz-note" role="status">{uiText(control.error)}</p>}
+        {control?.attachmentAnswerRecovered&&!t.contentRestricted&&<p className="mist-xz-note" role="status">{uiText('已找回附件答复')}</p>}
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">

@@ -109,6 +109,16 @@ async function readCoworkTask(base: string, id: string, signal: AbortSignal): Pr
   }
 }
 
+async function readAttachmentAnswerReceipt(base:string,taskId:string,request:Extract<TaskControlRequest,{action:'answer'}>,controller:AbortController){
+  const receipt=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,CONTROL_FAILURE.answer,signal=>
+    mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(taskId)+'/answer/receipt/'+encodeURIComponent(request.requestId),{signal,cache:'no-store'})) as {item:AgentTaskView;attachmentIds:string[]};
+  const question=receipt.item?.questions?.find(item=>item.id===request.questionId&&item.answeredAt);
+  if(receipt.item?.id!==taskId||receipt.item.contentRestricted||!question||!Array.isArray(receipt.attachmentIds)
+    ||!receipt.attachmentIds.length||!receipt.attachmentIds.every(id=>receipt.item.attachments?.some(file=>file.id===id)))
+    throw Error(CONTROL_FAILURE.answer);
+  return receipt.item;
+}
+
 async function readCoworkHistory(base: string, signal: AbortSignal) {
   const items: AgentTaskView[] = [];
   let cursor: string | undefined;
@@ -167,7 +177,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
-export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string };
+export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string; attachmentAnswerRecovered?:boolean };
 const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试',resume:'继续结果未确认，可重试'};
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>, controlStorageScope?:string) {
@@ -210,11 +220,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const controlRequests = React.useRef(new Map<string,AbortController>());
   const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   const controlKeys=savedControls??localControls;
+  const restoredAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
   React.useEffect(()=>{
     let changed=false;
     for(const task of tasks){
       const pending=controlKeys.get(task.id);
-      if(pending&&(task.version>pending.version||task.contentRestricted||task.canControl===false)) {
+      const restoredUpload=pending?.action==='answer'&&pending.hasAttachments&&pending.restoredFromStorage;
+      if(pending&&(task.contentRestricted||!restoredUpload&&(task.version>pending.version||task.canControl===false))) {
         controlKeys.delete(task.id);
         changed=true;
       }
@@ -222,6 +234,47 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
   },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
+  const recoverRestoredAnswers=React.useCallback(()=>{
+    if(!base||!enabled||!navigator.onLine)return;
+    for(const task of currentTasks.current){
+      const pending=controlKeys.get(task.id);
+      if(pending?.action!=='answer'||!pending.hasAttachments||!pending.restoredFromStorage||task.contentRestricted
+        ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt)
+        ||restoredAnswerChecks.has(pending.requestId))continue;
+      const controller=new AbortController();
+      restoredAnswerChecks.set(pending.requestId,controller);
+      const current=()=>live.current===scope&&restoredAnswerChecks.get(pending.requestId)===controller
+        &&controlKeys.get(task.id)===pending&&currentTasks.current.some(item=>item.id===task.id&&!item.contentRestricted);
+      const forget=()=>{
+        controlKeys.delete(task.id);
+        if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+      };
+      void readAttachmentAnswerReceipt(base,task.id,pending,controller).then(item=>{
+        if(!current())return;
+        forget();
+        setTasks(old=>old.map(previous=>mergeTaskUpdate(previous,item)));
+        setControls(old=>({...old,[task.id]:{busy:false,attachmentAnswerRecovered:true}}));
+      },error=>{
+        // An answered question with no receipt for this request belongs to a different submission.
+        if(current()&&(error as {status?:number})?.status===404)forget();
+      }).finally(()=>{
+        if(restoredAnswerChecks.get(pending.requestId)===controller)restoredAnswerChecks.set(pending.requestId,null);
+      });
+    }
+  },[base,enabled,scope,controlKeys,controlStorageScope,restoredAnswerChecks]);
+  React.useEffect(()=>{recoverRestoredAnswers();},[tasks,recoverRestoredAnswers]);
+  React.useEffect(()=>{
+    const reconnect=()=>{
+      for(const [id,controller] of restoredAnswerChecks)if(!controller)restoredAnswerChecks.delete(id);
+      recoverRestoredAnswers();
+    };
+    window.addEventListener('online',reconnect);
+    return()=>{
+      window.removeEventListener('online',reconnect);
+      for(const controller of restoredAnswerChecks.values())controller?.abort();
+      restoredAnswerChecks.clear();
+    };
+  },[recoverRestoredAnswers,restoredAnswerChecks]);
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
@@ -780,14 +833,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const denial = deniedHistory.current;
       if(request.action==='answer'&&request.hasAttachments){
         try{
-          const receipt=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal=>
-            mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/answer/receipt/'+encodeURIComponent(request.requestId),{signal,cache:'no-store'})) as {item:AgentTaskView;attachmentIds:string[]};
+          const item=await readAttachmentAnswerReceipt(base,task.id,request,controller);
           if(!isCurrent()||deniedHistory.current!==denial)return;
-          const question=receipt.item?.questions?.find(item=>item.id===request.questionId&&item.answeredAt);
-          if(receipt.item?.id!==task.id||receipt.item.contentRestricted||!question||!receipt.attachmentIds?.length
-            ||!receipt.attachmentIds.every(id=>receipt.item.attachments?.some(file=>file.id===id)))return;
           clearStaleProgress(task.id);
-          accept(receipt.item);
+          accept(item);
           error='';
           return;
         }catch(problem){

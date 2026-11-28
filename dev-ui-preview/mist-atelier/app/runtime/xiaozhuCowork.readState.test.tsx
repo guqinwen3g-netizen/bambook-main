@@ -6,7 +6,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 const api=vi.hoisted(()=>vi.fn());
 vi.mock('./workspace',()=>({mistApiRequest:(...args:any[])=>api(...args)}));
 import {useXiaozhuCowork} from './xiaozhuCowork';
-import {readTaskControls} from './xiaozhuControlRequests';
+import {readTaskControls,saveTaskControls} from './xiaozhuControlRequests';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let root:Root|undefined,host:HTMLElement,channel:ReturnType<typeof useXiaozhuCowork>;
 const task={id:'task',identityId:'identity',executor:'platform',state:'succeeded',instructions:'原业务核对',result:'已完成',createdAt:'2026-11-17T04:00:00Z',updatedAt:'2026-11-17T04:01:00Z'};
@@ -473,6 +473,39 @@ it('keeps the same upload request id on a byte-identical retry and changes it fo
   expect(requests[0]).toBe(requests[1]);
   expect(requests[2]).not.toBe(requests[0]);
  }finally{vi.unstubAllGlobals();}
+});
+
+it.each([true,false])('recovers a settled uploaded answer by its saved request after reload (%s)',async committed=>{
+ const store='restored-attached-answer',requestId='00000000-0000-4000-8000-000000000052';
+ saveTaskControls(store,new Map([['task',{action:'answer',questionId:'q1',version:2,requestId,
+  fingerprint:'abc123'.padEnd(64,'0'),hasAttachments:true}]]));
+ const saved=readTaskControls(store);
+ const attachment={id:committed?'mine':'theirs',name:'quote.txt',mimeType:'text/plain',size:3};
+ const latest={...task,version:3,canControl:false,attachments:[attachment],questions:[
+  {id:'q1',question:'请补交原件。',answer:'附件见本轮。',answeredAt:'2026-11-17T04:02:00Z',attachmentIds:[attachment.id]},
+ ]};
+ function Restored(){
+  channel=useXiaozhuCowork('workspace','account:workspace',true,undefined,undefined,saved,store);
+  return <div/>;
+ }
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-tasks'))return {items:[latest],nextCursor:null};
+  if(url.includes('/answer/receipt/')){
+   expect(url.endsWith(requestId)).toBe(true);
+   if(!committed)throw Object.assign(new Error('没有原始回执'),{status:404});
+   return {item:latest,attachmentIds:[attachment.id]};
+  }
+  return loaded(url);
+ });
+ try{
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<Restored/>));
+  expect(api.mock.calls.filter(([url])=>url.includes('/answer/receipt/'))).toHaveLength(1);
+  expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  expect(readTaskControls(store).size).toBe(0);
+  expect(!!channel.controls.task?.attachmentAnswerRecovered).toBe(committed);
+  expect(channel.tasks[0].attachments).toEqual([attachment]);
+ }finally{saveTaskControls(store,new Map());}
 });
 
 it('keeps the exact answer request after a fresh page without storing the answer',async()=>{
