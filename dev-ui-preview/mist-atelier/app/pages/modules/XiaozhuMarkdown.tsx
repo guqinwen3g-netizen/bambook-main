@@ -194,7 +194,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
   const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
-  const linkWorksheetTable = (table:Table, headingFile?:number) => {
+  const linkAttachmentTable = (table:Table, headingFile?:number) => {
     const [header,...rows]=table.children;
     if(!header)return;
     const columns=header.children.map(cell=>singleLabel(cell).trim().toLowerCase());
@@ -202,14 +202,25 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     const fileColumns=matching(/^(?:文件|文件名|原件|附件|workbook|file|attachment)$/);
     const sheetColumns=matching(/^(?:工作表|worksheet|sheet)$/);
     const rowColumns=matching(/^(?:行号|原行号|原表行号|原始行号|原工作表行号|row|row number)$/);
-    if(fileColumns.length>1||sheetColumns.length!==1||rowColumns.length!==1)return;
+    const pageColumns=matching(/^(?:页码|原页码|原始页码|pdf[ \t]*页码|page|page number)$/);
+    const hasWorksheet=sheetColumns.length===1&&rowColumns.length===1;
+    if(fileColumns.length>1||!hasWorksheet&&pageColumns.length!==1)return;
     if(!fileColumns.length&&headingFile===undefined)return;
     for(const {children} of rows){
-      const fileCell=children[fileColumns[0]],sheetCell=children[sheetColumns[0]],rowCell=children[rowColumns[0]];
-      if(!sheetCell||!rowCell)continue;
+      const fileCell=children[fileColumns[0]];
       const index=fileColumns.length?(fileCell?byName.get(singleLabel(fileCell).trim()):undefined):headingFile;
       if(index===undefined)continue;
-      const file=files[index],sheet=singleLabel(sheetCell).trim(),label=singleLabel(rowCell).trim();
+      const file=files[index];
+      const pageCell=pageColumns.length===1?children[pageColumns[0]]:undefined;
+      if(pageCell?.children.length===1){
+        const label=singleLabel(pageCell).trim();
+        const reference=/^[1-9]\d*$/.test(label)?`第 ${label} 页`:label;
+        const page=PDF_PAGE_REFERENCE.exec(reference)?.[0]===reference?citedPdfPage(reference,file,observedReads):undefined;
+        if(page!==undefined)pageCell.children=[toAttachment(index,pageCell.children[0],'',page)];
+      }
+      const sheetCell=children[sheetColumns[0]],rowCell=children[rowColumns[0]];
+      if(!hasWorksheet||!sheetCell||!rowCell)continue;
+      const sheet=singleLabel(sheetCell).trim(),label=singleLabel(rowCell).trim();
       const value=/^(?:第[ \t]*([1-9]\d*)[ \t]*行|row[ \t]+([1-9]\d*)|([1-9]\d*))$/i.exec(label);
       if(!sheet||!value||rowCell.children.length!==1)continue;
       const row=Number(value[1]??value[2]??value[3]);
@@ -337,7 +348,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
           for (const item of details.children) {
             const paragraph = item.children[0];
             if (paragraph?.type !== 'paragraph') continue;
-            if (lead && mentionsAnotherSource(paragraph)) break;
+            if (mentionsAnotherSource(paragraph)) break;
             linkSectionReference(paragraph,index,lead?.range);
           }
         }
@@ -346,7 +357,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
         if(node.type!=='table')continue;
         const heading=tree.children[position-1];
         const label=heading&&(heading.type==='heading'||heading.type==='paragraph')?singleLabel(heading).trim().replace(/[：:]$/,'').trim():'';
-        linkWorksheetTable(node,byName.get(label));
+        linkAttachmentTable(node,byName.get(label));
       }
       const visit = (parent: Parent, following='') => {
         const children=parent.children;

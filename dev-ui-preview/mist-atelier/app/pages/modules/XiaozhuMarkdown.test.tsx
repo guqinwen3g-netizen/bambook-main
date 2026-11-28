@@ -139,6 +139,47 @@ it.each(['两页均无 PDF 可提取文字','这两页没有可提取的文字�
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('stops inheriting a PDF heading when a report list mentions another original',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const first={id:'first',name:'inspection.pdf',mimeType:'application/pdf',size:100};
+ const second={...first,id:'second',name:'shipment.pdf'};
+ const reads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:first.id,taskAttachmentObservedPages:[3,4]},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:second.id,taskAttachmentObservedPages:[4]},
+ ];
+ const text='### inspection.pdf\n\n- 第 3 页：核对数量。\n- 另外核对 shipment.pdf。\n- 第 4 页：出运号。';
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const anchors=[...host.querySelectorAll('li button[title]')];
+  expect(anchors.map(button=>button.title)).toEqual(['第 3 页']);
+  await act(async()=>anchors[0].click());
+  expect(preview.mock.calls).toEqual([[first,3]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
+it('links exact observed PDF pages in report tables without trusting unknown files, unobserved pages, or ranges',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const first={id:'first',name:'inspection.pdf',mimeType:'application/pdf',size:100};
+ const second={...first,id:'second',name:'shipment.pdf'};
+ const reads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:first.id,taskAttachmentObservedPages:[3]},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:second.id,taskAttachmentObservedPages:[5]},
+ ];
+ const text=[
+  '### inspection.pdf\n\n| 页码 | 核对结果 |\n| --- | --- |\n| **3** | 已核对 |\n| 5 | 未核对 |\n| 3–5 | 范围 |',
+  '### 来源对照\n\n| 原件 | 原页码 | 事实 |\n| --- | --- | --- |\n| shipment.pdf | 第 5 页 | 记录 |\n| inspection.pdf | 第 5 页 | 未核对 |\n| unknown.pdf | 第 3 页 | 其他 |',
+ ].join('\n\n');
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const anchors=[...host.querySelectorAll('td button[title]')];
+  expect(anchors.map(button=>button.title)).toEqual(['第 3 页','第 5 页']);
+  await act(async()=>anchors.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first,3],[second,5]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('binds spreadsheet table row citations to the exact file, worksheet, and observed row',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
