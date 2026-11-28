@@ -351,7 +351,7 @@ export class MistPlatformTaskWorker{
               const namedLineRule=namedOrderLineRead
                 ? '\nnamedOrderLineRead 指向本人明确指定款号对应的订单行完整回执。当前记录可直接用于核对，按需读取其他仍未取得的条目。发现变更或冲突时再按工具提示回源。'
                 : ambiguousOrderLineReads
-                  ? '\nambiguousOrderLineReads 是同一款号的全部候选订单行完整回执。本人明确要求处理该款号的全部条目时按其范围核对。只处理其中一条且本人没有用数量、品名、颜色等区分到唯一时，先用 bambook_task 的 question 询问。列出可区分各候选的品名、数量及单位，必要时加单价或规格；不要只重复款号，也不要显示内部 ID。本人答复后继续原任务。身份仍不明确时继续询问，明确后才按正常预演与确认提交。'
+                  ? '\nambiguousOrderLineReads 是同一款号的全部候选订单行完整回执。本人明确要求处理该款号的全部条目时按其范围核对。只处理其中一条且本人没有用数量、品名、颜色等区分到唯一时，先用 bambook_task 的 question 询问。先简短问要处理哪一条，再用编号列出候选，每项单独一行，写品名与数量、单位，必要时加单价或规格；不要只重复款号，也不要显示内部 ID。本人答复后继续原任务。身份仍不明确时继续询问，明确后才按正常预演与确认提交。'
                   : '';
               const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),...(namedOrderLineRead?{namedOrderLineRead}:{}),...(ambiguousOrderLineReads?{ambiguousOrderLineReads}:{}),history,...(imageSources?.length?{imageSources}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead

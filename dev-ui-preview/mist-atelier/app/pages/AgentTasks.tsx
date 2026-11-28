@@ -1,3 +1,4 @@
+import { agentQuestionCopy } from './agentQuestionCopy';
 import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
@@ -341,7 +342,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     {detail.waitingFor?.link&&<Button onClick={openOriginal}>{uiText('查看原资料')}</Button>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
     {detail.executionIssue&&<Banner tone="bad" title={uiText(AGENT_TASK_ISSUE_LABEL[detail.executionIssue.code])}>{detail.state==='queued'&&detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
-    {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub">{q.question}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}
+    {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(q.question)}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub mist-xz-question-copy">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}
     {detail.state==='waiting_human'&&detail.waitingProposalIds.length>0&&<Button onClick={()=>nav.go('cockpit')}>{uiText('查看待确认事项')}</Button>}
     <Button variant="quiet" icon={Copy} onClick={()=>void copy(detail.id)}>{uiText('复制任务编号')}</Button>
     {history.items.map((event,i)=><div className="mist-row" key={i}><span>{uiText(ACTION[event.action]??event.action)}</span><span className="mist-spacer"/><span className="mist-sub">{event.actorName} · {time(event.at)}</span></div>)}{historyError&&<FailureNotice title="任务记录读取失败" detail={historyError} retry={()=>void readDetailHistory(detail.id,history.nextCursor)}/>}
