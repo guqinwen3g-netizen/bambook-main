@@ -472,7 +472,14 @@ export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskL
   const requestId=rid(input.requestId),question=plain(input.question,2000,'需要补充的资料');
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);
   const {row,value:c}=await assertTaskLease(db,actor,lease,now);
-  if((c.questions??[]).length>=10)fail('AGENT_TASK_LIMIT','任务提问已达上限，请结束后重新安排',422);
+  if((c.questions??[]).length>=10){
+    if(c.executor!=='platform')fail('AGENT_TASK_LIMIT','任务提问已达上限，请结束后重新安排',422);
+    // A queued retry cannot free a question slot. Finish under the current lease and acknowledge the same plan.
+    const result=c.locale==='en-US'
+      ? 'This task has reached its question limit. Review your answers and files here, then start a new task with any missing details.'
+      : '本任务提问已达上限。已提交的答复和附件可在本任务查看。补齐缺项后可重新交办。';
+    return finishTask(db,actor,lease,{requestId,outcome:'failed',result},now);
+  }
   const n=next(c,now,'question',requestId,[question]);n.controlVersion++;n.state='waiting_human';n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;
   n.questions=[...(c.questions??[]),{id:randomUUID(),question,askedAt:new Date(now).toISOString(),
     ...(correction?{attachmentScopeCorrection:correction}:{})}];n.checkpoint='等待本人补充资料。';
