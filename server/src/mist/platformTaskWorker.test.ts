@@ -1983,6 +1983,45 @@ it('explicitly reopens a prior attachment in the same conversation without creat
   expect(writes).toHaveBeenCalledTimes(1);
 });
 
+it('asks distinct original-file and worksheet questions for one same-name Excel request',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对第 47 行。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const workbook=(marker:string)=>{
+  const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet([]);
+  XLSX.utils.sheet_add_aoa(sheet,[[marker]],{origin:'B47'});
+  XLSX.utils.book_append_sheet(book,sheet,'报价');
+  return XLSX.write(book,{type:'buffer',bookType:'xlsx'});
+ };
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对同名原件第 47 行',instructions:'请只读取 quote.xlsx 第 47 行。'}))
+  .attach('attachments',workbook('OTHER-ORIGINAL-47'),'quote.xlsx')
+  .attach('attachments',workbook('SELECTED-ORIGINAL-47'),'quote.xlsx').expect(201)).body.item;
+ await f.drain();
+ const waiting=await f.current(task.id);
+ expect(waiting.questions.at(-1).question).toContain('工作簿');
+ expect(complete).not.toHaveBeenCalled();
+ const answer=async(current:any,value:string)=>{
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:current.version,questionId:current.questions.at(-1).id,answer:value,
+  }).expect(200);
+  await f.drain();
+  return f.current(task.id);
+ };
+ const workbookRetry=await answer(waiting,'quote.xlsx（99）');
+ expect(workbookRetry.questions.at(-1).id).not.toBe(waiting.questions.at(-1).id);
+ const sheetQuestion=await answer(workbookRetry,'quote.xlsx（2）');
+ expect(sheetQuestion.state).toBe('waiting_human');
+ expect(sheetQuestion.questions.at(-1).worksheetChoiceNames).toEqual(['报价']);
+ expect(complete).not.toHaveBeenCalled();
+ expect(await answer(sheetQuestion,'报价')).toMatchObject({state:'succeeded',id:task.id});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const text=complete.mock.calls[0][0].messages[0].content;
+ expect(text).toContain('SELECTED-ORIGINAL-47');
+ expect(text).not.toContain('OTHER-ORIGINAL-47');
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ expect(facts.task.attachments.map((file:{id:string})=>file.id)).toEqual(['attachment_2']);
+});
+
 it('asks for the worksheet before reading unnamed Excel rows',async()=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对报价第 47 行。'}));
  const f=await fixture(complete);f.worker.start(3_600_000);

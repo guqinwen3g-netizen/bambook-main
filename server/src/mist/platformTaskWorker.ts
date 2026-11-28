@@ -226,17 +226,16 @@ export class MistPlatformTaskWorker{
         }
         const question=pdfChoice?.question??pdfVisualChoice??worksheetQuestion;
         if(question){
-          const attempts=pdfChoice?(context.task.questions?.length??0):(context.task.questions?.filter(q=>q.question===question).length??0);
-          const prefix=pdfChoice?'platform-pdf-choice-':pdfVisualChoice?'platform-pdf-visual-choice-':'platform-workbook-choice-';
+          const sequence=context.task.questions?.length??0;
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
-            requestId:prefix+job.taskId+'-'+attempts,question,
+            requestId:'platform-attachment-question-'+job.taskId+'-'+sequence,question,
           });
           return;
         }
-        const outsideAttachmentScope=(fileId:string)=>excludedPdfIds?.has(fileId)||!!allowedFiles&&!allowedFiles.has(fileId);
+        const outsideAttachmentScope=(fileId:string)=>excludedPdfIds?.has(fileId)||!!allowedFiles&&!allowedFiles.has(fileId)
+          ||!!worksheetScope?.workbookIds.includes(fileId)&&fileId!==worksheetScope.fileId;
         const readableSteps=scopedAttachmentTaskSteps(context.steps,pdfRanges,worksheetScope,allowedFiles,excludedPdfIds);
-        const readableAttachments=context.task.attachments?.filter(file=>!outsideAttachmentScope(file.id)
-          &&(!worksheetScope?.workbookIds.includes(file.id)||file.id===worksheetScope.fileId));
+        const readableAttachments=context.task.attachments?.filter(file=>!outsideAttachmentScope(file.id));
         const pendingScopedReads=new Set<string>();
         let discardedReadNeedsReview=false;
         if(readableSteps.length!==context.steps.length){
@@ -335,6 +334,8 @@ export class MistPlatformTaskWorker{
                 : '';
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
+              if(worksheetScope?.rows&&modelTask.questions)
+                modelTask.questions=modelTask.questions.filter(question=>question.question!==WORKBOOK_SELECTION_QUESTION);
               if(worksheetScope?.needsWorksheetChoice&&modelTask.questions?.length){
                 const selected=[...modelTask.questions].reverse().find(question=>isWorksheetNameQuestion(question.question)&&question.answeredAt);
                 modelTask.questions=modelTask.questions.flatMap(question=>!isWorksheetNameQuestion(question.question)?[question]
