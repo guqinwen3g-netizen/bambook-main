@@ -50,6 +50,29 @@ it('identifies a contract proposal by its order and original filename without pr
   expect(getConfirm(host).disabled).toBe(false);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it('compares order draft payment notes and blocks confirmation when the draft note changes',()=>{
+ const{state,proposal}=contractProposalFixture();
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const order=state.orders[0],original=order.governance!.contract;
+ proposal.command.payload.input={...original,paymentNote:'拟改的付款说明'};
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  expect(host.textContent).toContain('当前付款说明 · T/T 100% 预付');
+  expect(host.textContent).toContain('拟改付款说明 · 拟改的付款说明');
+  expect(host.textContent).not.toContain('交货地点 · 上海');
+  expect(getConfirm(host).disabled).toBe(false);
+  original.paymentNote='另一会话最新付款说明';render();
+  expect(host.textContent).toContain('订单付款说明已更新，请重新提出提议');
+  expect(host.textContent).toContain('当前付款说明 · 另一会话最新付款说明');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it.each(['order','file'])('blocks a saved contract proposal after its %s source becomes invisible',kind=>{
  const{state,proposal}=contractProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);
@@ -105,7 +128,7 @@ it.each([false,true])('keeps a rejected confirmation local while preserving an u
 it('keeps a missing receipt open for read-only retry and closes only after confirmation',async()=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const proposal:any={id:'p',ownerId:'u',owner:'User',summary:['Update customer'],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}}};
- const run=vi.fn(),onClose=vi.fn(),onDone=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+ const run=vi.fn(),onClose=vi.fn(),onDone=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValueOnce('missing').mockResolvedValueOnce('confirmed');
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  try{
   act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} pendingRequestId="original-receipt" onRecoverOriginal={onRecoverOriginal} run={run} onClose={onClose} onDone={onDone}/></MistRoot>));
@@ -122,12 +145,12 @@ it('keeps a missing receipt open for read-only retry and closes only after confi
  }finally{act(()=>root.unmount());host.remove();}
 });
 
-it.each(['ordinary','protected','blocked'])('offers explicit replay only when the original confirmation is eligible (%s)',async(mode)=>{
+it.each(['ordinary','protected','blocked','unknown'])('offers explicit replay only when the original confirmation is eligible (%s)',async(mode)=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const proposal:any={id:'p',ownerId:'u',owner:'User',summary:['Update'],state:'pending',createdAt:'2026-11-15T00:00:00Z',
   command:mode==='protected'?{type:'payable.payment.register',payload:{requestId:'r',amount:10}}:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}},
   ...(mode==='blocked'?{taskBlocked:'原任务已停止'}:{})};
- const run=vi.fn(),onClose=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValue(false);
+ const run=vi.fn(),onClose=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValue(mode==='unknown'?'unknown':'missing');
  const onReplayOriginal=vi.fn().mockResolvedValue(true);
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  const find=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===name);
@@ -317,6 +340,31 @@ it('shows quotation business references and exact version, and blocks missing so
   for(const [owner,key]of [[state.market,'quotations'],[state,'customers'],[state,'devs'],[state,'versions'],[state,'files']] as const){const rows=owner[key as keyof typeof owner];(owner as any)[key]=[];render();expect(host.textContent).toContain('报价或来源资料已不可见，请重新核对');expect(confirmButton().disabled).toBe(true);(owner as any)[key]=rows;}
  }
  finally{act(()=>root.unmount());host.remove();}
+});
+
+it.each(['customer.update','market.customer.update'])('compares current and proposed payment terms for %s',type=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const state=createMistState({id:()=> 'id',now:'2026-11-28T04:00:00Z',actorName:'Test'},'empty');
+ state.customers=[{id:'customer-private',code:'CUS-SIM',name:'Birchline',terms:'T/T 20% 预付',creditLimit:0,currency:'GBP'} as any];
+ const proposal:any={id:'terms-proposal',ownerId:'u',owner:'Manager',summary:['变更付款条件'],state:'pending',createdAt:'2026-11-28',
+  command:{type,payload:{id:'customer-private',patch:{terms:'T/T 40% 预付'}}}};
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  const changes=document.querySelector('[data-agent-proposal-changes]')?.textContent;
+  expect(changes).toContain('当前付款条件 · T/T 20% 预付');
+  expect(changes).toContain('拟改付款条件 · T/T 40% 预付');
+  expect(changes).not.toContain('customer-private');
+  state.customers[0].city='Manchester';render();
+  expect(getConfirm(host).disabled).toBe(false);
+  state.customers[0].terms='由另一会话修改的条款';render();
+  expect(document.body.textContent).toContain('客户付款条件已更新，请重新提出提议');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
 });
 
 it('shows a customer credit grant with the exact old/new currency values and requires the existing high-risk password',()=>{
