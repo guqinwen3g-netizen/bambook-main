@@ -43,6 +43,108 @@ function okCompletion(text: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
 }
 
+it('only exposes the longest observed retry delay when the provider chain is exhausted',async()=>{
+ process.env.ARK_API_KEY='primary-key';
+ process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
+ process.env.BAMBOOK_LLM_BACKUP_KEY='backup-key';
+ const clock=Date.now(),time=vi.spyOn(Date,'now').mockReturnValue(clock);
+ const busy=(seconds:number)=>new Response('{}',{status:429,headers:{'Retry-After':String(seconds)}});
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(busy(45)).mockResolvedValueOnce(okCompletion('backup report'))
+  .mockResolvedValueOnce(busy(45)).mockResolvedValueOnce(busy(75));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProviders:{chain:()=>[]}});
+  await expect(complete(BASE_INPUT)).resolves.toBe('backup report');
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore:clock+75_000});
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+ }finally{time.mockRestore();}
+});
+
+it('skips a cooling provider across agent turns and isolates a replaced credential',async()=>{
+ process.env.ARK_API_KEY='first-key';
+ let clock=Date.now();
+ const time=vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(new Response('{}',{status:429,headers:{'Retry-After':'60'}}))
+  .mockResolvedValueOnce(okCompletion('new credential'))
+  .mockResolvedValueOnce(okCompletion('resumed original'));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]}});
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore:clock+60_000});
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({message:'LLM_PROVIDER_COOLDOWN',retryNotBefore:clock+60_000});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  process.env.ARK_API_KEY='replacement-key';
+  await expect(complete(BASE_INPUT)).resolves.toBe('new credential');
+  process.env.ARK_API_KEY='first-key';clock+=60_000;
+  await expect(complete(BASE_INPUT)).resolves.toBe('resumed original');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+ }finally{time.mockRestore();}
+});
+
+it('honors a streaming Retry-After without immediately retrying the same provider in non-streaming mode',async()=>{
+ process.env.ARK_API_KEY='fixture-flash-key';
+ process.env.BAMBOOK_MODEL_BASE_URL='https://ark.cn-beijing.volces.com/api/plan/v3';
+ process.env.BAMBOOK_MODEL_NAME='deepseek-v4.1-flash';
+ const cancelBody=vi.fn();
+ const fetchMock=vi.fn().mockResolvedValueOnce(new Response(new ReadableStream({cancel:cancelBody}),{
+  status:429,headers:{'Retry-After':'60'},
+ })).mockResolvedValueOnce(okCompletion('unexpected early retry'));
+ vi.stubGlobal('fetch',fetchMock);
+ const complete=createLlmCompleter({platformProviders:{chain:()=>[]}});
+ await expect(complete({...BASE_INPUT,onDelta:vi.fn()})).rejects.toMatchObject({retryNotBefore:expect.any(Number)});
+ expect(fetchMock).toHaveBeenCalledOnce();
+ expect(cancelBody).toHaveBeenCalledOnce();
+});
+
+it.each([
+ ['60', Date.UTC(2026, 10, 1, 0, 1)],
+ ['Fri, 06 Nov 2026 00:00:00 GMT', Date.UTC(2026, 10, 6)],
+ ['Friday, 06-Nov-26 00:00:00 GMT', Date.UTC(2026, 10, 6)],
+ ['Fri Nov  6 00:00:00 2026', Date.UTC(2026, 10, 6)],
+ ['Sunday, 01-Jan-51 00:00:00 GMT', Date.UTC(2051, 0, 1)],
+ ['Sunday, 01-Nov-76 00:00:00 GMT', Date.UTC(2076, 10, 1)],
+ ['Saturday, 06-Nov-76 00:00:00 GMT', undefined],
+ ['January 2031', undefined],
+ ['Fri, 06 Nov 2026 00:00:00', undefined],
+ ['Wed, 31 Feb 2027 00:00:00 GMT', undefined],
+ ['Thu, 06 Nov 2026 00:00:00 GMT', undefined],
+])('interprets Retry-After %s using HTTP date syntax and UTC time', async (value, scheduledAt) => {
+ const clock=Date.UTC(2026,10,1),time=vi.spyOn(Date,'now').mockReturnValue(clock);
+ process.env.ARK_API_KEY='fixture-flash-key';
+ process.env.BAMBOOK_MODEL_BASE_URL='https://ark.cn-beijing.volces.com/api/plan/v3';
+ process.env.BAMBOOK_MODEL_NAME='deepseek-v4.1-flash';
+ const fetchMock=vi.fn().mockResolvedValueOnce(new Response(null,{status:429,headers:{'Retry-After':value}}));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]}});
+  const retryNotBefore=scheduledAt??clock+20_000;
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore});
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({message:'LLM_PROVIDER_COOLDOWN',retryNotBefore});
+  expect(fetchMock).toHaveBeenCalledOnce();
+ }finally{time.mockRestore();}
+});
+
+it('rechecks authority before using a ready fallback when the primary is cooling down',async()=>{
+ process.env.ARK_API_KEY='primary-key';
+ process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
+ process.env.BAMBOOK_LLM_BACKUP_KEY='backup-key';
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(new Response('{}',{status:429,headers:{'Retry-After':'60'}}))
+  .mockResolvedValueOnce(okCompletion('first alternate'))
+  .mockResolvedValueOnce(okCompletion('second alternate'));
+ vi.stubGlobal('fetch',fetchMock);
+ const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]}});
+ const beforeFallback=vi.fn(async()=>{});
+ await expect(complete({...BASE_INPUT,beforeFallback})).resolves.toBe('first alternate');
+ await expect(complete({...BASE_INPUT,beforeFallback})).resolves.toBe('second alternate');
+ expect(beforeFallback).toHaveBeenCalledTimes(2);
+ expect(fetchMock).toHaveBeenCalledTimes(3);
+ await expect(complete({...BASE_INPUT,beforeFallback:async()=>{throw Error('权限已变化');}})).rejects.toThrow('权限已变化');
+ expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
 describe('A. resolveLlmProviderChain', () => {
   it('无任何 key → 空链', () => {
     expect(resolveLlmProviderChain()).toEqual([]);
