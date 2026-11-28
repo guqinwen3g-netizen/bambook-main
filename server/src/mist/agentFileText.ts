@@ -4,7 +4,7 @@
  * 摘录是外部来源的不可信资料，不得当作本人指令。
  */
 import { PDFParse } from 'pdf-parse';
-import { extractOfficeText, LEGACY_OFFICE, officeKind, type OfficeText } from './agentOfficeText';
+import { extractOfficeText, LEGACY_OFFICE, officeKind, type OfficeText, type SheetRowSpan } from './agentOfficeText';
 
 export const FILE_TEXT_DEFAULT = 8_000;
 export const FILE_TEXT_MAX = 20_000;
@@ -19,7 +19,7 @@ export type PdfPageTextSpan = {page:number;start:number;end:number};
 
 type SheetTextSpan = {name:string;start:number;end:number};
 
-export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheetTextSpans?:SheetTextSpan[]; attributedValues?:true; sheets?: string[]; reason?: string };
+export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheetTextSpans?:SheetTextSpan[]; sheetRowSpans?:SheetRowSpan[]; attributedValues?:true; sheets?: string[]; reason?: string };
 
 export async function renderPdfPageImage(bytes:Buffer,page:number):Promise<Buffer|undefined>{
   if(bytes.length>SOURCE_BYTES_MAX||bytes.subarray(0,5).toString('latin1')!=='%PDF-'
@@ -114,7 +114,8 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
     const out = cut(normalized, limit);
     if (!out.text) return { kind: office, text: '', truncated: false, ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}), reason: '文档里没有可提取的文字' };
     const spans=office==='xlsx'?sheetTextSpans(normalized,result).filter(span=>span.start<limit):undefined;
-    return { kind: office, ...out, truncated: out.truncated || result.truncated, ...(spans?{sheetTextSpans:spans}:{}), ...(result.attributedValues?{attributedValues:true}:{}), ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}) };
+    const rows=office==='xlsx'&&normalized===result.text?result.sheetRowSpans?.filter(row=>row.end<=out.text.length):undefined;
+    return { kind: office, ...out, truncated: out.truncated || result.truncated, ...(spans?{sheetTextSpans:spans}:{}), ...(rows?.length?{sheetRowSpans:rows}:{}), ...(result.attributedValues?{attributedValues:true}:{}), ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}) };
   }
   if (LEGACY_OFFICE.test(file.name)) return { kind: 'unsupported', text: '', truncated: false, reason: '旧版 Office 格式（.doc/.xls/.ppt）暂不提取，可另存为 .docx/.xlsx/.pptx 后上传' };
   if (/^image\//i.test(file.mimeType) || /\.(png|jpe?g|gif|webp|heic|bmp|tiff?)$/i.test(file.name)) return { kind: 'unsupported', text: '', truncated: false, reason: '图片不提取文字，请本人查看' };

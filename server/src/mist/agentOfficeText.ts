@@ -15,8 +15,9 @@ const SHEETS_MAX = 20;
 const COLUMNS_MAX = 60;
 const SLIDES_MAX = 200;
 
+export type SheetRowSpan = {sheet:string;row:number;start:number;end:number};
 type SheetBlock = {name:string;start:number;bodyStart:number;end:number;observed:boolean};
-export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; attributedValues?:true; pages?: number; reason?: string };
+export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; sheetRowSpans?:SheetRowSpan[]; attributedValues?:true; pages?: number; reason?: string };
 
 export const LEGACY_OFFICE = /\.(doc|xls|ppt)$/i;
 
@@ -98,13 +99,25 @@ const columnIndex = (ref: string | undefined, fallback: number) => {
 };
 const cellText = (s: string) => s.replace(/[\t\r\n]+/g, ' ').trim();
 
-export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number): { lines: string[]; truncated: boolean; attributedValues?:true } {
-  const lines: string[] = []; let used = 0, truncated = false, attributedValues = false;
-  for (const row of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
-    const cells: string[] = []; let next = 0;
-    for (const c of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-      const head = c[1], body = c[2] ?? '', col = columnIndex(attr(' ' + head, 'r'), next); next = col + 1;
-      if (col >= COLUMNS_MAX) { truncated = true; continue; }
+export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number): { lines: string[]; rowSpans:Omit<SheetRowSpan,'sheet'>[]; truncated: boolean; attributedValues?:true } {
+  const lines:string[]=[],rowSpans:Omit<SheetRowSpan,'sheet'>[]=[];
+  let used=0,truncated=false,attributedValues=false;
+  for(const row of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)){
+    const declared=attr(row[1],'r');
+    let rowNumber=declared===undefined?undefined:Number(declared);
+    let incomplete=false,next=0;
+    const cells:string[]=[];
+    for(const c of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+      const head=c[1],body=c[2]??'',coordinate=attr(' '+head,'r');
+      const physicalRow=/^[A-Z]+([1-9]\d*)$/.exec(coordinate??'')?.[1];
+      if(physicalRow){
+        const n=Number(physicalRow);
+        if(rowNumber===undefined)rowNumber=n;
+        else if(rowNumber!==n)incomplete=true;
+      }
+      const col=columnIndex(coordinate,next);
+      next=col+1;
+      if(col>=COLUMNS_MAX){truncated=true;incomplete=true;continue;}
       const type = attr(' ' + head, 't'), style = Number(attr(' ' + head, 's') ?? -1);
       const valueTag = /<v(\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body);
       const raw = valueTag?.[2];
@@ -124,9 +137,11 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
       if(remaining)lines.push(line.slice(0,remaining));
       truncated = true; break;
     }
+    if(!incomplete&&rowNumber!==undefined&&Number.isSafeInteger(rowNumber)&&rowNumber>0&&rowNumber<=1_048_576)
+      rowSpans.push({row:rowNumber,start:used,end:used+line.length});
     lines.push(line); used += line.length + 1;
   }
-  return { lines, truncated, ...(attributedValues?{attributedValues:true}:{}) };
+  return { lines, rowSpans, truncated, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
 async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string): Promise<OfficeText & {unreadable?:boolean}> {
@@ -147,23 +162,27 @@ async function xlsxText(read: (p: string) => Promise<string | undefined>, limit:
   const shared = [...sharedXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(si => [...si[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join(''));
   const dates = dateStyles(await read('xl/styles.xml'));
   const date1904 = /<workbookPr\b[^>]*\sdate1904="(1|true)"/.test(workbook);
-  const parts: string[] = [], sheetBlocks: SheetBlock[] = [];
+  const parts: string[] = [], sheetBlocks: SheetBlock[] = [], sheetRowSpans:SheetRowSpan[]=[];
   let truncated = sheets.length > SHEETS_MAX, used = 0, attributedValues = false;
   for (const sheet of sheets.slice(0, SHEETS_MAX)) {
     const path = sheet.rid && target.get(sheet.rid);
     const xml = path ? await read(path) : undefined;
     if (!xml) throw new Error('Missing worksheet');
     const head = `## 工作表：${sheet.name}`;
-    const { lines, truncated: cut, attributedValues: restoredValues } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
+    const { lines, rowSpans, truncated: cut, attributedValues: restoredValues } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
     truncated ||= cut;
     attributedValues ||= !!restoredValues;
     const block = [head, ...(lines.length ? lines : [cut?'（正文超出本次摘录范围）':'（空）'])].join('\n');
     parts.push(block);
     sheetBlocks.push({name:sheet.name,start:used,bodyStart:used+head.length+1,end:used+block.length,observed:lines.length>0||!cut});
+    for(const span of rowSpans){
+      const offset=used+head.length+1;
+      sheetRowSpans.push({sheet:sheet.name,row:span.row,start:offset+span.start,end:offset+span.end});
+    }
     used += block.length + 2;
     if (used >= limit) { truncated = true; break; }
   }
-  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name), sheetBlocks, ...(attributedValues?{attributedValues:true}:{}) };
+  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name), sheetBlocks, sheetRowSpans, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
 async function pptxText(read: (p: string) => Promise<string | undefined>): Promise<OfficeText> {

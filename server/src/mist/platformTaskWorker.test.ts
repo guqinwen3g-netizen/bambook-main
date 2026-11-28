@@ -1983,6 +1983,28 @@ it('explicitly reopens a prior attachment in the same conversation without creat
   expect(writes).toHaveBeenCalledTimes(1);
 });
 
+it('gives the model original worksheet row numbers instead of positions in the excerpt',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'报价第 23、47 行。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet([]);
+ XLSX.utils.sheet_add_aoa(sheet,[['SUPPLIER-B','QC-ROW-23']],{origin:'B23'});
+ XLSX.utils.sheet_add_aoa(sheet,[['SUPPLIER-A','QC-ROW-47']],{origin:'B47'});
+ XLSX.utils.book_append_sheet(book,sheet,'报价');
+ XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['OTHER-WORKSHEET-NO-MODEL']]),'其他表');
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对报价行',instructions:'请只读取报价.xlsx 的工作表「报价」，报告这两笔数据的原始行号。'}))
+  .attach('attachments',XLSX.write(book,{type:'buffer',bookType:'xlsx'}),'报价.xlsx').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ const content=complete.mock.calls[0][0].messages[0].content;
+ const facts=JSON.parse(content.slice(content.indexOf('{"task":')));
+ const read=facts.history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
+ expect(read.text.split('\n').find((line:string)=>line.includes('QC-ROW-23'))).toMatch(/第 23 行.*QC-ROW-23/);
+ expect(read.text.split('\n').find((line:string)=>line.includes('QC-ROW-47'))).toMatch(/第 47 行.*QC-ROW-47/);
+ expect(read.observedSheets).toEqual(['报价']);
+ expect(content).not.toContain('OTHER-WORKSHEET-NO-MODEL');
+});
+
 it('reuses a scanned PDF for a new visual page without mixing in the previous report',async()=>{
  const priorRef='EXCLUSIVE-PAGE-3-QC-7158',nextRef='EXCLUSIVE-PAGE-5-QC-9251';
  const complete=vi.fn(async (_input:LlmCompletionInput):Promise<string>=>tool('bambook_task',{action:'finish',outcome:'succeeded',

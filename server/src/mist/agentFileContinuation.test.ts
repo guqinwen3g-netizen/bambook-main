@@ -5,6 +5,20 @@ import JSZip from 'jszip';
 import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import {platformTrail} from './agentTaskTrail';
 const scope={workspaceId:'w',fileId:'f'};
+it('attaches original worksheet row identities only to complete rows in each returned window',async()=>{
+ const zip=new JSZip(),file={name:'sparse.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+ zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价" r:id="r1"/></sheets></workbook>');
+ zip.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>');
+ zip.file('xl/worksheets/sheet1.xml','<worksheet><sheetData><row r="23"><c r="B23" t="inlineStr"><is><t>'
+  +'x'.repeat(350)+'</t></is></c></row><row r="47"><c r="B47" t="inlineStr"><is><t>FINAL-ROW</t></is></c></row></sheetData></worksheet>');
+ const bytes=await zip.generateAsync({type:'nodebuffer'});
+ const first=await readFileTextWindow(scope,file,bytes,200);
+ expect(first.hasMore).toBe(true);
+ expect(first.observedSheetRows).toBeUndefined();
+ const next=await readFileTextWindow(scope,file,bytes,300,first.nextCursor);
+ expect(next.observedSheetRows?.map(row=>[row.sheet,row.row,next.text.slice(row.start,row.end)])).toEqual([['报价',47,'\tFINAL-ROW']]);
+});
+
 it('restricts workbook extraction and continuations to one exactly named visible worksheet',async()=>{
  const zip=new JSZip(), file={name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
  zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价草案" r:id="r1"/><sheet name="确认报价" r:id="r2"/><sheet name="内部底表" state = "hidden" r:id="r3"/></sheets></workbook>');

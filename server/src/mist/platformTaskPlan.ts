@@ -166,9 +166,9 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
   const request=splitTaskRequest(instructions);
   const workbooks=taskWorkbookChoices(attachments);
   if(!workbooks.length)return;
-  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
+  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[「“"]([^」”"\n]{1,31})[」”"]|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
   const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?worksheet[ \t]+["“]([^"”\n]{1,31})["”]/gi)];
-  const names=new Set([...chinese.map(match=>match[2]??match[3].trim()),...english.map(match=>match[1])]);
+  const names=new Set([...chinese.map(match=>match[2]??match[3]??match[4].trim()),...english.map(match=>match[1])]);
   if(names.size!==1)return;
   const [worksheet]=names;
   if(!worksheet)return;
@@ -520,9 +520,21 @@ function modelFileRead(result:unknown) {
   if(!result||typeof result!=='object')return result;
   // Binary integrity is checked by the repository. Models only need sourceHash to join excerpts.
   const {sha256:_binaryDigest,notice:_repeatedNotice,...read}=result as {
-    sha256?:string;notice?:string;kind?:string;nextCursor?:unknown;text?:string;pageTextSpans?:PdfPageTextSpan[];
+    sha256?:string;notice?:string;kind?:string;nextCursor?:unknown;text?:string;pageTextSpans?:PdfPageTextSpan[];observedSheetRows?:Array<{sheet:string;row:number;start:number;end:number}>;
   };
   const cursor=typeof read.nextCursor==='string'?{nextCursor:'next'}:{};
+  if(read.kind==='xlsx'&&typeof read.text==='string'&&read.observedSheetRows?.length){
+    const {text,observedSheetRows,...metadata}=read;
+    let previous=0;
+    const numbered:string[]=[];
+    for(const row of observedSheetRows){
+      if(row.start<previous||row.end>text.length||row.start>=row.end)return {...read,...cursor};
+      numbered.push(text.slice(previous,row.start),'工作表 '+row.sheet+' 第 '+row.row+' 行：',text.slice(row.start,row.end));
+      previous=row.end;
+    }
+    numbered.push(text.slice(previous));
+    return {...metadata,...cursor,text:numbered.join('')};
+  }
   if(read.kind!=='pdf'||typeof read.text!=='string'||!read.pageTextSpans?.length)return {...read,...cursor};
   const {text,pageTextSpans,...metadata}=read;
   return {...metadata,...cursor,pdfTextByPage:pageTextSpans.map(({page,start,end})=>({page,text:text.slice(start,end)}))};

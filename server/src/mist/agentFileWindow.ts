@@ -69,6 +69,8 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const pageTextSpans=raw.pageTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>({
   page:span.page,start:Math.max(span.start,p.offset)-p.offset,end:Math.min(span.end,end)-p.offset,
  }));
+ const observedSheetRows=raw.sheetRowSpans?.filter(span=>span.start>=p.offset&&span.end<=end).slice(0,256)
+  .map(span=>({sheet:span.sheet,row:span.row,start:span.start-p.offset,end:span.end-p.offset}));
  const extractionLimited=raw.text.length>TEXT_WINDOW_MAX || raw.truncated&&!originalHasLaterPages;
  const next=readable&&end<content.length?{...p,offset:end}:readable&&continuationPage!==undefined&&!extractionLimited?{...p,page:continuationPage,offset:0}:undefined;
  if(fileCache){
@@ -102,6 +104,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   ...(worksheetScope!==undefined?{worksheetScope,worksheetComplete}:{}),
   ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:[...raw.sheets]}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:[...raw.pagesWithoutText]}:{}),
+  ...(observedSheetRows?.length?{observedSheetRows}:{}),
   ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
   ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
