@@ -4,10 +4,15 @@ import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getByLabelText,getByText,queryByRole,fireEvent} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
-const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:''}));
+import type { Route } from '../nav';
+const seam=vi.hoisted(()=>({api:vi.fn(),readAttachment:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:'',sourcePosition:undefined as Route['sourcePosition']}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
-vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
-vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,automationId:seam.automationId||undefined}})}));
+vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh,readTaskAttachment:seam.readAttachment}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
+vi.mock('../nav',async importOriginal=>({
+ ...await importOriginal<typeof import('../nav')>(),
+ useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,
+  automationId:seam.automationId||undefined,sourcePosition:seam.sourcePosition}}),
+}));
 import {AgentTasks} from './AgentTasks';
 let host:HTMLDivElement,root:Root;
 const row=()=>({id:'task',identityId:'identity',identityName:'邮件助理',name:'核对邮件',ownerId:'sales',ownerName:'顾言',mode:'operate',instructions:'核对本人来信，移动前交本人确认。',state:'queued',version:3,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',expiresAt:'2026-11-02T00:00:00Z',stepsUsed:0,stepLimit:40,runtimeUsedMs:0,runtimeLimitMs:1800000,lastHeartbeatAt:null,checkpoint:'',result:'',waitingProposalIds:[],canControl:true});
@@ -15,12 +20,188 @@ const identity=()=>({id:'identity',name:'邮件助理',mode:'operate',state:'act
 const paint=()=>root.render(<MistRoot><ToastProvider><AgentTasks onConnections={()=>{}}/></ToastProvider></MistRoot>);
 const flush=async()=>{await act(async()=>{await Promise.resolve();await Promise.resolve();});};
 const click=async(node:HTMLElement)=>{await act(async()=>node.click());await flush();};
+it('refreshes the opened platform task as it switches models without reloading connection data', async () => {
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const executionStageSince=new Date(Date.now()-5_000).toISOString();
+ let current={...row(),executor:'platform',state:'running',executionStage:'model',executionStageSince,
+  modelFallbackSince:undefined as string|undefined};
+ const count=(suffix:string)=>seam.api.mock.calls.filter(([url])=>String(url).endsWith(suffix)).length;
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:current}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null}));
+ try{
+  act(paint);await flush();
+  expect(getByText(host,'正在等待模型')).toBeTruthy();
+  await click(getByText(host,'核对邮件'));
+  const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+  expect(getByRole(dialog,'timer').textContent).toBe('· 5 秒');
+  const connections=count('agent-identities?scope=mine');
+  current={...current,modelFallbackSince:new Date(Date.now()+2_500).toISOString()};
+  await act(async()=>vi.advanceTimersByTimeAsync(2_500));
+  expect(getByText(dialog,'正在等待备用模型')).toBeTruthy();
+  expect(getByText(getByRole(host,'table',{hidden:true}),'正在等待备用模型')).toBeTruthy();
+  expect(getByRole(dialog,'timer').textContent).toBe('· 0 秒');
+  expect(count('agent-identities?scope=mine')).toBe(connections);
+  expect(count('/task')).toBe(2);
+
+  const online=vi.spyOn(navigator,'onLine','get').mockReturnValue(false);
+  await act(async()=>window.dispatchEvent(new Event('offline')));
+  expect(getByText(dialog,'执行进度暂未更新')).toBeTruthy();
+  expect(queryByRole(dialog,'timer')).toBeNull();
+  await act(async()=>vi.advanceTimersByTimeAsync(2_500));
+  expect(count('/task')).toBe(2);
+  online.mockReturnValue(true);
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(count('/task')).toBe(3);
+  expect(getByText(dialog,'正在等待备用模型')).toBeTruthy();
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it('refreshes the visible task list without requerying stable connection settings on every poll',async()=>{
+ vi.useFakeTimers();
+ const hidden=vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const online=vi.spyOn(navigator,'onLine','get').mockReturnValue(true);
+ const count=(suffix:string)=>seam.api.mock.calls.filter(([url])=>String(url).endsWith(suffix)).length;
+ const api=seam.api.getMockImplementation()!;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>url.endsWith('/agent-task-capabilities')
+  ? Promise.resolve({platformAvailable:true}) : api(url,init));
+ try{
+  act(paint);await flush();
+  expect(count('/agent-tasks')).toBe(1);
+  expect(count('/agent-identities?scope=mine')).toBe(1);
+  expect(count('/agent-task-capabilities')).toBe(1);
+  await act(async()=>vi.advanceTimersByTimeAsync(20_000));
+  expect(count('/agent-tasks')).toBe(3);
+  expect(count('/agent-identities?scope=mine')).toBe(1);
+  expect(count('/agent-task-capabilities')).toBe(1);
+
+  hidden.mockReturnValue(true);
+  await act(async()=>vi.advanceTimersByTimeAsync(20_000));
+  expect(count('/agent-tasks')).toBe(3);
+  hidden.mockReturnValue(false);
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(count('/agent-tasks')).toBe(4);
+  expect(count('/agent-identities?scope=mine')).toBe(2);
+  await click(getByRole(host,'button',{name:'刷新'}));
+  expect(count('/agent-task-capabilities')).toBe(3);
+  online.mockReturnValue(false);
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(count('/agent-tasks')).toBe(5);
+  online.mockReturnValue(true);
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(count('/agent-tasks')).toBe(6);
+  expect(count('/agent-identities?scope=mine')).toBe(4);
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it('checks connection metadata on the next visible poll after a transient failure',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const api=seam.api.getMockImplementation()!;
+ let attempts=0;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-task-capabilities'))return Promise.resolve({platformAvailable:true});
+  if(url.includes('agent-identities')&&++attempts===1)return Promise.reject(new Error('临时连接失败'));
+  return api(url,init);
+ });
+ try{
+  act(paint);await flush();
+  expect(getByText(host,'Agent连接读取失败')).toBeTruthy();
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(attempts).toBe(2);
+  expect(host.textContent).not.toContain('Agent连接读取失败');
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(attempts).toBe(2);
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it('keeps the loaded task pages through refresh and rechecks access to older rows',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const api=seam.api.getMockImplementation()!;
+ const recent={...row(),name:'当前一页的任务'};
+ const older={...row(),id:'second-task',name:'旧一页的报告'};
+ let refreshed=false;
+ const cursors:string[]=[];
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-tasks'))return Promise.resolve({items:[recent],nextCursor:refreshed?'fresh-cursor':'earlier-cursor'});
+  const cursor=new URL(url,'http://local.test').searchParams.get('cursor');
+  if(cursor){
+   cursors.push(cursor);
+   return Promise.resolve({items:[refreshed?{...older,name:'Agent任务',state:'access_changed',contentRestricted:true}:older],nextCursor:null});
+  }
+  return api(url,init);
+ });
+ try{
+  act(paint);await flush();
+  await click(getByRole(host,'button',{name:'加载更多'}));
+  expect(getByText(host,older.name)).toBeTruthy();
+  refreshed=true;
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(cursors).toEqual(['earlier-cursor','fresh-cursor']);
+  expect(getByText(host,'当前一页的任务')).toBeTruthy();
+  expect(getByText(host,'Agent任务')).toBeTruthy();
+  expect(host.textContent).not.toContain(older.name);
+  expect(queryByRole(host,'button',{name:'加载更多'})).toBeNull();
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it('lets a pending older page finish without the automatic refresh aborting it',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const api=seam.api.getMockImplementation()!;
+ let reply:(value:unknown)=>void=()=>{};
+ let signal:AbortSignal|undefined,firstPageReads=0;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-tasks')){
+   firstPageReads++;return Promise.resolve({items:[row()],nextCursor:'older'});
+  }
+  if(url.endsWith('?cursor=older')){
+   signal=init?.signal??undefined;
+   return new Promise(resolve=>{reply=resolve;});
+  }
+  return api(url,init);
+ });
+ try{
+  act(paint);await flush();
+  await act(async()=>vi.advanceTimersByTimeAsync(7_000));
+  await click(getByRole(host,'button',{name:'加载更多'}));
+  await act(async()=>vi.advanceTimersByTimeAsync(3_000));
+  expect(signal?.aborted).toBe(false);
+  expect(firstPageReads).toBe(1);
+  await act(async()=>reply({items:[{...row(),id:'second',name:'已加载旧任务'}],nextCursor:null}));
+  expect(getByText(host,'已加载旧任务')).toBeTruthy();
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it.each([
+ ['personal', {executor:'platform',conversationId:'c_original_report'}, '打开原对话', ['assistant','task',{section:'task-origin'}]],
+ ['automation', {executor:'platform',automationId:'rule-original'}, '打开原规则', ['assistant','task',{section:'automations',automationId:'rule-original'}]],
+ ['external', {executor:'external',conversationId:'c_external_report'}, undefined, []],
+ ['restricted', {executor:'platform',conversationId:'c_restricted_report',contentRestricted:true}, undefined, []],
+] as const)('offers an exact origin only for a readable task with an origin (%s)',async(_kind,metadata,label,route)=>{
+ const report={...row(),...metadata,state:'succeeded',result:'模拟订单已核对',canControl:false};
+ const api=seam.api.getMockImplementation()!;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>url.endsWith('/agent-tasks')
+  ? Promise.resolve({items:[report],nextCursor:null}) : url.endsWith('/task') ? Promise.resolve({item:report}) : api(url,init));
+ act(paint);await flush();await click(getByText(host,report.name));
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ if(label){
+  await click(getByRole(dialog,'button',{name:label}));
+  expect(seam.go).toHaveBeenCalledExactlyOnceWith(...route);
+ }else{
+  expect(queryByRole(dialog,'button',{name:'打开原对话'})).toBeNull();
+  expect(queryByRole(dialog,'button',{name:'打开原规则'})).toBeNull();
+ }
+ expect(seam.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
 it('returns the task detail to its original automation rule when closed',async()=>{
  seam.routeId='task';seam.automationId='rule-a';
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:{...row(),automationId:'rule-a'}}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
  act(paint);await flush();
  await click(getByRole(getByRole(document.body,'dialog',{name:'核对邮件'}),'button',{name:'关闭'}));
- expect(seam.go).toHaveBeenCalledExactlyOnceWith('assistant','rule-a',{section:'automations'});
+ expect(seam.go).toHaveBeenCalledExactlyOnceWith('assistant','task',{section:'automations',automationId:'rule-a'});
 });
 it('opens the exact notification task even when it is absent from the first list page',async()=>{
  seam.routeId='older-task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/older-task')?{item:{...row(),id:'older-task',name:'核对旧交接',state:'waiting_human',questions:[{id:'q',question:'请提供书面交期。',askedAt:'2026-11-01T00:00:00Z'}]}}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
@@ -205,6 +386,54 @@ it('rechecks an open report on focus and visibility, withholds it after confirme
  expect(detailRequests).toBe(4);
  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(report.result);
 });
+it.each(['queued','running'] as const)('shows the model timeout in task details during %s',async state=>{
+ const detail={...row(),state,executor:'platform',executionStage:state==='running'?'model':undefined,
+  executionIssue:{code:'model_timeout',retryAt:new Date(Date.now()+5000).toISOString()}};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:detail}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[detail],nextCursor:null}));
+ act(paint);
+ await flush();
+ await click(getByText(host,detail.name));
+ const dialog=getByRole(document.body,'dialog',{name:detail.name});
+ expect(dialog.textContent).toContain('模型响应超时');
+ expect(dialog.textContent).toContain(state==='queued'?'模型响应超时，等待重试':'正在重试模型');
+ expect(dialog.textContent?.includes('下次重试')).toBe(state==='queued');
+});
+
+it('opens a report attachment from the task drawer and removes its preview on restriction', async () => {
+ const pdf={id:'pdf-a',name:'发票.pdf',mimeType:'application/pdf',size:30};
+ const sibling={...pdf,id:'pdf-b'};
+ const label='发票.pdf（2）';
+ const report={...row(),state:'succeeded',executor:'platform',result:'请核对 '+label+' 第 23 页。',canControl:false,contentRestricted:false,
+  attachments:[sibling,pdf],trail:[{at:'',kind:'read',label:'已读',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[23]}]};
+ let current=report;
+ seam.readAttachment.mockRejectedValue(new Error('暂时无法读取'));
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:current}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,report.name));
+ expect(seam.readAttachment).not.toHaveBeenCalled();
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ const citation=getByRole(dialog,'button',{name:label});
+ expect(citation.title).toBe('第 23 页');
+ citation.focus();await click(citation);
+ expect(getByRole(document.body,'dialog',{name:label})).toBeTruthy();
+ expect(seam.readAttachment).toHaveBeenLastCalledWith(report.id,pdf);
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));await flush();
+ expect(document.activeElement).toBe(citation);
+ await click(citation);
+ current={...report,name:'Agent任务',result:'',attachments:[],trail:[],contentRestricted:true};
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(queryByRole(document.body,'dialog',{name:label})).toBeNull();
+ expect(getByRole(document.body,'dialog',{name:'Agent任务'})).toBeTruthy();
+ expect(queryByRole(document.body,'button',{name:label})).toBeNull();
+ current=report;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(getByRole(document.body,'button',{name:label})).toBeTruthy();
+ expect(queryByRole(document.body,'dialog',{name:label})).toBeNull();
+ expect(seam.readAttachment).toHaveBeenCalledTimes(2);
+ expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
+});
+
 it('does not replace a committed task control receipt with an older focus read',async()=>{
  const active={...row(),executor:'platform',state:'running'};
  const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
@@ -236,6 +465,32 @@ it('shows missing facts distinctly and submits an owner answer without confirmin
  await act(async()=>fireEvent.input(getByLabelText(document.body,/答复/,{selector:'textarea'}),{target:{value:'请按11月25日核对原件。'}}));await click(getByRole(document.body,'button',{name:'提交答复'}));
  const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/task\/answer$/);expect(JSON.parse(writes[0][1].body)).toMatchObject({version:3,questionId:'question',answer:'请按11月25日核对原件。'});expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();expect(getByText(document.body,'请按11月25日核对原件。')).toBeTruthy();
 });
+it.each(['xlsx','pdf'])('submits the numbered %s selected in task details', async extension => {
+ const filename='报价.'+extension;
+ const choice=filename+'（2）';
+ const question = {id:'question',question:extension==='pdf'?'请回复要核对的 PDF 完整文件名，包括名称后显示的编号。':'请回复要核对的工作簿完整文件名，包括名称后显示的编号。',attachmentChoiceIds:['a1','a2'],askedAt:'2026-11-01T00:10:00Z'};
+ const waiting = {...row(),state:'waiting_human',questions:[question],attachments:[
+  {id:'a1',name:filename,mimeType:'application/octet-stream',size:10},
+  {id:'a2',name:filename,mimeType:'application/octet-stream',size:10},
+ ]};
+ seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:{...waiting,state:'queued',questions:[]}}:
+  url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:waiting}:{items:[waiting],nextCursor:null}));
+ act(paint);
+ await flush();
+ await click(getByText(host,'核对邮件'));
+ await click(getByRole(document.body,'button',{name:'补充资料',exact:true}));
+ const dialog=getByRole(document.body,'dialog',{name:'补充资料'});
+ expect(queryByRole(dialog,'textbox')).toBeNull();
+ const submit=getByRole(dialog,'button',{name:'提交答复'}) as HTMLButtonElement;
+ expect(submit.disabled).toBe(true);
+ await click(getByRole(dialog,'button',{name:choice,exact:true}));
+ expect(seam.api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(0);
+ await click(submit);
+ const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');
+ expect(writes).toHaveLength(1);
+ expect(JSON.parse(writes[0][1].body)).toMatchObject({version:3,questionId:'question',answer:choice});
+});
+
 it('freezes an uncertain owner answer and retries the same question and request',async()=>{
  const question={id:'question',question:'请补充书面确认依据。',askedAt:'2026-11-01T00:10:00Z'},waiting={...row(),state:'waiting_human',questions:[question]};let first:any=null;
  seam.api.mockImplementation((url:string,init:any)=>{if(init?.method==='POST'){if(!first){first=JSON.parse(init.body);return Promise.reject(new Error('网络中断'));}return Promise.resolve({item:{...waiting,state:'queued'}});}return Promise.resolve(url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:waiting}:{items:[waiting],nextCursor:null});});
@@ -250,6 +505,71 @@ it('creates an explicit platform task without issuing any external credential',a
 it('does not offer a platform task as ready when the runtime is unavailable, while retaining external creation',async()=>{
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));await act(async()=>fireEvent.change(getByLabelText(document.body,/执行方式/,{selector:'select'}),{target:{value:'platform'}}));expect(getByText(document.body,'平台执行暂不可用')).toBeTruthy();expect((getByRole(document.body,'button',{name:'安排任务',exact:true}) as HTMLButtonElement).disabled).toBe(true);
 });
+it('links verified report references and records the drawer route before leaving a task opened from the list', async () => {
+ const report={...row(),state:'succeeded',result:'核对 SO-1200、PO-1200、SO-8888、重复编号。',canControl:false,
+  trail:[
+   {kind:'read',ref:{type:'order',id:'order-id',label:'SO-1200',view:'orders/detail'}},
+   {kind:'read',refs:[
+    {type:'purchase',id:'purchase-id',label:'PO-1200',view:'procurement',section:'supplies'},
+    {type:'order',id:'a',label:'重复编号',view:'orders/detail'},
+    {type:'order',id:'b',label:'重复编号',view:'orders/detail'},
+   ]},
+   {kind:'read',failed:true,ref:{type:'order',id:'failed',label:'SO-8888',view:'orders/detail'}},
+  ]};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,report.name));
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ expect(queryByRole(dialog,'button',{name:'重复编号'})).toBeNull();
+ expect(queryByRole(dialog,'button',{name:'SO-8888'})).toBeNull();
+ expect(getByRole(dialog,'button',{name:'SO-1200'})).toBeTruthy();
+ await click(getByRole(dialog,'button',{name:'PO-1200'}));
+ expect(seam.go.mock.calls).toEqual([
+  ['assistant','task',{section:'tasks'}],
+  ['procurement','purchase-id',{section:'supplies'}],
+ ]);
+});
+
+it('closes a routed report when browser history returns to the task list', async () => {
+ const report={...row(),state:'succeeded',result:'已核对',canControl:false};
+ seam.routeId=report.id;
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ act(paint);await flush();
+ expect(getByRole(document.body,'dialog',{name:report.name})).toBeTruthy();
+ seam.routeId='';
+ act(paint);await flush();
+ expect(queryByRole(document.body,'dialog',{name:report.name})).toBeNull();
+ expect(seam.go).not.toHaveBeenCalled();
+});
+
+it('restores the exact repeated report citation only for the same session and report version', async () => {
+ const report={...row(),state:'succeeded',result:'起始 SO-1200。末段 SO-1200。',canControl:false,
+  trail:[{kind:'read',ref:{type:'order',id:'order-id',label:'SO-1200',view:'orders/detail'}}]};
+ const saved={view:'assistant' as const,scope:seam.identity+':workspace',taskId:report.id,
+  version:report.version,updatedAt:report.updatedAt,citation:1,offset:30};
+ seam.routeId=report.id;
+ seam.sourcePosition={...saved,scope:'other-session:workspace'};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ const nextFrame=()=>act(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));});
+ try {
+  act(paint);await flush();await nextFrame();
+  const dialog=getByRole(document.body,'dialog',{name:report.name});
+  const citations=[...dialog.querySelectorAll('button.mist-xz-ref')];
+  expect(citations).toHaveLength(2);
+  expect(citations).not.toContain(document.activeElement);
+  seam.sourcePosition={...saved,version:report.version-1};
+  act(paint);await nextFrame();
+  expect(citations).not.toContain(document.activeElement);
+  seam.sourcePosition=saved;
+  act(paint);await nextFrame();
+  expect(document.activeElement).toBe(citations[1]);
+ } finally {
+  seam.sourcePosition=undefined;
+ }
+});
+
 it('opens the exact attachment source version from a formatted task report',async()=>{
  const finished={...row(),state:'succeeded',result:'[来源版本](bambook://open?view=development/detail&id=dev&versionId=old)\n\n| 规格 | 数量 |\n| --- | --- |\n| A | 1200 |',canControl:false};
  seam.routeId='task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:finished}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[finished],nextCursor:null}));
