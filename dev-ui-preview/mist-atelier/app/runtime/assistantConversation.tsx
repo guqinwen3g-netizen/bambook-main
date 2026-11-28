@@ -7,10 +7,9 @@ export type AssistantReply = {
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
   revision?: number; truncated?: boolean; contextToken?: string;
 };
-type RetryAttachmentRef = TaskAttachmentRef & { preserveScope?: true };
-export type AssistantAttachmentRef = RetryAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
+export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
 
-export function taskAttachmentRefPayload({taskId, fileId, preserveScope}: RetryAttachmentRef): RetryAttachmentRef {
+export function taskAttachmentRefPayload({taskId, fileId, preserveScope}: TaskAttachmentRef): TaskAttachmentRef {
   return {taskId, fileId, ...(preserveScope === true ? {preserveScope: true} : {})};
 }
 type TaskAnswerDraft = {taskId:string;questionId:string;text:string;files:readonly File[]};
