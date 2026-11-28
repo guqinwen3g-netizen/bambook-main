@@ -432,10 +432,17 @@ function SheetView({ blob, name, onFail, initialSheetName, initialSheetRow }: Re
   const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean>; origins: Record<string,{row:number;col:number}> } | null>(null), [sheet, setSheet] = React.useState('');
   const paneRef=React.useRef<HTMLDivElement>(null),targetRow=React.useRef<HTMLTableRowElement>(null);
   React.useLayoutEffect(()=>{
-    const pane=paneRef.current,row=targetRow.current;
-    if(!pane||!row)return;
-    const viewport=pane.getBoundingClientRect(),rect=row.getBoundingClientRect();
-    pane.scrollTop+=rect.top-viewport.top-(viewport.height-rect.height)/2;
+    const pane = paneRef.current, row = targetRow.current, table = row?.closest('table');
+    if (!pane) return;
+    pane.style.removeProperty('--mist-sheet-citation-space');
+    if (!row || !table) return;
+    const viewport = pane.getBoundingClientRect(), rect = row.getBoundingClientRect();
+    const center = rect.top + rect.height / 2;
+    const scrollTo = pane.scrollTop + center - viewport.top - viewport.height / 2;
+    // A citation near the end needs scroll space beyond the last physical row.
+    const space = Math.ceil(center + viewport.height / 2 - table.getBoundingClientRect().bottom);
+    if (scrollTo > 0 && space > 0) pane.style.setProperty('--mist-sheet-citation-space', `${space}px`);
+    pane.scrollTop = Math.max(0, scrollTo);
   },[book,sheet,initialSheetRow]);
   React.useEffect(() => {
     let live = true;
