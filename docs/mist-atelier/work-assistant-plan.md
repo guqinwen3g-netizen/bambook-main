@@ -52,7 +52,7 @@
 - 入口：AI 助手页「我的 Agent」（`PersonalAgentPage.tsx`），浏览器与桌面端都可用；桌面「工作助手」保留。
 - 身份：`POST /workspaces/:id/personal-agent` 开通或续期本人的个人 Agent（`agentIdentities.ts#ensurePersonalIdentity`，`kind:'personal'`，编号 `personalIdentityId(workspaceId,userId)`）。负责人即本人，权限上限 = `AGENT_OPERATE_CEILING` ∩ 本人当前权限。管理员只能停用或改名。
 - 交办：`POST /workspaces/:id/personal-agent/tasks` 建 `executor:'platform'` 任务，由 `platformTaskWorker` 执行；中高风险写入一律成为本人待确认提议。
-- 用量：`GET /workspaces/:id/personal-agent/usage?month=YYYY-MM`（`agentTasks.ts#platformTaskUsage`），按账号汇总交办项数、模型轮次、运行时长。
+- 用量：`GET /workspaces/:id/personal-agent/usage?month=YYYY-MM`（`agentTasks.ts#platformTaskUsage`），按账号汇总交办项数、模型轮次、运行时长。每日额度与月度轮次按已保存的模型计划统计。系统预读订单或附件仍留在办理记录并受原任务限额约束，轮次统计跳过标记为 `prefetched` 的步骤。未带标记的历史步骤沿用原口径。模型开始前，执行器会在同一事务核对个人与公司剩余额度并随任务租约预留一轮。正在执行的预留只用于并发判断，保存计划后才计入已用轮次。调用失败或租约结束时释放预留。跨上海零点的日用量归在调用开始日。
 
 以下第 1–13 节为历史桌面方案，保留其出处和实施记录；具体接线按第 0 节执行。
 
