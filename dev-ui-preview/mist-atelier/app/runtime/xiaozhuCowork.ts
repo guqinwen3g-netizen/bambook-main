@@ -122,6 +122,45 @@ async function readCoworkHistory(base: string, signal: AbortSignal) {
   return { items, cursor };
 }
 
+type TaskReadFlight = { controller: AbortController; result: Promise<AgentTaskView>; readers: number };
+
+/** Origin navigation and polling can cancel independently while sharing the same authorized in-flight read. */
+function shareCoworkTaskRead(flights: Map<string, TaskReadFlight>, base: string, id: string, authority: number, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const key = JSON.stringify([authority, id]);
+  let flight = flights.get(key);
+  if (!flight) {
+    const controller = new AbortController();
+    const result = readCoworkTask(base, id, controller.signal).finally(() => {
+      if (flights.get(key)?.controller === controller) flights.delete(key);
+    });
+    flight = { controller, result, readers: 0 };
+    flights.set(key, flight);
+  }
+  const active = flight;
+  active.readers++;
+  return new Promise<AgentTaskView>((resolve, reject) => {
+    let subscribed = true;
+    const release = () => {
+      if (!subscribed) return false;
+      subscribed = false;
+      signal.removeEventListener('abort', abort);
+      active.readers--;
+      if (active.readers === 0 && flights.get(key) === active) {
+        flights.delete(key);
+        active.controller.abort();
+      }
+      return true;
+    };
+    const abort = () => { if (release()) reject(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    active.result.then(
+      item => { if (release()) resolve(item); },
+      error => { if (release()) reject(error); },
+    );
+  });
+}
+
 function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTaskView {
   if (previous.id !== next.id || previous.identityId !== next.identityId || previous.executor !== next.executor
     || next.version < previous.version || next.updatedAt < previous.updatedAt) return previous;
@@ -156,6 +195,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const origin = React.useRef(originTaskId); origin.current = originTaskId;
   const trackedOrigin = React.useRef<{scope:string;id:string}|undefined>(undefined);
   const deniedHistory = React.useRef(0);
+  const taskReads = React.useMemo(() => new Map<string, TaskReadFlight>(), [base, scope]);
+  React.useEffect(() => () => {
+    for (const flight of taskReads.values()) flight.controller.abort();
+    taskReads.clear();
+  }, [taskReads]);
   const version = React.useRef(0);
   const pending = React.useRef(new Map<string, PendingSubmission>());
   const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<Array<PendingSubmission&{fingerprint:string}>>([]);
@@ -391,7 +435,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if(pending)return pending.promise;
       const controller=new AbortController(), denial=deniedHistory.current;
       backgroundAt.set(id,Date.now()+BACKGROUND_PROGRESS_INTERVAL_MS);
-      const promise=readCoworkTask(base,id,controller.signal)
+      const promise=shareCoworkTaskRead(taskReads,base,id,denial,controller.signal)
         .then(next=>{
           if(controller.signal.aborted||live.current!==scope||deniedHistory.current!==denial)return;
           retry.delete(id);
@@ -480,7 +524,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', reconnect);
     };
-  }, [hasProgressTargets, base, enabled, scope, clearStaleProgress]);
+  }, [hasProgressTargets, base, enabled, scope, clearStaleProgress, taskReads]);
   React.useEffect(() => {
     syncProgressTargets.current?.();
   }, [foregroundId, backgroundIds, available, base, enabled, scope]);
@@ -586,7 +630,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     ? old.map(item=>mergeTaskUpdate(item,task)) : [...old,task]);
   const refreshTask = async (taskId: string, signal: AbortSignal, {retainOrigin = false}: {retainOrigin?: boolean} = {}) => {
     const bound = scope, denial = deniedHistory.current;
-    const item = await readCoworkTask(base, taskId, signal);
+    const previous = currentTasks.current.find(task => task.id === taskId);
+    const joinProgress = retainOrigin && (!previous || !previous.contentRestricted && COWORK_ACTIVE.includes(previous.state));
+    const item = await (joinProgress ? shareCoworkTaskRead(taskReads, base, taskId, denial, signal) : readCoworkTask(base, taskId, signal));
     if (signal.aborted || live.current !== bound) return;
     if (deniedHistory.current !== denial) throw new Error('任务暂时无法核对');
     clearStaleProgress(taskId);

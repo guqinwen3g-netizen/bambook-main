@@ -64,6 +64,32 @@ it('gives the visible task a read while background tasks fill a bounded, fair qu
  expect(order.slice(1)).toEqual(background.map(item=>item.id));
 });
 
+it('shares an active progress request with origin navigation and preserves it if navigation cancels',async()=>{
+ const pending={...task,state:'running',version:2,conversationId:'c_origin'};
+ const reads:{resolve:(result:unknown)=>void;signal:AbortSignal}[]=[];
+ api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-tasks'))return{items:[pending],nextCursor:null};
+  if(url.endsWith('/agent-tasks/task'))return new Promise(resolve=>reads.push({resolve,signal:init!.signal!}));
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ const original=reads[0],cancelled=new AbortController(),attached=new AbortController();
+ const first=channel.refreshTask('task',cancelled.signal,{retainOrigin:true}).catch(error=>error);
+ const remaining=channel.refreshTask('task',attached.signal,{retainOrigin:true});
+ expect(reads).toHaveLength(1);
+ cancelled.abort();
+ expect((await first).name).toBe('AbortError');
+ expect(original.signal.aborted).toBe(false);
+ const done={...pending,state:'succeeded',version:3,result:'同一请求返回报告'};
+ await act(async()=>{
+  original.resolve({item:done});
+  expect(await remaining).toMatchObject({id:task.id,result:done.result});
+ });
+ expect(channel.tasks[0]).toMatchObject({state:'succeeded',result:done.result});
+ expect(reads).toHaveLength(1);
+});
+
 it('rechecks a stale task directly and coalesces concurrent progress reads',async()=>{
  const waiting={...task,state:'running',executionStage:'model',version:2,canControl:true};
  const finished={...waiting,state:'succeeded',version:3,result:'已恢复原报告'};
