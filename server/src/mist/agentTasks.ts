@@ -2,7 +2,7 @@ import type { MistStoredFile } from './files';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import { AGENT_TASK_ISSUE_LABEL, activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import { AGENT_TASK_ISSUE_LABEL, activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef, type AttachmentScopeCorrection } from '../shared/mistAgentTasks';
 import { WORKBOOK_SELECTION_QUESTION, isWorksheetNameQuestion, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
@@ -11,7 +11,7 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
-import {compactPlatformTaskSteps,newPlatformTaskStep,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
+import {attachmentScopeCorrectionRanges,compactPlatformTaskSteps,matchesAttachmentScopeCorrection,newPlatformTaskStep,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
 import{responseLocale,type ResponseLocale}from'./responseLanguage';
 import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskConditionTarget} from './agentTaskConditions';
 
@@ -171,8 +171,8 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   let questions=readable?c.questions??[]:[];
   if(visibleSteps?.length||questions.some(q=>!q.answeredAt)){
     const {pdfRanges,worksheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    if(visibleSteps&&(pdfRanges.size||allowedFiles||excludedPdfIds||pdfChoice||pdfScopeConflict||pdfVisualChoice)){
-      const permitted=pdfChoice||pdfScopeConflict||pdfVisualChoice?new Set<string>():allowedFiles;
+    if(visibleSteps&&(pdfRanges.size||worksheet||allowedFiles||excludedPdfIds||pdfChoice||pdfScopeConflict||pdfVisualChoice)){
+      const permitted=pdfChoice||pdfScopeConflict||pdfVisualChoice||worksheet?.rowScopeConflict?new Set<string>():allowedFiles;
       visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdfRanges,worksheet,permitted,excludedPdfIds);
     }
     if(pdfChoice)questions=questions.map(q=>q.question===pdfChoice.question&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoice.ids}:q);
@@ -186,7 +186,7 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
     ...(readable&&!isAgentActor(actor)&&isPersonalPlatformTask(c)&&['waiting_human','paused'].includes(state)
-      &&hasUnansweredQuestion(c)?{canSupplementAttachments:true}:{}),
+      &&questions.some(question=>!question.answeredAt&&!question.attachmentScopeCorrection)?{canSupplementAttachments:true}:{}),
     ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions,resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
@@ -466,14 +466,16 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
 }
 /** Missing facts suspend the same durable task; an answer is data, never business approval. */
-export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskLease,input:Record<string,unknown>,now:number){
+export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskLease,input:Record<string,unknown>,now:number,
+  correction?:AttachmentScopeCorrection){
   if(Object.keys(input).some(k=>!['requestId','question'].includes(k)))fail('INVALID_INPUT','提问字段无效',400);
   const requestId=rid(input.requestId),question=plain(input.question,2000,'需要补充的资料');
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);
   const {row,value:c}=await assertTaskLease(db,actor,lease,now);
   if((c.questions??[]).length>=10)fail('AGENT_TASK_LIMIT','任务提问已达上限，请结束后重新安排',422);
   const n=next(c,now,'question',requestId,[question]);n.controlVersion++;n.state='waiting_human';n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;
-  n.questions=[...(c.questions??[]),{id:randomUUID(),question,askedAt:new Date(now).toISOString()}];n.checkpoint='等待本人补充资料。';
+  n.questions=[...(c.questions??[]),{id:randomUUID(),question,askedAt:new Date(now).toISOString(),
+    ...(correction?{attachmentScopeCorrection:correction}:{})}];n.checkpoint='等待本人补充资料。';
   platformEffect(n,requestId,{status:'waiting_human',questionId:n.questions.at(-1)!.id});
   await save(db,row,c,n);await event(db,n,actor,'question',requestId,now);return taskView(n,actor,now);
 }
@@ -504,6 +506,16 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
   if(!['waiting_human','paused'].includes(c.state))fail('AGENT_TASK_NOT_READY','任务当前不等待补充资料',409);
   if(c.expiresAt<=now||c.stepsUsed>=STEP_LIMIT||usedRuntime(c,now)>=RUNTIME_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到执行限额',409);
   const question=c.questions?.find(q=>q.id===questionId&&!q.answeredAt);if(!question)fail('AGENT_TASK_CHANGED','问题已处理，请刷新核对',409);
+  const attachmentScope=question.attachmentScopeCorrection||c.platform
+    ? requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions):undefined;
+  if(question.attachmentScopeCorrection){
+    const correction=attachmentScope?.scopeCorrection;
+    if(attachments||!correction||!matchesAttachmentScopeCorrection(question.attachmentScopeCorrection,correction)
+      ||!attachmentScopeCorrectionRanges(answer,correction))
+      fail('INVALID_INPUT',c.locale==='en-US'
+        ? 'Enter a page or row range within the original bounds.'
+        : '请填写原范围内的页码或行号。',422);
+  }
   const files=await attachments?.save(c);
   const attachmentIds=files?.map(file=>file.id);
   const submittedAnswer=answer||(c.locale==='en-US'?'Files supplied.':'已补交附件。');
@@ -516,11 +528,10 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
     // a fresh read, and existing source or approval obligations stay in force.
     // A deterministic PDF choice binds the prefetch in the next lease. It does not
     // require an unrelated whole-file or business read before a read-only report.
-    const attachmentScope=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    const worksheetScope=attachmentScope.worksheet;
+    const worksheetScope=attachmentScope?.worksheet;
     const worksheetChoice=worksheetScope?.rows&&!worksheetScope.fileId
       ? WORKBOOK_SELECTION_QUESTION:worksheetScope?.worksheetQuestion;
-    const choosingAttachmentScope=(attachmentScope.pdfChoice?.question??attachmentScope.pdfVisualChoice
+    const choosingAttachmentScope=!!question.attachmentScopeCorrection||(attachmentScope?.pdfChoice?.question??attachmentScope?.pdfVisualChoice
       ??worksheetChoice)===question.question
       ||!!worksheetScope?.needsWorksheetChoice&&isWorksheetNameQuestion(question.question);
     // Provided-only tasks verify their original attachments in the next worker
