@@ -380,8 +380,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       setLoading(false);
       setError('');
 
-      await checkReceipts(mode);
       const result = await capability;
+      if (!current()) return;
+      if ('error' in result && [401,403,404].includes(Number((result.error as { status?:number })?.status)))
+        throw result.error;
+      await checkReceipts(mode);
       if (!current()) return;
       if ('error' in result) throw result.error;
       const nextAvailable = result.caps.platformAvailable === true && own?.state !== 'disabled';

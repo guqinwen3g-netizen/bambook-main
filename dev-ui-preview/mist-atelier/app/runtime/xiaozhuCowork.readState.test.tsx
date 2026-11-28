@@ -748,6 +748,28 @@ it('checks a stored receipt once even when duplicate online events arrive during
  } finally{savePendingSubmissions(scope,new Map());}
 });
 
+it('does not consume a restored receipt when the capability read denies access on reconnect',async()=>{
+ const scope='account:workspace',conversationId='c_denied_capability';
+ savePendingSubmissions(scope,new Map([['receipt',{requestId:'01234567-0123-4567-89ab-0123456789ab',instructions:'待核对',locale:'zh-CN',draftKey:'draft',conversationId,hasAttachments:false}]]));
+ let restored=false;
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.endsWith('/agent-tasks')&&!restored)throw Object.assign(new Error('暂时读取失败'),{status:503});
+   if(url.endsWith('/agent-task-capabilities')&&restored)throw Object.assign(new Error('权限不足'),{status:403});
+   if(url.includes('/tasks/receipt/'))return {item:{...task,id:'receipt-task',conversationId}};
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View conversationId={conversationId}/>));
+  restored=true;
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(channel.error).toBe('权限不足');
+  expect(channel.hasPendingSubmission).toBe(true);
+  expect(channel.recoveredSubmissions).toEqual([]);
+  expect(api.mock.calls.some(([url])=>url.includes('/tasks/receipt/'))).toBe(false);
+ }finally{savePendingSubmissions(scope,new Map());}
+});
+
 it('keeps an old receipt from restoring a report after history returns a permission denial',async()=>{
  const scope='account:workspace',conversationId='c_old_receipt';
  const recovered={...task,id:'old-receipt',conversationId};
