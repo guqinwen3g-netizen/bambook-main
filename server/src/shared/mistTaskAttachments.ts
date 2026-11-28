@@ -32,6 +32,8 @@ export function officeKind(file: { name: string; mimeType: string }): OfficeKind
   return ext ?? (Object.keys(OFFICE_MIME) as OfficeKind[]).find(k => OFFICE_MIME[k].test(file.mimeType));
 }
 
+export const WORKSHEET_NAME_QUESTION = '请回复要核对的工作表名称。';
+
 export const WORKBOOK_SELECTION_QUESTION = '请回复要核对的工作簿完整文件名，包括名称后显示的编号。';
 
 export function taskWorkbookChoices(files: readonly TaskAttachment[] = []) {

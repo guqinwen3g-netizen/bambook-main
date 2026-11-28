@@ -209,7 +209,7 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const question=pdfChoice?.question??pdfVisualChoice??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:undefined);
+        const question=pdfChoice?.question??pdfVisualChoice??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:worksheetScope?.worksheetQuestion);
         if(question){
           const attempts=pdfChoice?(context.task.questions?.length??0):(context.task.questions?.filter(q=>q.question===question).length??0);
           const prefix=pdfChoice?'platform-pdf-choice-':pdfVisualChoice?'platform-pdf-visual-choice-':'platform-workbook-choice-';

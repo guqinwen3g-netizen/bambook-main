@@ -1983,6 +1983,34 @@ it('explicitly reopens a prior attachment in the same conversation without creat
   expect(writes).toHaveBeenCalledTimes(1);
 });
 
+it('asks for the worksheet before reading unnamed Excel rows',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对报价第 47 行。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const book=XLSX.utils.book_new();
+ for(const [name,value] of [['报价','SELECTED-47'],['内部','HIDDEN-FROM-MODEL']]){
+  const sheet=XLSX.utils.aoa_to_sheet([]);
+  XLSX.utils.sheet_add_aoa(sheet,[[value]],{origin:'B47'});
+  XLSX.utils.book_append_sheet(book,sheet,name);
+ }
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对第 47 行',instructions:'请只读取 quote.xlsx 第 47 行。'}))
+  .attach('attachments',XLSX.write(book,{type:'buffer',bookType:'xlsx'}),'quote.xlsx').expect(201)).body.item;
+ await f.drain();
+ const waiting=await f.current(task.id);
+ expect(waiting.state).toBe('waiting_human');
+ expect(waiting.questions.at(-1).question).toContain('工作表名称');
+ expect(complete).not.toHaveBeenCalled();
+ await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+  requestId:randomUUID(),version:waiting.version,questionId:waiting.questions.at(-1).id,answer:'报价',
+ }).expect(200);
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const text=complete.mock.calls[0][0].messages[0].content;
+ expect(text).toContain('SELECTED-47');
+ expect(text).not.toContain('HIDDEN-FROM-MODEL');
+});
+
 it.each([false,true])('only sends explicitly requested original worksheet rows to the model (with history: %s)',async history=>{
  let rounds=0;
  const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskIssueCode,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
-import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_VISUAL_PAGE_LIMIT, type PdfVisualCandidate, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_VISUAL_PAGE_LIMIT, type PdfVisualCandidate, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
 import { isFileTextCursor, type PdfPageRange, type PdfPageScope } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
@@ -189,24 +189,33 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
   const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[「“"]([^」”"\n]{1,31})[」”"]|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
   const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?worksheet[ \t]+["“]([^"”\n]{1,31})["”]/gi)];
   const names=new Set([...chinese.map(match=>match[2]??match[3]??match[4].trim()),...english.map(match=>match[1])]);
-  if(names.size!==1)return;
-  const [worksheet]=names;
-  if(!worksheet)return;
+  if(names.size>1)return;
+  const unnamed=names.size?[]:[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?=第[ \t]*[0-9])/gu)]
+    .filter(match=>attachments.length===1||/\.xlsx|excel|工作簿|表格/i.test(match[1]))
+    .filter(match=>{
+      const rows=worksheetRowsAt(request.slice((match.index??0)+match[0].length),false);
+      return rows.ranges.length||rows.invalid;
+    });
+  if(!names.size&&!unnamed.length)return;
+  const answered=[...questions].reverse().find(q=>q.question===WORKSHEET_NAME_QUESTION&&q.answeredAt)?.answer?.trim();
+  const requestedName=answered?.replace(/^[「“"]([^」”"\n]{1,31})[」”"]$/u,'$1');
+  const worksheet=[...names][0]??(requestedName&&requestedName.length<=31&&!/[\r\n]/.test(requestedName)?requestedName:'');
+  const worksheetQuestion=worksheet?undefined:WORKSHEET_NAME_QUESTION;
   const rowBindings=[
-    ...chinese.map(match=>worksheetRowsAt(request.slice((match.index??0)+match[0].length),false)),
+    ...[...chinese,...unnamed].map(match=>worksheetRowsAt(request.slice((match.index??0)+match[0].length),false)),
     ...english.map(match=>worksheetRowsAt(request.slice((match.index??0)+match[0].length),true)),
   ];
   const values=rowBindings.flatMap(binding=>binding.ranges);
   const rowScopeConflict=rowBindings.some(binding=>binding.invalid);
   const merged=values.length&&!rowScopeConflict?mergePdfRanges(values):undefined;
   const rows=merged?(merged.windows??[{from:merged.from,to:merged.to}]):undefined;
-  const selection={worksheet,rows,rowScopeConflict};
+  const selection={worksheet,worksheetQuestion,rows,rowScopeConflict};
 
   const workbookIds=workbooks.map(({file})=>file.id);
   const aliases=[...new Set(workbooks.flatMap(({file,label})=>[file.name,label]))].sort((a,b)=>b.length-a.length);
   const pattern=new RegExp('(?<![\\w./-])(?:'+aliases.map(escapeAttachmentName).join('|')+')(?![\\w./-]|[（(]\\d+)','gu');
   const normalizeLabel=(value:string)=>value.replace(/(\.xlsx)\((\d+)\)/gi,'$1（$2）');
-  const subjects=chinese.map(match=>normalizeLabel(match[1]));
+  const subjects=[...chinese,...unnamed].map(match=>normalizeLabel(match[1]));
   const candidates=new Set<string>();
   let unknownWorkbook=false;
   for(const subject of subjects){
@@ -363,7 +372,7 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:Rea
     const pdfScope=typeof fileId==='string'?pdfRanges.get(fileId):undefined;
     if(typeof fileId!=='string'||!workbookInScope&&!pdfScope)return true;
     if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
-    if(workbookInScope&&worksheetScope)return !worksheetScope.rowScopeConflict&&fileId===worksheetScope.fileId&&read?.kind==='xlsx'&&read.file?.id===fileId
+    if(workbookInScope&&worksheetScope)return !worksheetScope.rowScopeConflict&&!worksheetScope.worksheetQuestion&&fileId===worksheetScope.fileId&&read?.kind==='xlsx'&&read.file?.id===fileId
       &&read.worksheetScope===worksheetScope.worksheet
       &&(!worksheetScope.rows||JSON.stringify(read.worksheetRowScope)===JSON.stringify(worksheetScope.rows))
       &&Array.isArray(read.sheets)&&read.sheets.length===1&&read.sheets[0]===worksheetScope.worksheet
