@@ -220,6 +220,32 @@ it('links a verified row immediately after the worksheet closing parenthesis',as
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('links the observed row when a report bullet repeats its annotated worksheet after a colon',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const file={id:'quote',name:'sparse.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const other={...file,id:'other',name:'other.xlsx'};
+ const reads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:file.id,taskAttachmentObservedSheets:['报价','备注'],
+   taskAttachmentObservedSheetRows:[{sheet:'报价',row:47},{sheet:'备注',row:47}]},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:other.id,taskAttachmentObservedSheets:['报价'],
+   taskAttachmentObservedSheetRows:[{sheet:'报价',row:46}]},
+ ];
+ const text=[
+  '- **sparse.xlsx（工作表：报价）**：工作表：报价 第 47 行 依次为 ROW-47-KEEP、2500、EUR，来源为该行原表内容。',
+  '- **sparse.xlsx（工作表：报价）**：工作表：报价 第 46 行未核对。',
+  '- **sparse.xlsx（工作表：报价）**：工作表：备注 第 47 行内容另述。',
+  '- **sparse.xlsx（工作表：报价）**：工作表：报价 第 47 行、第 48 行待比较。',
+ ].join('\n');
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[file,other]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button[title]')];
+  expect(buttons.map(button=>button.title)).toEqual(['工作表 报价 第 47 行','工作表 报价','工作表 报价','工作表 报价']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[file,{sheet:'报价',row:47}],[file,'报价'],[file,'报价'],[file,'报价']]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet rows and keeps other rows at worksheet level',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

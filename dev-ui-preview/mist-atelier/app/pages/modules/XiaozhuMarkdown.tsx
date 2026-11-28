@@ -124,6 +124,17 @@ function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTr
   const sheet=observedWorksheet(text,file,reads,/^[ \t]*(?:[）)]|第[ \t]*[1-9]\d*[ \t]*行|row[ \t]+[1-9]\d*\b)/i);
   if(sheet){
     const following=text.slice(sheet.length).replace(/^[ \t]*[）)][ \t]*/u,'');
+    // A report bullet can repeat its worksheet between the title colon and the row reference.
+    const body=/^[ \t]*[：:][ \t]*/.exec(following);
+    if(body){
+      const repeated=following.slice(body[0].length);
+      const repeatedPrefix=WORKSHEET_REFERENCE.exec(repeated);
+      if(repeatedPrefix){
+        const repeatedSheet=repeated.slice(repeatedPrefix[0].length);
+        if(!repeatedSheet.startsWith(sheet))return sheet;
+        return sheetRowTarget(sheet,repeatedSheet.slice(sheet.length),file,reads)?.target??sheet;
+      }
+    }
     return sheetRowTarget(sheet,following,file,reads)?.target??sheet;
   }
 }
