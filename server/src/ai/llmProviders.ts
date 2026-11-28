@@ -18,6 +18,27 @@
  *      env 提供方始终排在最后兜底（见 platformProviders.ts）。
  */
 
+/** A provider-supplied lower bound for the next automatic attempt. */
+export class LlmProviderRetryError extends Error {
+  constructor(message: string, readonly retryNotBefore: number) {
+    super(message);
+  }
+}
+
+/** Every eligible provider is already waiting, so this attempt sent no request. */
+export class LlmProviderCooldownError extends LlmProviderRetryError {}
+
+const MAX_PROVIDER_COOLDOWNS = 32;
+
+function responseRetryNotBefore(response: Response, now: number) {
+  if (response.status !== 429 && response.status !== 503) return;
+  const value = response.headers?.get('retry-after')?.trim();
+  if (!value) return;
+  const at = /^\d+$/.test(value) ? Math.min(Number.MAX_SAFE_INTEGER, now + Number(value) * 1000)
+    : /^[A-Za-z]{3}/.test(value) ? Date.parse(value) : NaN;
+  return Number.isSafeInteger(at) && at > now ? at : undefined;
+}
+
 export type LlmProviderConfig = {
   id: string;
   baseUrl: string;
@@ -41,6 +62,7 @@ export type LlmCompletionInput = {
 import { codexSubscriptions, PLATFORM_SUBJECT, type CodexSubscriptionService } from './codexSubscription';
 import { platformReasoning, type PlatformAiProfile } from './platformModel';
 import { platformProviders, type PlatformApiProvider, type PlatformProviderStore } from './platformProviders';
+import { createHash } from 'node:crypto';
 import { aiFetch } from './outboundProxy';
 
 const DEFAULT_LLM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
@@ -124,6 +146,7 @@ const ARK_KIMI = 'kimi-k3.1-pro';
 const ARK_DEEPSEEK_FLASH = 'deepseek-v4.1-flash';
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
+  const cooldowns = new Map<string, number>();
   return async function complete(input: LlmCompletionInput): Promise<string> {
     const subscriptions = options.subscriptions ?? codexSubscriptions();
     const steps = [
@@ -131,19 +154,37 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       ...resolveEnvProviderChain().map(provider => ({ kind: 'api' as const, provider })),
     ];
     const profile = options.platformProfile;
+    const now = Date.now();
+    for (const [key, until] of cooldowns) if (until <= now) cooldowns.delete(key);
+    const cooldownKey = (step: typeof steps[number]) => profile === 'agent-task' && step.kind === 'api'
+      ? createHash('sha256').update(JSON.stringify([step.provider.baseUrl, input.model || step.provider.model, step.provider.apiKey])).digest('hex')
+      : undefined;
     const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
     let invalidResponse: Error | undefined;
     let attemptedProvider = false;
+    let retryNotBefore: number | undefined;
     for (const [index, step] of steps.entries()) {
       if (!available(step)) continue;
       input.signal.throwIfAborted();
-      if (attemptedProvider && input.beforeFallback) {
+      const key = cooldownKey(step);
+      const coolingUntil = key ? cooldowns.get(key) : undefined;
+      if (coolingUntil !== undefined && coolingUntil > Date.now()) {
+        retryNotBefore = Math.max(retryNotBefore ?? 0, coolingUntil);
+        continue;
+      }
+      if ((attemptedProvider || retryNotBefore !== undefined) && input.beforeFallback) {
         await input.beforeFallback();
         input.signal.throwIfAborted();
+        const refreshed = key ? cooldowns.get(key) : undefined;
+        if (refreshed !== undefined && refreshed > Date.now()) {
+          retryNotBefore = Math.max(retryNotBefore ?? 0, refreshed);
+          continue;
+        }
       }
       attemptedProvider = true;
-      const remaining = steps.slice(index + 1).filter(available);
+      const remaining = steps.slice(index + 1).filter(next =>
+        available(next) && (cooldowns.get(cooldownKey(next) ?? '') ?? 0) <= Date.now());
       const deadline = profile === 'agent-task' && !input.onDelta && remaining.length ? new AbortController() : undefined;
       const hasDeepseekBackup = remaining.some(next => next.kind === 'api'
         && next.provider.baseUrl === ARK_AGENT_PLAN_URL && next.provider.model === ARK_DEEPSEEK_FLASH);
@@ -167,15 +208,28 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
         return reply;
       } catch (err: any) {
         if (input.signal.aborted || (!deadline?.signal.aborted && err?.name === 'AbortError')) throw err;
+        if (err instanceof LlmProviderRetryError) {
+          retryNotBefore = Math.max(retryNotBefore ?? 0, err.retryNotBefore);
+          if (key) {
+            const until = Math.max(cooldowns.get(key) ?? 0, err.retryNotBefore);
+            cooldowns.delete(key);
+            cooldowns.set(key, until);
+            const oldest = cooldowns.keys().next().value;
+            if (oldest !== undefined && cooldowns.size > MAX_PROVIDER_COOLDOWNS) cooldowns.delete(oldest);
+          }
+        }
         const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
         failures.push({ providerId, error: deadline?.signal.aborted ? 'PROVIDER_ATTEMPT_TIMEOUT' : code + String(err?.message || err) });
       } finally {
         clearTimeout(timer);
       }
     }
-    if (invalidResponse) throw invalidResponse;
-    if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
-    throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    if (!attemptedProvider && retryNotBefore !== undefined) throw new LlmProviderCooldownError('LLM_PROVIDER_COOLDOWN', retryNotBefore);
+    if (!invalidResponse && failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
+    const failure = invalidResponse ?? new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    // A successful fallback returns above. Only an exhausted chain advises the task scheduler.
+    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(failure.message, retryNotBefore);
+    throw failure;
   };
 }
 
@@ -235,8 +289,11 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    const retryNotBefore = responseRetryNotBefore(res, Date.now());
     const data: any = await res.json().catch(() => ({}));
-    throw new Error(data?.error?.message || data?.message || `Model API failed with ${res.status}`);
+    const message = data?.error?.message || data?.message || `Model API failed with ${res.status}`;
+    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(message, retryNotBefore);
+    throw new Error(message);
   }
   const data: any = await res.json().catch(() => ({}));
   const text = String(data?.choices?.[0]?.message?.content || '').trim();
