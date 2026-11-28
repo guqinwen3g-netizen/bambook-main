@@ -351,6 +351,8 @@
 .mist-scrim { position: fixed; inset: 0; background: var(--mist-scrim); backdrop-filter: blur(3px); z-index: var(--mist-z-overlay); animation: mist-fade .25s both; }
 @keyframes mist-fade { from { opacity: 0; } }
 .mist-palette, .mist-drawer, .mist-dialog, .mist-menu { background: var(--mist-overlay-bg); backdrop-filter: blur(24px) saturate(1.2); -webkit-backdrop-filter: blur(24px) saturate(1.2); box-shadow: var(--mist-shadow-overlay); color: var(--mist-ink); }
+/* Nested surfaces cover the readable content of their parent overlay. */
+.mist-drawer[data-nested], .mist-dialog[data-nested] { background: var(--mist-card); }
 .mist-palette { position: fixed; left: 50%; top: 14vh; transform: translateX(-50%); width: min(640px, 92vw); z-index: calc(var(--mist-z-overlay) + 1); border-radius: var(--mist-r-card); overflow: hidden; animation: mist-pop .3s var(--mist-ease) both; }
 @keyframes mist-pop { from { opacity: 0; transform: translate(-50%, 8px) scale(.98); } }
 .mist-palette-q { display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 20px; border-bottom: 1px solid var(--mist-line); color: var(--mist-ink-3); }
