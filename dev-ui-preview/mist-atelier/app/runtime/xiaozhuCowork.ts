@@ -119,6 +119,10 @@ async function readAttachmentAnswerReceipt(base:string,taskId:string,request:Ext
   return receipt.item;
 }
 
+function transientHistoryRead(status:number) {
+  return !Number.isFinite(status)||status===0||status===408||status===429||status>=500;
+}
+
 async function readCoworkHistory(base: string, signal: AbortSignal) {
   const items: AgentTaskView[] = [];
   let cursor: string | undefined;
@@ -281,6 +285,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const historyRecovery = React.useRef<'needed'|'pending'|undefined>(undefined);
   const capabilityRead = React.useRef<AbortController | undefined>(undefined);
   const moreRead = React.useRef<AbortController | undefined>(undefined);
+  const moreRecovery = React.useRef<{cursor:string;resume?:true}|undefined>(undefined);
+  const abortOlderRead = React.useCallback(()=>{
+    const active=moreRead.current;
+    moreRead.current=undefined;
+    active?.abort();
+  },[]);
   const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
   const personalIdentity = React.useRef<string | undefined>(undefined);
   const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
@@ -332,10 +342,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
     historyRecovery.current=mode==='reconnect'?'pending':undefined;
+    const keepOlderPages=mode==='reconnect'&&!!moreRecovery.current;
     historyRead.current?.abort();
     capabilityRead.current?.abort();
-    moreRead.current?.abort();
-    moreRead.current = undefined;
+    abortOlderRead();
+    if(!keepOlderPages)moreRecovery.current=undefined;
     setLoadingMore(false);
     setMoreError('');
     if (!base || !enabled) { setLoading(false); setCheckingAvailability(false); setAvailable(false); return; }
@@ -373,10 +384,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         const tracked = trackedOrigin.current;
         const originId = tracked?.scope === bound && tracked.id === origin.current ? tracked.id : undefined;
         const retained = old.filter(task => task.executor === 'platform' && (!own || task.identityId === own.id)
-          && !listedTaskIds.has(task.id) && (task.id === originId || !knownTaskIds.has(task.id)));
+          && !listedTaskIds.has(task.id) && (keepOlderPages || task.id === originId || !knownTaskIds.has(task.id)));
         return retained.length ? [...history, ...retained].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : history;
       });
-      setMore(page.cursor);
+      if(!keepOlderPages)setMore(page.cursor);
       setLoading(false);
       setError('');
 
@@ -394,11 +405,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
       if (current()) {
         const status=Number((e as {status?:number})?.status);
-        const transient=!Number.isFinite(status)||status===0||status===408||status===429||status>=500;
-        historyRecovery.current=transient?'needed':undefined;
+        historyRecovery.current=transientHistoryRead(status)?'needed':undefined;
         if ([401,403,404].includes(status)) {
           deniedHistory.current++;trackedOrigin.current=undefined;
           receiptReconnectPending.current=false;receiptRead.current?.abort();
+          abortOlderRead();moreRecovery.current=undefined;
+          setLoadingMore(false);setMoreError('');
           setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
         }
         setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
@@ -414,8 +426,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         setLoading(false);setCheckingAvailability(false);
       }
     }
-  }, [base, enabled, scope, checkReceipts]);
-  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  }, [abortOlderRead, base, enabled, scope, checkReceipts]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); abortOlderRead(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [abortOlderRead,load,scope]);
   React.useEffect(() => {
     if(!base||!enabled)return;
     const disconnect=()=>{
@@ -823,8 +835,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } else applyTaskUpdate(item);
     return item;
   };
-  const loadMore = async () => {
+  const loadMore = React.useCallback(async () => {
     if (!more || !base || !enabled || loading || moreRead.current) return;
+    if(!navigator.onLine){
+      moreRecovery.current={cursor:more};
+      setMoreError('网络连接已断开');
+      return;
+    }
+    moreRecovery.current=undefined;
     const cursor = more, run = version.current, bound = scope, controller = new AbortController();
     const isCurrent = () => moreRead.current === controller && run === version.current && live.current === bound;
     moreRead.current = controller;
@@ -842,14 +860,43 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       });
       setMore(page.nextCursor ?? undefined);
     } catch (e) {
-      if (isCurrent()) setMoreError(e instanceof Error ? e.message : '读取失败');
+      if (isCurrent()) {
+        if(transientHistoryRead(Number((e as {status?:number})?.status)))moreRecovery.current={cursor};
+        setMoreError(e instanceof Error ? e.message : '读取失败');
+      }
     } finally {
       if (isCurrent()) {
         moreRead.current = undefined;
         setLoadingMore(false);
       }
     }
-  };
+  },[base,enabled,loading,more,scope]);
+  React.useEffect(()=>{
+    if(!base||!enabled||!more)return;
+    const disconnect=()=>{
+      if(!moreRead.current||live.current!==scope)return;
+      moreRecovery.current={cursor:more};
+      abortOlderRead();
+      setLoadingMore(false);
+      setMoreError('网络连接已断开');
+    };
+    const reconnect=()=>{
+      const retry=moreRecovery.current;
+      if(!navigator.onLine||live.current!==scope||retry?.cursor!==more)return;
+      if(historyRecovery.current==='pending')retry.resume=true;
+      else void loadMore();
+    };
+    window.addEventListener('offline',disconnect);
+    window.addEventListener('online',reconnect);
+    return()=>{
+      window.removeEventListener('offline',disconnect);
+      window.removeEventListener('online',reconnect);
+    };
+  },[abortOlderRead,base,enabled,loadMore,more,scope]);
+  React.useEffect(()=>{
+    const retry=moreRecovery.current;
+    if(!loading&&!checkingAvailability&&navigator.onLine&&retry?.resume&&retry.cursor===more)void loadMore();
+  },[checkingAvailability,loadMore,loading,more]);
   const controlTask = async (task:AgentTaskView, intent:TaskControlIntent|TaskControlRequest) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
     const {action}=intent;
