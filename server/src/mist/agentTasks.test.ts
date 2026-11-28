@@ -39,6 +39,12 @@ it('projects only current public tool activity and drops credential-like strings
     ...view,name:'请使用 sk-test-secret-1234',trail:[{...view.trail[0],label:'aft1.private-cursor',progress:'bms1_private'}],
   })).toEqual({id:taskId,name:'小竹任务',state:'running',executionStage:'tool'});
   expect(personalTaskActivity({...view,state:'waiting_time'})).toBeUndefined();
+  const model = {...view,executionStage:'model' as const,executionStageSince:saved.createdAt};
+  expect(personalTaskActivity(model)).toEqual({
+    id:taskId,name:'核对订单',state:'running',executionStage:'model',executionStageSince:saved.createdAt,
+  });
+  expect(personalTaskActivity({...model,runnerStatus:'heartbeat_stale'})).not.toHaveProperty('executionStageSince');
+  expect(personalTaskActivity({...model,executionStage:'tool'})).not.toHaveProperty('executionStageSince');
 });
 it('persists exact intent references separately from actual task reads and distinguishes same-label identity in idempotency',async()=>{
  const requestId=randomUUID(),input={requestId,identityId,name:'同名资料',instructions:'核对同名资料'};
