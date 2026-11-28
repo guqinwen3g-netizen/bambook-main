@@ -117,20 +117,20 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
     return () => { live = false; };
   }, [file?.id, readAttempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const many = files.length > 1;
-  const go = React.useCallback((d: 1 | -1) => { if (files.length > 1) onIndex((index + d + files.length) % files.length); }, [files.length, index, onIndex]);
+  const go = (d: 1 | -1) => { if (many) onIndex((index + d + files.length) % files.length); };
   const zoomable = info.kind === 'image' || info.kind === 'pdf';
-  React.useEffect(() => {
-    if (!open) return;
-    const h = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-      if (e.key === 'ArrowLeft' && many) { e.preventDefault(); go(-1); }
-      else if (e.key === 'ArrowRight' && many) { e.preventDefault(); go(1); }
-      else if (zoomable && (e.key === '+' || e.key === '=')) setZoom(z => stepZoom(z, 1, fitScale));
-      else if (zoomable && e.key === '-') setZoom(z => stepZoom(z, -1, fitScale));
-      else if (zoomable && e.key === '0') setZoom('fit');
-    };
-    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
-  }, [open, many, go, zoomable, fitScale]);
+  const onPreviewKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const { target, currentTarget, key } = event;
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;
+    if (!(target instanceof HTMLElement) || !currentTarget.contains(target) || currentTarget.hasAttribute('inert')) return;
+    if (target.isContentEditable || target.matches('input, textarea, select')) return;
+    if (many && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+      event.preventDefault();
+      go(key === 'ArrowLeft' ? -1 : 1);
+    } else if (zoomable && (key === '+' || key === '=')) setZoom(z => stepZoom(z, 1, fitScale));
+    else if (zoomable && key === '-') setZoom(z => stepZoom(z, -1, fitScale));
+    else if (zoomable && key === '0') setZoom('fit');
+  };
   if (!file) return null;
   const download = async () => { if (!onDownload) return; setDownloadError(''); try { await onDownload(file); } catch (e) { setDownloadError(e instanceof Error ? e.message : '下载失败'); } };
   const retry = () => { ref.current?.focus(); retryRead(); };
@@ -155,7 +155,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   const nameSuffix = displayName.startsWith(file.name) ? displayName.slice(file.name.length) : '';
   const currentScale = zoom === 'fit' ? fitScale : zoom;
   return <Portal><div className="mist-scrim" onClick={onClose} />
-    <div ref={ref} tabIndex={-1} className="mist-dialog mist-viewer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-file-preview={file.id} data-preview-kind={info.kind}>
+    <div ref={ref} tabIndex={-1} className="mist-dialog mist-viewer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-file-preview={file.id} data-preview-kind={info.kind} onKeyDown={onPreviewKeyDown}>
       <div className="mist-viewer-h">
         <Tile icon={KIND_ICON[info.kind]} size="sm" />
         <div className="mist-viewer-title">

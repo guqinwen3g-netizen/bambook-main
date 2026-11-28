@@ -149,7 +149,7 @@ export function CommandPalette({ open, onClose, items, query, onQueryChange, pla
   const exec = (it?: CommandItem) => { if (!it) return; onClose(); it.run(); };
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <div ref={ref} id={id} tabIndex={-1} className="mist-palette" role="dialog" aria-modal="true" aria-label={uiText("搜索")}>
-      <div className="mist-palette-q"><Icon icon={Search} /><input autoFocus value={q} placeholder={uiText(placeholder)} aria-label={uiText(placeholder)}
+      <div className="mist-palette-q"><Icon icon={Search} /><input value={q} placeholder={uiText(placeholder)} aria-label={uiText(placeholder)}
         onChange={e => { setQ(e.target.value); setActive(0); }}
         onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(flat.length - 1, a + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(0, a - 1)); } else if (e.key === 'Enter') exec(flat[active]); }} /><Kbd>ESC</Kbd></div>
       <div className="mist-palette-list">
