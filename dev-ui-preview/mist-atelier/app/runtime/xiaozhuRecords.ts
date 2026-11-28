@@ -1,7 +1,32 @@
 /** 小竹回答里的编号、客户名自动链到对应记录：只匹配当前账号已读到的记录，不猜。 */
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 
-export type RecordRef = { text: string; view: string; id: string };
+import type { AgentTaskTrailItem } from '../../../../server/src/shared/mistAgentTasks';
+import type { RouteTarget } from '../nav';
+
+export type RecordRef = { text: string; view: string; id: string; target?: RouteTarget };
+
+/** A report can auto-link a label only when its own verified reads agree on the destination. */
+export function taskReportRecordIndex(trail: readonly AgentTaskTrailItem[] | undefined): RecordRef[] {
+  const labels = new Map<string, RecordRef | undefined>();
+  for (const step of trail ?? []) {
+    if (step.kind !== 'read' || step.failed || step.completed === false) continue;
+    const refs = step.ref ? [step.ref, ...(step.refs ?? [])] : step.refs ?? [];
+    for (const { label, view, id, section } of refs) {
+      const text = label.trim();
+      if (!view || !id || text.length < 4) continue;
+      if (!labels.has(text)) {
+        labels.set(text, { text, view, id, ...(section ? { target: { section } } : {}) });
+        continue;
+      }
+      const previous = labels.get(text);
+      if (previous && (previous.view !== view || previous.id !== id || previous.target?.section !== (section || undefined))) {
+        labels.set(text, undefined);
+      }
+    }
+  }
+  return [...labels.values()].filter((ref): ref is RecordRef => ref !== undefined);
+}
 export function recordIndex(state: MistState | null | undefined): RecordRef[] {
   if (!state) return [];
   const s: any = state, out: RecordRef[] = [], seen = new Set<string>();
