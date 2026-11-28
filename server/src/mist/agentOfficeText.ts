@@ -99,13 +99,13 @@ const columnIndex = (ref: string | undefined, fallback: number) => {
 };
 const cellText = (s: string) => s.replace(/[\t\r\n]+/g, ' ').trim();
 
-export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number): { lines: string[]; rowSpans:Omit<SheetRowSpan,'sheet'>[]; truncated: boolean; attributedValues?:true } {
+export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number, selectedRows?:readonly {from:number;to:number}[]): { lines: string[]; rowSpans:Omit<SheetRowSpan,'sheet'>[]; truncated: boolean; attributedValues?:true } {
   const lines:string[]=[],rowSpans:Omit<SheetRowSpan,'sheet'>[]=[];
   let used=0,truncated=false,attributedValues=false;
   for(const row of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)){
     const declared=attr(row[1],'r');
     let rowNumber=declared===undefined?undefined:Number(declared);
-    let incomplete=false,next=0;
+    let conflictingCoordinates=false,next=0,columnLimit=false;
     const cells:string[]=[];
     for(const c of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
       const head=c[1],body=c[2]??'',coordinate=attr(' '+head,'r');
@@ -113,11 +113,11 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
       if(physicalRow){
         const n=Number(physicalRow);
         if(rowNumber===undefined)rowNumber=n;
-        else if(rowNumber!==n)incomplete=true;
+        else if(rowNumber!==n)conflictingCoordinates=true;
       }
       const col=columnIndex(coordinate,next);
       next=col+1;
-      if(col>=COLUMNS_MAX){truncated=true;incomplete=true;continue;}
+      if(col>=COLUMNS_MAX){columnLimit=true;continue;}
       const type = attr(' ' + head, 't'), style = Number(attr(' ' + head, 's') ?? -1);
       const valueTag = /<v(\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body);
       const raw = valueTag?.[2];
@@ -129,6 +129,8 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
       cells[col] = cellText(value);
       if(valueTag?.[1]&&type!=='inlineStr'&&cells[col])attributedValues=true;
     }
+    if(selectedRows&&(conflictingCoordinates||!rowNumber||!selectedRows.some(range=>rowNumber!>=range.from&&rowNumber!<=range.to)))continue;
+    truncated ||= columnLimit;
     while (cells.length && !cells[cells.length - 1]) cells.pop();
     if (!cells.length) continue;
     const line = Array.from(cells, v => v ?? '').join('\t');
@@ -137,14 +139,14 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
       if(remaining)lines.push(line.slice(0,remaining));
       truncated = true; break;
     }
-    if(!incomplete&&rowNumber!==undefined&&Number.isSafeInteger(rowNumber)&&rowNumber>0&&rowNumber<=1_048_576)
+    if(!conflictingCoordinates&&!columnLimit&&rowNumber!==undefined&&Number.isSafeInteger(rowNumber)&&rowNumber>0&&rowNumber<=1_048_576)
       rowSpans.push({row:rowNumber,start:used,end:used+line.length});
     lines.push(line); used += line.length + 1;
   }
   return { lines, rowSpans, truncated, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
-async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string): Promise<OfficeText & {unreadable?:boolean}> {
+async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string, selectedRows?:readonly {from:number;to:number}[]): Promise<OfficeText & {unreadable?:boolean}> {
   const workbook = await read('xl/workbook.xml');
   if (!workbook) throw new Error('Missing workbook');
   const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].flatMap(([tag])=>{
@@ -169,7 +171,7 @@ async function xlsxText(read: (p: string) => Promise<string | undefined>, limit:
     const xml = path ? await read(path) : undefined;
     if (!xml) throw new Error('Missing worksheet');
     const head = `## 工作表：${sheet.name}`;
-    const { lines, rowSpans, truncated: cut, attributedValues: restoredValues } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
+    const { lines, rowSpans, truncated: cut, attributedValues: restoredValues } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2), selectedRows);
     truncated ||= cut;
     attributedValues ||= !!restoredValues;
     const block = [head, ...(lines.length ? lines : [cut?'（正文超出本次摘录范围）':'（空）'])].join('\n');
@@ -202,7 +204,7 @@ async function pptxText(read: (p: string) => Promise<string | undefined>): Promi
 }
 
 /** 返回未截断的正文（由调用方统一按 limit 截取）；无法解析时给出原因。 */
-export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, limit: number, worksheet?:string): Promise<OfficeText & { unreadable?: boolean }> {
+export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, limit: number, worksheet?:string, selectedRows?:readonly {from:number;to:number}[]): Promise<OfficeText & { unreadable?: boolean }> {
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return { text: '', truncated: false, unreadable: true, reason: '文件不是有效的 Office 文档（可能是旧版格式或已加密）' };
   let zip: JSZip;
   try { zip = await JSZip.loadAsync(bytes); } catch { return { text: '', truncated: false, unreadable: true, reason: 'Office 文档无法解压（可能已损坏或加密）' }; }
@@ -213,7 +215,7 @@ export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, lim
       if (!xml) return { text: '', truncated: false, unreadable: true, reason: '不是有效的 Word 文档' };
       return { text: docxText(xml), truncated: false };
     }
-    if (kind === 'xlsx') return await xlsxText(read, limit, worksheet);
+    if (kind === 'xlsx') return await xlsxText(read, limit, worksheet, selectedRows);
     return await pptxText(read);
   } catch (error) {
     if (error instanceof OfficeLimit) return { text: '', truncated: false, unreadable: true, reason: '文档解压后过大，不提取正文' };

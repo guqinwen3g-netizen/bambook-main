@@ -162,6 +162,26 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
   return {pdfRanges,pdfVisualRanges,confirmedPdfChoices};
 }
 
+function worksheetRowsAt(text:string,english:boolean){
+  const row=english
+    ? /^[ \t]*rows?[ \t]+([1-9]\d*)(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*))?\b/i
+    : /^[ \t]*(?:的[ \t]*)?第[ \t]*([1-9]\d*)(?:[ \t]*(?:行[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?(?:[ \t]*行|(?=[ \t]*(?:、|，|,|和|及|与)[ \t]*(?:第[ \t]*)?[1-9]\d*[^。；\n]{0,28}行))/u;
+  const first=row.exec(text);
+  if(!first)return {ranges:[],invalid:(english?/^[ \t]*rows?[ \t]+[0-9]/i:/^[ \t]*(?:的[ \t]*)?第[ \t]*[0-9][^。；\n]{0,32}行/u).test(text)};
+  const item=english
+    ? /^[ \t]*(?:,[ \t]*(?:and[ \t]+)?|and[ \t]+)(?:rows?[ \t]+)?([1-9]\d*)(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*))?\b/i
+    : /^[ \t]*(?:、|和|及|与|，|,)[ \t]*(?:第[ \t]*)?([1-9]\d*)(?:[ \t]*(?:行[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?(?:[ \t]*行|(?=[ \t]*(?:、|，|,|和|及|与)[ \t]*(?:第[ \t]*)?[1-9]\d*[^。；\n]{0,28}行))/u;
+  const ranges=[{from:Number(first[1]),to:Number(first[2]??first[1])}];
+  let rest=text.slice(first[0].length);
+  for(let next=item.exec(rest);next;next=item.exec(rest)){
+    ranges.push({from:Number(next[1]),to:Number(next[2]??next[1])});
+    rest=rest.slice(next[0].length);
+  }
+  const invalid=ranges.some(({from,to})=>!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>to||to>1_048_576)
+    ||/^[ \t]*(?:至|到|和|与|及|或|[、，,–—/-]|and\b|or\b|to\b|through\b)[ \t]*(?:第[ \t]*|rows?[ \t]+)?[0-9]/i.test(rest);
+  return {ranges,invalid};
+}
+
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
   const request=splitTaskRequest(instructions);
   const workbooks=taskWorkbookChoices(attachments);
@@ -172,6 +192,15 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
   if(names.size!==1)return;
   const [worksheet]=names;
   if(!worksheet)return;
+  const rowBindings=[
+    ...chinese.map(match=>worksheetRowsAt(request.slice((match.index??0)+match[0].length),false)),
+    ...english.map(match=>worksheetRowsAt(request.slice((match.index??0)+match[0].length),true)),
+  ];
+  const values=rowBindings.flatMap(binding=>binding.ranges);
+  const rowScopeConflict=rowBindings.some(binding=>binding.invalid);
+  const merged=values.length&&!rowScopeConflict?mergePdfRanges(values):undefined;
+  const rows=merged?(merged.windows??[{from:merged.from,to:merged.to}]):undefined;
+  const selection={worksheet,rows,rowScopeConflict};
 
   const workbookIds=workbooks.map(({file})=>file.id);
   const aliases=[...new Set(workbooks.flatMap(({file,label})=>[file.name,label]))].sort((a,b)=>b.length-a.length);
@@ -187,11 +216,11 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
       for(const {file,label} of workbooks)if(token===label||token===file.name)candidates.add(file.id);
     }
   }
-  if(!unknownWorkbook&&candidates.size===1)return {fileId:[...candidates][0],worksheet,workbookIds};
-  if(!unknownWorkbook&&!candidates.size&&workbooks.length===1)return {fileId:workbooks[0].file.id,worksheet,workbookIds};
+  if(!unknownWorkbook&&candidates.size===1)return {fileId:[...candidates][0],...selection,workbookIds};
+  if(!unknownWorkbook&&!candidates.size&&workbooks.length===1)return {fileId:workbooks[0].file.id,...selection,workbookIds};
   const answer=[...questions].reverse().find(q=>q.question===WORKBOOK_SELECTION_QUESTION&&q.answeredAt)?.answer?.trim();
   const matching=answer?workbooks.filter(item=>item.label===normalizeLabel(answer)):[];
-  return {fileId:matching.length===1?matching[0].file.id:undefined,worksheet,workbookIds};
+  return {fileId:matching.length===1?matching[0].file.id:undefined,...selection,workbookIds};
 }
 
 const SKIP_READ_ZH = /(?:不要|请勿|无需|不|勿)(?:再)?(?:读取|阅读|核对|查看|检查|处理|读|看)/.source;
@@ -323,7 +352,7 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:Rea
   worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>,allowedFiles?:ReadonlySet<string>,excludedPdfIds?:ReadonlySet<string>):PlatformTaskStep[] {
   if(!pdfRanges.size&&!worksheetScope&&!allowedFiles&&!excludedPdfIds)return steps;
   const eligible=steps.filter(step=>{
-    const read=step.result as (PdfReadWindow&{worksheetScope?:string;sheets?:string[];observedSheets?:string[];attachmentScopeRereadRequired?:boolean;pdfScopeRereadRequired?:boolean;excludedAttachmentHistoryDiscarded?:boolean})|undefined;
+    const read=step.result as (PdfReadWindow&{worksheetScope?:string;worksheetRowScope?:readonly PdfPageRange[];sheets?:string[];observedSheets?:string[];attachmentScopeRereadRequired?:boolean;pdfScopeRereadRequired?:boolean;excludedAttachmentHistoryDiscarded?:boolean})|undefined;
     if(read?.excludedAttachmentHistoryDiscarded===true)return false;
     if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'
       &&(read?.pdfScopeRereadRequired===true||read?.attachmentScopeRereadRequired===true))return false;
@@ -334,8 +363,9 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:Rea
     const pdfScope=typeof fileId==='string'?pdfRanges.get(fileId):undefined;
     if(typeof fileId!=='string'||!workbookInScope&&!pdfScope)return true;
     if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
-    if(workbookInScope&&worksheetScope)return fileId===worksheetScope.fileId&&read?.kind==='xlsx'&&read.file?.id===fileId
+    if(workbookInScope&&worksheetScope)return !worksheetScope.rowScopeConflict&&fileId===worksheetScope.fileId&&read?.kind==='xlsx'&&read.file?.id===fileId
       &&read.worksheetScope===worksheetScope.worksheet
+      &&(!worksheetScope.rows||JSON.stringify(read.worksheetRowScope)===JSON.stringify(worksheetScope.rows))
       &&Array.isArray(read.sheets)&&read.sheets.length===1&&read.sheets[0]===worksheetScope.worksheet
       &&Array.isArray(read.observedSheets)&&read.observedSheets.every(name=>name===worksheetScope.worksheet);
     if(!pdfScope)return false;

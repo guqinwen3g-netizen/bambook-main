@@ -29,7 +29,7 @@ function position(value:unknown,scope:Scope,sourceFor:(version:CursorVersion)=>s
  if((p.page-(active?.from??1))%20!==0)throw new RangeError('附件续读位置无效');
  return p;
 }
-export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:string},bytes:Uint8Array,maxChars?:number,cursor?:unknown,fileCache?:FileTextWindowCache,pdfPages?:PdfPageScope,worksheet?:string){
+export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:string},bytes:Uint8Array,maxChars?:number,cursor?:unknown,fileCache?:FileTextWindowCache,pdfPages?:PdfPageScope,worksheet?:string,worksheetRows?:readonly PdfPageRange[]){
  // Bump the protocol tag and cursor version if extraction/normalization semantics change.
  const limit=fileTextLimit(maxChars),sha256=hash(bytes);
  const disjoint=pdfPages?.windows;
@@ -37,13 +37,13 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const scopeBinding=!pdfPages?[]:disjoint?['requested-pdf-windows',disjoint]
   :pdfPages.from===1?['requested-pdf-prefix',pdfPages.to]:['requested-pdf-range',pdfPages.from,pdfPages.to];
  const sourceFor=(version:CursorVersion)=>hash(JSON.stringify(['file-text-v'+version,sha256,file.name,file.mimeType,
-  ...scopeBinding,...(worksheet===undefined?[]:['requested-workbook-worksheet',worksheet])]));
+  ...scopeBinding,...(worksheet===undefined?[]:['requested-workbook-worksheet',worksheet]),...(worksheetRows?['requested-workbook-rows',worksheetRows]:[])]));
  let p=position(cursor,scope,sourceFor,windows);
  const activeWindow=windows?.find(window=>p.page>=window.from&&p.page<=window.to);
  const cacheKey=JSON.stringify([scope.workspaceId,scope.fileId]);
  const cached=fileCache?.get(cacheKey);
  const raw=p.offset>0&&cached?.sourceHash===p.source&&cached.page===p.page
-   ? cached.result : await extractFileText(file,bytes,TEXT_WINDOW_MAX+1,p.page,activeWindow?.to,worksheet);
+   ? cached.result : await extractFileText(file,bytes,TEXT_WINDOW_MAX+1,p.page,activeWindow?.to,worksheet,worksheetRows);
  if(raw.kind==='xlsx'&&raw.attributedValues&&p.v===1){
    if(cursor!==undefined)throw new MistApiError('FILE_TEXT_CURSOR_UPDATED','Excel 正文读取方式已更新，请从首段重新读取',409);
    p={...p,v:2,source:sourceFor(2)};
@@ -89,7 +89,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const fromStart=p.page===1&&p.offset===0,hasMore=!!next;
  const worksheetScope=raw.kind==='xlsx'?worksheet:undefined;
  const wholeResponse=readable&&fromStart&&!hasMore&&!extractionLimited&&!raw.reason;
- const worksheetComplete=worksheetScope!==undefined&&wholeResponse;
+ const worksheetComplete=worksheetScope!==undefined&&!worksheetRows&&wholeResponse;
  const complete=wholeResponse&&!disjoint&&pageScopeLimit===undefined&&worksheetScope===undefined;
  return {kind:raw.kind,text,truncated:readable&&!complete&&!worksheetComplete,complete,hasMore,
   ...(next?{nextCursor:'aft'+next.v+'.'+Buffer.from(JSON.stringify(next)).toString('base64url')}:{}),
@@ -102,13 +102,14 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   ...(pageScopeStart!==undefined?{pageScopeStart}:{}),
   ...(pageScopeLimit!==undefined?{pageScopeLimit}:{}),
   ...(worksheetScope!==undefined?{worksheetScope,worksheetComplete}:{}),
+  ...(worksheetRows?{worksheetRowScope:worksheetRows}:{}),
   ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:[...raw.sheets]}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:[...raw.pagesWithoutText]}:{}),
   ...(observedSheetRows?.length?{observedSheetRows}:{}),
   ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
   ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
-  ...(pdf&&disjoint?{readHint:hasMore?'用同一 fileId 和 nextCursor 继续指定页段，跳过未指定的页。':'只核对指定页段，其他页未核实。'}:hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:singlePageScope!==undefined?{readHint:`本任务只读取第 ${singlePageScope} 页，其他页未核实。`}:pageScopeStart!==undefined?{readHint:`本任务只读取第 ${pageScopeStart} 至 ${pageScopeLimit??raw.pages} 页，范围外未核实。`}:pageScopeLimit!==undefined?{readHint:`本任务只读取前 ${pageScopeLimit} 页，之后的页未核实。`}:worksheetScope!==undefined?{readHint:worksheetComplete
+  ...(pdf&&disjoint?{readHint:hasMore?'用同一 fileId 和 nextCursor 继续指定页段，跳过未指定的页。':'只核对指定页段，其他页未核实。'}:hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:singlePageScope!==undefined?{readHint:`本任务只读取第 ${singlePageScope} 页，其他页未核实。`}:pageScopeStart!==undefined?{readHint:`本任务只读取第 ${pageScopeStart} 至 ${pageScopeLimit??raw.pages} 页，范围外未核实。`}:pageScopeLimit!==undefined?{readHint:`本任务只读取前 ${pageScopeLimit} 页，之后的页未核实。`}:worksheetRows?{readHint:'只核对指定工作表的原表行，其他行未读取。'}:worksheetScope!==undefined?{readHint:worksheetComplete
    ?'本次已返回所选工作表的全部可提取正文，其他工作表未核实。'
    :'本任务只读取指定工作表，其他工作表未核实。'}:!fromStart?{readHint:'本段已到可提取范围末尾，但仅是片段；须与此前相同 sourceHash 的连续范围一起核对，不代表此前部分已读取。'}:{})};
 }

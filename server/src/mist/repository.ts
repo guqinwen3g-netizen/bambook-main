@@ -2305,11 +2305,11 @@ export class MistRepository {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
     const {pdfRanges,worksheet:sheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(files,instructions,questions);
-    if(pdfChoice||pdfScopeConflict||pdfVisualChoice||excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
+    if(pdfChoice||pdfScopeConflict||pdfVisualChoice||sheet?.rowScopeConflict||excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
     if(sheet?.workbookIds.includes(fileId)&&sheet.fileId!==fileId)
       fail('FILE_TEXT_WORKBOOK_SCOPE','该工作簿未被选中，本任务不读取它的正文',422);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);
-    const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,fileCache,pdfRanges.get(fileId),sheet?.fileId===fileId?sheet.worksheet:undefined);
+    const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,fileCache,pdfRanges.get(fileId),sheet?.fileId===fileId?sheet.worksheet:undefined,sheet?.fileId===fileId?sheet.rows:undefined);
     // Parsing is asynchronous. Recheck live file access before releasing the result.
     const current=taskFile?{file,bytes:await this.files.read(workspaceId,file)}:await this.download(prior,workspaceId,fileId);
     if(taskFile&&!(await this.privateTaskAttachments(prior,workspaceId)).files.some(item=>item.id===fileId))fail('FILE_NOT_FOUND','附件不在当前任务内',404);

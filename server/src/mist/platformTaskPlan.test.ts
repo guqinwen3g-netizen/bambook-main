@@ -52,6 +52,14 @@ it('narrows a multi-file visual choice without altering a separately requested t
  expect([...selected.excludedPdfIds!]).toEqual(['alpha']);
 });
 
+it('binds shorthand worksheet rows and rejects invalid row ranges rather than widening them',()=>{
+ const files=[{id:'quote',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:1}];
+ const scope=(suffix:string)=>requestedTaskAttachmentScope(files,'请只读取 quote.xlsx 的工作表「报价」'+suffix+'。').worksheet;
+ expect(scope('第 23、47 行')).toMatchObject({fileId:'quote',rows:[{from:23,to:23},{from:47,to:47}],rowScopeConflict:false});
+ expect(scope('第 47 至 23 行')?.rowScopeConflict).toBe(true);
+ expect(scope('第 0 行')?.rowScopeConflict).toBe(true);
+});
+
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
   expect(parsePlatformTaskPlan('{"name":"bambook_query","arguments":{"type":"email"}}')).toEqual({name:'bambook_query',arguments:{type:'email'}});
   expect(()=>parsePlatformTaskPlan('{"name":"bambook_workspaces","arguments":{}}')).toThrow();

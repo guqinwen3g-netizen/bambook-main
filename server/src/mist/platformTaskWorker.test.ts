@@ -1983,6 +1983,47 @@ it('explicitly reopens a prior attachment in the same conversation without creat
   expect(writes).toHaveBeenCalledTimes(1);
 });
 
+it.each([false,true])('only sends explicitly requested original worksheet rows to the model (with history: %s)',async history=>{
+ let rounds=0;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',
+  result:history&&++rounds===1?'旧报告含 ROW-36-OUTSIDE。':'已核对第 23、47 行。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet([]);
+ XLSX.utils.sheet_add_aoa(sheet,[['ROW-23-KEEP']],{origin:'B23'});
+ XLSX.utils.sheet_add_aoa(sheet,[['ROW-36-OUTSIDE']],{origin:'B36'});
+ XLSX.utils.sheet_add_aoa(sheet,[['ROW-47-KEEP']],{origin:'B47'});
+ XLSX.utils.book_append_sheet(book,sheet,'报价');
+ const bytes=XLSX.write(book,{type:'buffer',bookType:'xlsx'}),conversationId='c_worksheet_rows';
+ const endpoint=f.base+'/personal-agent/tasks';
+ const request={requestId:randomUUID(),name:'按行核对',conversationId,
+  instructions:'请只读取报价.xlsx 的工作表「报价」第 23 行和第 47 行。'};
+ let task;
+ if(history){
+  const prior=(await f.human.post(endpoint).field('task',JSON.stringify({
+   requestId:randomUUID(),name:'旧核对',conversationId,instructions:'查看报价.xlsx。'
+  })).attach('attachments',bytes,'报价.xlsx').expect(201)).body.item;
+  await f.drain();
+  expect((await f.current(prior.id)).result).toContain('ROW-36-OUTSIDE');
+  task=(await f.human.post(endpoint).send({...request,historyTaskIds:[prior.id],
+   attachmentRefs:[{taskId:prior.id,fileId:prior.attachments[0].id}],
+  }).expect(201)).body.item;
+ }else{
+  task=(await f.human.post(endpoint).field('task',JSON.stringify(request))
+   .attach('attachments',bytes,'报价.xlsx').expect(201)).body.item;
+ }
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ const text=complete.mock.calls.at(-1)![0].messages[0].content;
+ expect(text).toContain('第 23 行：');
+ expect(text).toContain('ROW-23-KEEP');
+ expect(text).toContain('ROW-47-KEEP');
+ expect(text).not.toContain('ROW-36-OUTSIDE');
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ const receipt=facts.history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
+ expect(receipt.worksheetRowScope).toEqual([{from:23,to:23},{from:47,to:47}]);
+ expect(receipt.worksheetComplete).toBe(false);
+});
+
 it('gives the model original worksheet row numbers instead of positions in the excerpt',async()=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'报价第 23、47 行。'}));
  const f=await fixture(complete);f.worker.start(3_600_000);

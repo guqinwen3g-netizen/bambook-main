@@ -203,6 +203,12 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
+        if(worksheetScope?.rowScopeConflict){
+          await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
+            requestId:'platform-worksheet-row-conflict-'+job.taskId,outcome:'failed',result:'工作表行号范围无效。请注明确切行号或行段后重新提交。',
+          });
+          return;
+        }
         const question=pdfChoice?.question??pdfVisualChoice??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:undefined);
         if(question){
           const attempts=pdfChoice?(context.task.questions?.length??0):(context.task.questions?.filter(q=>q.question===question).length??0);
@@ -315,7 +321,7 @@ export class MistPlatformTaskWorker{
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
-              if(allowedFiles||excludedPdfIds||pdfRanges.size)modelTask.instructions=splitTaskRequest(modelTask.instructions);
+              if(allowedFiles||excludedPdfIds||pdfRanges.size||worksheetScope?.rows)modelTask.instructions=splitTaskRequest(modelTask.instructions);
               const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'
