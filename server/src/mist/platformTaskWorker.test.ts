@@ -8,7 +8,7 @@ import{tmpdir}from'node:os';import path from'node:path';import{randomUUID}from'n
 import{createMistLocalRuntime}from'./local';import{createMistServer}from'./server';
 import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
-import {platformTaskClock}from'./platformTaskWorker';
+import {namedDraftOrderLine,platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
 import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
@@ -990,6 +990,21 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
+it('uses a complete order index only for one explicitly named unique style',()=>{
+ const row={type:'order_line',id:'line-a',style:'SIM-A'};
+ const other={type:'order_line',id:'line-b',style:'SIM-AB'};
+ const object={id:'order-a',total:2,truncated:false,related:[row,other]};
+ const source={object};
+ expect(namedDraftOrderLine('请移除款号「SIM-A」的条目。','order-a',2,source)).toBe('line-a');
+ expect(namedDraftOrderLine('Change style SIM-AB for the order draft.','order-a',2,source)).toBe('line-b');
+ expect(namedDraftOrderLine('请移除款号 SIM 的条目。','order-a',2,source)).toBeUndefined();
+ expect(namedDraftOrderLine('请修改款号 SIM-AB 并保留款号 SIM-A。','order-a',2,source)).toBeUndefined();
+ expect(namedDraftOrderLine('请移除款号 SIM-A。','order-a',3,source)).toBeUndefined();
+ expect(namedDraftOrderLine('请移除款号 SIM-A。','order-b',2,source)).toBeUndefined();
+ expect(namedDraftOrderLine('请移除款号 SIM-A。','order-a',2,{object:{...object,truncated:true}})).toBeUndefined();
+ expect(namedDraftOrderLine('请移除款号 SIM-A。','order-a',2,{object:{...object,related:[row,{...other,style:'sim-a'}]}})).toBeUndefined();
+});
+
 it('reads back a confirmed draft removal even after reading the removed line',async()=>{
  let orderId:string,removedId:string,kept:Record<string,unknown>,contract:Record<string,unknown>;
  let calls=0;
@@ -1001,11 +1016,12 @@ it('reads back a confirmed draft removal even after reading the removed line',as
    const index=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.orderLineIndex?.operationId);
    expect(index).toMatchObject({name:'bambook_related',arguments:{type:'order',id:orderId,relatedType:'order_line'},
     result:{object:{id:orderId,truncated:false,related:expect.arrayContaining([{id:removedId,style:'SIM-REMOVE',type:'order_line',label:expect.any(String),link:expect.any(String),relation:'referenced_by'}])}}});
-   return tool('bambook_get',{type:'order_line',id:removedId});
-  }
-  if(calls===2)return JSON.stringify({name:'bambook_execute',requestId:'untrusted-envelope-id',arguments:{
+   const line=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.namedOrderLineRead?.operationId);
+   expect(line).toMatchObject({name:'bambook_get',result:{object:{id:removedId,truncated:false,data:{orderId,qty:24,price:14}}}});
+   return JSON.stringify({name:'bambook_execute',requestId:'untrusted-envelope-id',arguments:{
    requestId:'untrusted-argument-id',command:{type:'order.governance.saveDraft',payload:{orderId,input:contract,lines:[kept]}},
   }});
+  }
   const prompt=input.messages[0].content;
   const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
   const read=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.proposalReadBack?.operationId);
@@ -1044,7 +1060,7 @@ it('reads back a confirmed draft removal even after reading the removed line',as
  expect.soft(confirmation.body.workspace.state.orderLines.filter((item:{orderId:string})=>item.orderId===orderId)).toEqual([retained]);
  await f.drain();
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已移除 SIM-REMOVE，保留 SIM-KEEP。'});
- expect(complete).toHaveBeenCalledTimes(3);
+ expect(complete).toHaveBeenCalledTimes(2);
  await f.command('order.governance.saveDraft',{orderId,input:contract,lines:[{...kept,img:'clay'}]});
  const {body:{workspace}}=await f.human.get(f.base).expect(200);
  expect(workspace.state.orderLines.find((item:{id:string})=>item.id===retained.id).img).toBe('clay');

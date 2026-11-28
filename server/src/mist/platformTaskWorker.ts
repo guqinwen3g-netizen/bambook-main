@@ -31,15 +31,28 @@ function readSelectedOrderDraft(context:PlatformTaskContext){
     ||!/修改|变更|调整|移除|删除|新增|添加|更新|保存|\b(?:change|update|modify|edit|revise|remove|add|save)\b/i.test(request))return undefined;
   const step=[...context.steps].reverse().find(item=>item.plan.name==='bambook_get'
     &&item.plan.arguments.type==='order'&&item.plan.arguments.id===selected.id&&item.result!==undefined);
-  const read=step?.result as {error?:boolean;object?:{type?:string;id?:string;truncated?:boolean;data?:{governance?:{status?:string}}}}|undefined;
+  const read=step?.result as {error?:boolean;object?:{type?:string;id?:string;truncated?:boolean;data?:{lines?:number;governance?:{status?:string}}}}|undefined;
   if(!step||step.compacted||read?.error||read?.object?.type!=='order'||read.object.id!==selected.id
     ||read.object.truncated!==false||read.object.data?.governance?.status!=='draft')return undefined;
-  return {id:selected.id,operationId:step.id,needsLines:/条目|订单行|款号|分色分码|数量|单价|\b(?:lines?|items?|quantity|price|style)\b/i.test(request)};
+  return {id:selected.id,operationId:step.id,request,lineCount:read.object.data.lines,needsLines:/条目|订单行|款号|分色分码|数量|单价|\b(?:lines?|items?|quantity|price|style)\b/i.test(request)};
 }
 
 function isOrderLineIndex(name:string,args:unknown,orderId:string){
   const target=args as {type?:string;id?:string;relatedType?:string}|undefined;
   return name==='bambook_related'&&target?.type==='order'&&target.id===orderId&&target.relatedType==='order_line';
+}
+
+export function namedDraftOrderLine(request:string,orderId:string,lineCount:number|undefined,result:unknown){
+  const index=result as {error?:boolean;object?:{id?:string;total?:number;truncated?:boolean;related?:Array<{type?:string;id?:string;style?:string}>}}|undefined;
+  const order=index?.object,lines=order?.related;
+  if(index?.error||order?.id!==orderId||order.truncated!==false||lineCount!==order.total
+    ||!Array.isArray(lines)||lines.length!==lineCount
+    ||lines.some(line=>line?.type!=='order_line'||typeof line.id!=='string'||typeof line.style!=='string'))return undefined;
+  const named=new Set([...request.matchAll(/(?:款号|品号|货号|\bstyle(?:\s+(?:no\.?|code))?)(?:\s*[为是])?[\s:：「“"'‘]*([a-z0-9][a-z0-9_./-]{0,78}[a-z0-9])(?=$|[\s，。,.；;、）)」”"'’])/gi)]
+    .map(match=>match[1].toUpperCase()));
+  if(named.size!==1)return undefined;
+  const matches=lines.filter(line=>named.has(line.style!.toUpperCase()));
+  return matches.length===1?matches[0].id:undefined;
 }
 
 const ORDER_BATCH_RULES='只读核对多个订单且已有查询返回的准确编号时，优先用 bambook_get_orders 一次读取 2 至 6 张订单，再汇总实际状态和交期。需要超过 6 张时按已确定的范围分批。批量读取只供报告。写入预演或任务明确要求重新核对原件时，仍用 bambook_get 逐条回源。';
@@ -246,7 +259,14 @@ export class MistPlatformTaskWorker{
           const lineIndexPlan:PlatformTaskPlan|undefined=selectedDraft?.needsLines
             &&!context.steps.some(item=>isOrderLineIndex(item.plan.name,item.plan.arguments,selectedDraft.id))
             ? {name:'bambook_related',arguments:{type:'order',id:selectedDraft.id,relatedType:'order_line'}} : undefined;
-          const prefetch=intentRead.plan??lineIndexPlan;
+          const indexStep=selectedDraft?.needsLines&&[...context.steps].reverse().find(item=>!item.compacted
+            &&isOrderLineIndex(item.plan.name,item.plan.arguments,selectedDraft.id));
+          const namedLineId=selectedDraft&&indexStep?namedDraftOrderLine(selectedDraft.request,selectedDraft.id,selectedDraft.lineCount,indexStep.result):undefined;
+          const namedLineStep=namedLineId&&[...context.steps].reverse().find(item=>item.plan.name==='bambook_get'
+            &&item.plan.arguments.type==='order_line'&&item.plan.arguments.id===namedLineId);
+          const namedLinePlan:PlatformTaskPlan|undefined=namedLineId&&!namedLineStep
+            ? {name:'bambook_get',arguments:{type:'order_line',id:namedLineId}}:undefined;
+          const prefetch=intentRead.plan??lineIndexPlan??namedLinePlan;
           if(prefetch){step=await this.repository.savePlatformTaskPlan(actor,prefetch);}
           else{
             const attachment=readableAttachments?.find(file=>!isTaskImage(file.name)&&(pendingScopedReads.has(file.id)
@@ -316,7 +336,14 @@ export class MistPlatformTaskWorker{
               const lineIndexRule=orderLineIndex
                 ? '\norderLineIndex 指向原订单已取得的条目索引。先用索引核对款号与条目 ID，再用 bambook_get 读取实际要处理的订单行。索引有截断或缺少目标时，在同一订单范围内继续核对；索引不提供数量、单价或其他完整事实。'
                 : '';
-              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),history,...(imageSources?.length?{imageSources}:{})};
+              const lineResult=(namedLineStep||undefined)?.result as {error?:boolean;object?:{id?:string;type?:string;truncated?:boolean;data?:{orderId?:string}}}|undefined;
+              const namedOrderLineRead=selectedDraft&&namedLineStep&&!namedLineStep.compacted&&!lineResult?.error
+                &&lineResult?.object?.id===namedLineId&&lineResult?.object?.type==='order_line'&&lineResult.object.truncated===false
+                &&lineResult.object.data?.orderId===selectedDraft.id&&history.recent.some(item=>item.operationId===namedLineStep.id)
+                ? {operationId:namedLineStep.id,orderId:selectedDraft.id,lineId:namedLineId}:undefined;
+              const namedLineRule=namedOrderLineRead
+                ? '\nnamedOrderLineRead 指向本人明确指定款号对应的订单行完整回执。当前记录可直接用于核对，按需读取其他仍未取得的条目。发现变更或冲突时再按工具提示回源。' : '';
+              const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,...(proposalReadBack?{proposalReadBack}:{}),...(draftCommand?{orderDraftCommand:draftCommand}:{}),...(orderLineIndex?{orderLineIndex}:{}),...(namedOrderLineRead?{namedOrderLineRead}:{}),history,...(imageSources?.length?{imageSources}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead
                 ? '\n当前答复无待复核的业务来源。问题已由本人补充且只需回答时，直接用 finish。若要办理业务，必须先读取当前相关记录；补充资料不代表批准操作。'
                 : '';
@@ -337,7 +364,7 @@ export class MistPlatformTaskWorker{
                 catch (error) { abort.abort(); throw error; }
               };
               if(context.hasTaskHistory)await checkModelAuthority(false);
-              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+decisionRule+customerCommandRule+lineIndexRule+(draftCommand?'\n'+ORDER_DRAFT_RULE:'')+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+decisionRule+customerCommandRule+lineIndexRule+namedLineRule+(draftCommand?'\n'+ORDER_DRAFT_RULE:'')+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
               if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
             }
           }
