@@ -66,12 +66,16 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 export type FilePreviewProps = {
   files: PreviewFile[]; index: number; onIndex: (index: number) => void; onClose: () => void;
   load: (file: PreviewFile) => Promise<Blob>; onDownload?: (file: PreviewFile) => Promise<void> | void;
+  /** Labels in file order, used only for the preview title. */
+  displayNames?: readonly string[];
   /** One-based PDF page for this opening. Omit when switching to a different attachment. */
   initialPdfPage?: number;
+  /** Exact visible workbook sheet name for this opening. Omit when switching attachments. */
+  initialSheetName?: string;
 };
 
 /** 附件预览浮层：大尺寸查看，支持多附件左右切换、图片/PDF 缩放、下载。 */
-export function FilePreview({ files, index, onIndex, onClose, load, onDownload, initialPdfPage }: FilePreviewProps) {
+export function FilePreview({ files, index, onIndex, onClose, load, onDownload, displayNames, initialPdfPage, initialSheetName }: FilePreviewProps) {
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   const file = files[index];
@@ -80,11 +84,17 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   const cache = React.useRef(new Map<string, Promise<Blob>>());
   const [blob, setBlob] = React.useState<Blob | null>(null), [error, setError] = React.useState(''), [downloadError, setDownloadError] = React.useState('');
   const [readAttempt, retryRead] = React.useReducer((attempt: number) => attempt + 1, 0);
-  const [zoom, setZoom] = React.useState<Zoom>('fit'), [rotate, setRotate] = React.useState(0), [fitScale, setFitScale] = React.useState(1), [pages, setPages] = React.useState(0);
+  const [zoom, setZoom] = React.useState<Zoom>('fit'), [rotate, setRotate] = React.useState(0), [fitScale, setFitScale] = React.useState(1);
+  const [pdfPosition, setPdfPosition] = React.useState<{fileId:string;page:number;total:number}>();
+  const fileId = file?.id;
+  const reportPdfPosition = React.useCallback((page:number, total:number) => {
+    if (fileId) setPdfPosition(previous => previous?.fileId === fileId && previous.page === page && previous.total === total
+      ? previous : { fileId, page, total });
+  }, [fileId]);
   const info = file ? previewKind(file) : { kind: 'unsupported' as PreviewKind };
   React.useEffect(() => {
     if (!file) return; let live = true;
-    setBlob(null); setError(''); setDownloadError(''); setZoom('fit'); setRotate(0); setFitScale(1); setPages(0);
+    setBlob(null); setError(''); setDownloadError(''); setZoom('fit'); setRotate(0); setFitScale(1); setPdfPosition(undefined);
     if (info.kind === 'unsupported') return;
     let p = cache.current.get(file.id); if (!p) { p = load(file); cache.current.set(file.id, p); p.catch(() => cache.current.delete(file.id)); }
     p.then(b => { if (live) setBlob(b); }, e => { if (live) setError(e instanceof Error ? e.message : '附件读取失败'); });
@@ -108,13 +118,23 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   if (!file) return null;
   const download = async () => { if (!onDownload) return; setDownloadError(''); try { await onDownload(file); } catch (e) { setDownloadError(e instanceof Error ? e.message : '下载失败'); } };
   const retry = () => { ref.current?.focus(); retryRead(); };
-  const sub = [KIND_LABEL[info.kind], formatFileSize(file.size), info.kind === 'pdf' && pages ? `共 ${pages} 页` : ''].filter(Boolean).join(' · ');
+  const currentPdf = info.kind === 'pdf' && pdfPosition?.fileId === file.id ? pdfPosition : undefined;
+  const pageLabel = currentPdf ? ui`第 ${currentPdf.page} 页，共 ${currentPdf.total} 页` : '';
+  const sub = [uiText(KIND_LABEL[info.kind]), formatFileSize(file.size), pageLabel].filter(Boolean).join(' · ');
+  const displayName = displayNames?.[index] ?? file.name;
+  const nameSuffix = displayName.startsWith(file.name) ? displayName.slice(file.name.length) : '';
   const currentScale = zoom === 'fit' ? fitScale : zoom;
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <div ref={ref} tabIndex={-1} className="mist-dialog mist-viewer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-file-preview={file.id} data-preview-kind={info.kind}>
       <div className="mist-viewer-h">
         <Tile icon={KIND_ICON[info.kind]} size="sm" />
-        <div className="mist-viewer-title"><div id={`${id}-title`} className="mist-h2" title={uiText(file.name)}>{file.name}</div><span className="mist-muted">{uiText(sub)}</span></div>
+        <div className="mist-viewer-title">
+          <div id={`${id}-title`} className="mist-h2" role="heading" aria-level={2} aria-label={displayName}
+            title={displayName} data-has-suffix={nameSuffix ? true : undefined}>
+            {nameSuffix ? <><span className="mist-viewer-filename">{file.name}</span><span>{nameSuffix}</span></> : displayName}
+          </div>
+          <span className="mist-muted">{sub}</span>
+        </div>
         <div className="mist-viewer-tools">
           {zoomable && blob && <div className="mist-viewer-group" role="group" aria-label={uiText("缩放")}>
             <IconButton icon={Minus} label={uiText("缩小")} size="sm" onClick={() => setZoom(z => stepZoom(z, -1, fitScale))} />
@@ -139,7 +159,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
             {onDownload && <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button>}
           </div>} /></div>
           : !blob ? <Loading />
-          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} initialPdfPage={initialPdfPage} />}
+          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPdfPosition={reportPdfPosition} onFail={setError} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} />}
       </div>
     </div></Portal>;
 }
@@ -149,7 +169,7 @@ function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () 
   return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
-type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void; initialPdfPage?: number };
+type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPdfPosition: (page: number, total: number) => void; onFail: (msg: string) => void; initialPdfPage?: number; initialSheetName?: string };
 function Renderer(p: RendererProps) {
   switch (p.kind) {
     case 'image': return <ImageView {...p} />;
@@ -195,13 +215,29 @@ async function loadPdfjs() {
   if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = worker.default + (worker.default.includes('?') ? '&' : '?') + 'module=1';
   return pdfjs;
 }
-function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: RendererProps) {
+// Page containers are in document order, so scrolling only needs to sample a few offsets.
+function pageAtScrollPosition(pane: HTMLDivElement): number {
+  const { children, scrollTop, scrollHeight, clientHeight } = pane;
+  const max = scrollHeight - clientHeight;
+  if (max > 1 && scrollTop >= max - 1) return children.length;
+  let first = 0, last = children.length - 1;
+  while (first < last) {
+    const middle = Math.ceil((first + last) / 2);
+    const page = children.item(middle) as HTMLElement;
+    if (page.offsetTop <= scrollTop + 1) first = middle;
+    else last = middle - 1;
+  }
+  return first + 1;
+}
+
+function PdfView({ blob, zoom, onFitScale, onPdfPosition, onFail, initialPdfPage }: RendererProps) {
   const box = React.useRef<HTMLDivElement>(null);
   const openingPage = React.useRef(initialPdfPage).current;
   const initialZoom = React.useRef(zoom).current;
   const hasOpeningPage = openingPage !== undefined && Number.isSafeInteger(openingPage) && openingPage > 1;
   const keepOpeningPosition = React.useRef(hasOpeningPage);
   const positionFrame = React.useRef<number | null>(null);
+  const pageFrame = React.useRef<number | null>(null);
   const lastAlignment = React.useRef<{ top: number; max: number } | null>(null);
   const releaseOpeningPosition = React.useCallback(() => {
     keepOpeningPosition.current = false;
@@ -217,7 +253,8 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
         const d = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false }).promise as unknown as PdfDoc; loaded = d;
         if (!live) { void d.destroy(); return; }
         const first = await d.getPage(1), vp = first.getViewport({ scale: 1 });
-        if (!live) return; setBase({ w: vp.width, h: vp.height }); setDoc(d); onPages(d.numPages);
+        if (!live) return; setBase({ w: vp.width, h: vp.height }); setDoc(d);
+        if (!hasOpeningPage) onPdfPosition(1, d.numPages);
       } catch (e) { if (live) { const name=(e as { name?: string })?.name; onFail(name === 'PasswordException' ? '该 PDF 设有打开密码，请下载后输入密码查看' : name === 'InvalidPDFException' ? 'PDF 无法解析，文件可能已损坏' : '预览加载失败，请刷新后重试'); } }
     })();
     return () => { live = false; if (loaded) void loaded.destroy(); };
@@ -238,23 +275,37 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
     if (page <= 1 || !(target instanceof HTMLElement)) return;
     scroll.scrollTop = target.offsetTop;
     lastAlignment.current = { top: scroll.scrollTop, max: scroll.scrollHeight - scroll.clientHeight };
-  }, [doc, openingPage, width]);
+    onPdfPosition(page, doc.numPages);
+  }, [doc, openingPage, width, onPdfPosition]);
+  const updateVisiblePage = React.useCallback(() => {
+    if (!doc || keepOpeningPosition.current || pageFrame.current !== null) return;
+    pageFrame.current = window.requestAnimationFrame(() => {
+      pageFrame.current = null;
+      const pane = box.current;
+      if (pane?.children.length) onPdfPosition(pageAtScrollPosition(pane), doc.numPages);
+    });
+  }, [doc, onPdfPosition]);
+  React.useEffect(() => () => {
+    if (pageFrame.current !== null) window.cancelAnimationFrame(pageFrame.current);
+  }, []);
   const onPageLayout = React.useCallback(() => {
     // Mixed page dimensions replace estimates as nearby pages render. Batch realignment without loading more canvases.
-    if (!keepOpeningPosition.current || positionFrame.current !== null) return;
+    if (!keepOpeningPosition.current) { updateVisiblePage(); return; }
+    if (positionFrame.current !== null) return;
     positionFrame.current = window.requestAnimationFrame(() => {
       positionFrame.current = null;
       alignOpeningPage();
     });
-  }, [alignOpeningPage]);
+  }, [alignOpeningPage, updateVisiblePage]);
   React.useLayoutEffect(() => {
     if (zoom !== initialZoom) releaseOpeningPosition();
     else alignOpeningPage();
+    updateVisiblePage();
     return () => {
       if (positionFrame.current !== null) window.cancelAnimationFrame(positionFrame.current);
       positionFrame.current = null;
     };
-  }, [alignOpeningPage, initialZoom, releaseOpeningPosition, zoom]);
+  }, [alignOpeningPage, initialZoom, releaseOpeningPosition, updateVisiblePage, zoom]);
   React.useEffect(() => {
     const dialog = box.current?.closest('[role="dialog"]');
     if (!hasOpeningPage || !dialog) return;
@@ -265,15 +316,16 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
     dialog.addEventListener('keydown', handleKey);
     return () => dialog.removeEventListener('keydown', handleKey);
   }, [hasOpeningPage, releaseOpeningPosition]);
-  const releaseAfterScroll = ({ currentTarget: pane }: React.UIEvent<HTMLDivElement>) => {
-    if (!keepOpeningPosition.current || !lastAlignment.current) return;
+  const trackScroll = ({ currentTarget: pane }: React.UIEvent<HTMLDivElement>) => {
+    const alignment = lastAlignment.current;
     // A stable scroll range with a new position also covers native scrollbar navigation.
-    const { top, max } = lastAlignment.current;
-    if (pane.scrollHeight - pane.clientHeight === max && Math.abs(pane.scrollTop - top) > 1) releaseOpeningPosition();
+    if (keepOpeningPosition.current && alignment && pane.scrollHeight - pane.clientHeight === alignment.max
+      && Math.abs(pane.scrollTop - alignment.top) > 1) releaseOpeningPosition();
+    updateVisiblePage();
   };
-  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages" style={hasOpeningPage ? { position: 'relative' } : undefined}
-    onWheel={releaseOpeningPosition} onPointerDown={releaseOpeningPosition} onTouchStart={releaseOpeningPosition} onScroll={releaseAfterScroll}>
-    {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} onLayout={hasOpeningPage ? onPageLayout : undefined} />) : <Loading />}
+  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages"
+    onWheel={releaseOpeningPosition} onPointerDown={releaseOpeningPosition} onTouchStart={releaseOpeningPosition} onScroll={trackScroll}>
+    {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} onLayout={onPageLayout} />) : <Loading />}
   </div>;
 }
 function PdfPage({ doc, n, scale, base, root, onLayout }: { doc: PdfDoc; n: number; scale: number; base: { w: number; h: number }; root: React.RefObject<HTMLDivElement | null>; onLayout?: () => void }) {
@@ -323,7 +375,7 @@ function DocxView({ blob, onFail }: RendererProps) {
 
 const MAX_ROWS = 1000, MAX_COLS = 60;
 const colName = (i: number) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
-function SheetView({ blob, name, onFail }: RendererProps) {
+function SheetView({ blob, name, onFail, initialSheetName }: RendererProps) {
   const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean> } | null>(null), [sheet, setSheet] = React.useState('');
   React.useEffect(() => {
     let live = true;
@@ -340,7 +392,12 @@ function SheetView({ blob, name, onFail }: RendererProps) {
           truncated[n] = used.length > MAX_ROWS || used.some(r => r.length > MAX_COLS);
           rows[n] = used.slice(0, MAX_ROWS).map(r => r.slice(0, MAX_COLS).map(v => String(v ?? '')));
         }
-        if (!live) return; setBook({ names: wb.SheetNames, rows, truncated }); setSheet(wb.SheetNames[0] || '');
+        if (!live) return;
+        const openingSheets = initialSheetName === undefined
+          ? wb.SheetNames
+          : wb.SheetNames.filter((_, index) => !wb.Workbook?.Sheets?.[index]?.Hidden);
+        setBook({ names: wb.SheetNames, rows, truncated });
+        setSheet(openingSheets.find(sheetName => sheetName === initialSheetName) ?? openingSheets[0] ?? '');
       } catch { if (live) onFail('表格无法解析，请下载后用 Excel 打开'); }
     })();
     return () => { live = false; };
