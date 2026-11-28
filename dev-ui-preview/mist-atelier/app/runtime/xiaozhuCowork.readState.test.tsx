@@ -799,7 +799,7 @@ it.each([true,false])('bounds retries for a transient attachment receipt (%s)',a
  saveTaskControls(store,new Map([['task',{action:'answer',questionId:'q1',version:2,requestId,fingerprint:'a'.repeat(64),hasAttachments:true}]]));
  const saved=readTaskControls(store),attachment={id:'file',name:'scan.pdf',mimeType:'application/pdf',size:3};
  const latest={...task,version:3,attachments:[attachment],questions:[{id:'q1',answer:'原件',answeredAt:task.updatedAt,attachmentIds:[attachment.id]}]};
- let calls=0;
+ let calls=0,manualAvailable=false;
  vi.useFakeTimers();
  function Page(){channel=useXiaozhuCowork('workspace','account:workspace',true,undefined,undefined,saved,store);return <div/>;}
  try{
@@ -807,7 +807,7 @@ it.each([true,false])('bounds retries for a transient attachment receipt (%s)',a
    if(url.endsWith('/agent-tasks'))return {items:[latest],nextCursor:null};
    if(url.includes('/answer/receipt/')){
     expect(url.endsWith(requestId)).toBe(true);
-    if(++calls<2||!restores)throw Object.assign(new Error('回执暂时不可用'),{status:503});
+    if(++calls<2||!restores&&!manualAvailable)throw Object.assign(new Error('回执暂时不可用'),{status:503});
     return {item:latest,attachmentIds:[attachment.id]};
    }
    return loaded(url);
@@ -823,7 +823,41 @@ it.each([true,false])('bounds retries for a transient attachment receipt (%s)',a
   expect(calls).toBe(restores?2:3);
   expect(!!channel.controls.task?.attachmentAnswerRecovered).toBe(restores);
   expect(readTaskControls(store).size).toBe(restores?0:1);
+  if(!restores){
+   expect(channel.controls.task?.attachmentReceiptPending).toBe(true);
+   manualAvailable=true;
+   await act(async()=>{channel.checkAttachmentReceipt(task.id);channel.checkAttachmentReceipt(task.id);});
+   expect(calls).toBe(4);
+   expect(channel.controls.task?.attachmentAnswerRecovered).toBe(true);
+   expect(readTaskControls(store).size).toBe(0);
+  }
   expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+ }finally{vi.useRealTimers();saveTaskControls(store,new Map());}
+});
+
+it('hides a previous receipt action once task access changes and clears its pending request',async()=>{
+ const store='old-receipt-action',requestId='00000000-0000-4000-8000-000000000074';
+ saveTaskControls(store,new Map([['task',{action:'answer',questionId:'q1',version:2,requestId,fingerprint:'a'.repeat(64),hasAttachments:true}]]));
+ const saved=readTaskControls(store);
+ const latest={...task,version:3,questions:[{id:'q1',answer:'原件',answeredAt:task.updatedAt}]};
+ let reads=0;
+ vi.useFakeTimers();
+ function Page(){channel=useXiaozhuCowork('workspace','account:workspace',true,undefined,undefined,saved,store);return <div/>;}
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.endsWith('/agent-tasks'))return {items:[latest],nextCursor:null};
+   if(url.includes('/answer/receipt/')){reads++;throw Object.assign(new Error('暂不可用'),{status:503});}
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<Page/>));
+  await act(async()=>vi.advanceTimersByTimeAsync(8000));
+  expect(channel.controls.task?.attachmentReceiptPending).toBe(true);
+  await act(async()=>channel.applyTaskUpdate({...latest,version:4,contentRestricted:true} as any));
+  expect(readTaskControls(store).size).toBe(0);
+  await act(async()=>channel.applyTaskUpdate({...latest,version:5} as any));
+  expect(channel.controls.task?.attachmentReceiptPending).toBeFalsy();
+  expect(reads).toBe(3);
  }finally{vi.useRealTimers();saveTaskControls(store,new Map());}
 });
 
