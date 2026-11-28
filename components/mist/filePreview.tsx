@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, Download, File as FileIcon, FileQuestion, FileSpreadsheet, FileText, FileVideo, Image as ImageIcon, Maximize, Minus, Music, Plus, RotateCw, X } from 'lucide-react';
 import { Banner, Button, EmptyState, IconButton, Skeleton, Tile } from './primitives';
 import { Portal, useModalFocus } from './overlays';
+import { TextInput } from './form';
 
 /* ═══════════════════════════════════════════════════════════════════
    附件在线预览：点击附件名称先预览，下载是旁边的独立动作。
@@ -66,25 +67,50 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 export type FilePreviewProps = {
   files: PreviewFile[]; index: number; onIndex: (index: number) => void; onClose: () => void;
   load: (file: PreviewFile) => Promise<Blob>; onDownload?: (file: PreviewFile) => Promise<void> | void;
+  /** Labels in file order, used only for the preview title. */
+  displayNames?: readonly string[];
   /** One-based PDF page for this opening. Omit when switching to a different attachment. */
   initialPdfPage?: number;
+  /** Exact visible workbook sheet name for this opening. Omit when switching attachments. */
+  initialSheetName?: string;
+  initialSheetRow?: number;
 };
 
 /** 附件预览浮层：大尺寸查看，支持多附件左右切换、图片/PDF 缩放、下载。 */
-export function FilePreview({ files, index, onIndex, onClose, load, onDownload, initialPdfPage }: FilePreviewProps) {
+export function FilePreview({ files, index, onIndex, onClose, load, onDownload, displayNames, initialPdfPage, initialSheetName, initialSheetRow }: FilePreviewProps) {
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   const file = files[index];
   const open = !!file;
-  useModalFocus(open, onClose, ref);
+  const jumpTrigger = React.useRef<HTMLButtonElement>(null);
+  const jumpField = React.useRef<HTMLInputElement>(null);
+  const [jumpEntry, setJumpEntry] = React.useState<string>();
+  const [jumpInvalid, setJumpInvalid] = React.useState(false);
+  const [pdfJump, setPdfJump] = React.useState<{fileId:string;page:number}>();
+  const jumpOpen = jumpEntry !== undefined;
+  const dismissJump = () => {
+    jumpTrigger.current?.focus();
+    setJumpEntry(undefined);
+    setJumpInvalid(false);
+  };
+  useModalFocus(open, () => { if (jumpOpen) dismissJump(); else onClose(); }, ref);
+  React.useLayoutEffect(() => {
+    if (jumpOpen) { jumpField.current?.focus(); jumpField.current?.select(); }
+  }, [jumpOpen]);
   const cache = React.useRef(new Map<string, Promise<Blob>>());
   const [blob, setBlob] = React.useState<Blob | null>(null), [error, setError] = React.useState(''), [downloadError, setDownloadError] = React.useState('');
   const [readAttempt, retryRead] = React.useReducer((attempt: number) => attempt + 1, 0);
-  const [zoom, setZoom] = React.useState<Zoom>('fit'), [rotate, setRotate] = React.useState(0), [fitScale, setFitScale] = React.useState(1), [pages, setPages] = React.useState(0);
+  const [zoom, setZoom] = React.useState<Zoom>('fit'), [rotate, setRotate] = React.useState(0), [fitScale, setFitScale] = React.useState(1);
+  const [pdfPosition, setPdfPosition] = React.useState<{fileId:string;page:number;total:number}>();
+  const fileId = file?.id;
+  const reportPdfPosition = React.useCallback((page:number, total:number) => {
+    if (fileId) setPdfPosition(previous => previous?.fileId === fileId && previous.page === page && previous.total === total
+      ? previous : { fileId, page, total });
+  }, [fileId]);
   const info = file ? previewKind(file) : { kind: 'unsupported' as PreviewKind };
   React.useEffect(() => {
     if (!file) return; let live = true;
-    setBlob(null); setError(''); setDownloadError(''); setZoom('fit'); setRotate(0); setFitScale(1); setPages(0);
+    setBlob(null); setError(''); setDownloadError(''); setZoom('fit'); setRotate(0); setFitScale(1); setPdfPosition(undefined); setJumpEntry(undefined); setJumpInvalid(false); setPdfJump(undefined);
     if (info.kind === 'unsupported') return;
     let p = cache.current.get(file.id); if (!p) { p = load(file); cache.current.set(file.id, p); p.catch(() => cache.current.delete(file.id)); }
     p.then(b => { if (live) setBlob(b); }, e => { if (live) setError(e instanceof Error ? e.message : '附件读取失败'); });
@@ -108,13 +134,41 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   if (!file) return null;
   const download = async () => { if (!onDownload) return; setDownloadError(''); try { await onDownload(file); } catch (e) { setDownloadError(e instanceof Error ? e.message : '下载失败'); } };
   const retry = () => { ref.current?.focus(); retryRead(); };
-  const sub = [KIND_LABEL[info.kind], formatFileSize(file.size), info.kind === 'pdf' && pages ? `共 ${pages} 页` : ''].filter(Boolean).join(' · ');
+  const currentPdf = info.kind === 'pdf' && pdfPosition?.fileId === file.id ? pdfPosition : undefined;
+  const pageLabel = currentPdf ? ui`第 ${currentPdf.page} 页，共 ${currentPdf.total} 页` : '';
+  const sub = [uiText(KIND_LABEL[info.kind]), formatFileSize(file.size)].filter(Boolean).join(' · ');
+  const canJump = currentPdf && currentPdf.total > 1 && !error;
+  const submitJump = (event:React.FormEvent) => {
+    event.preventDefault();
+    if (!currentPdf || jumpEntry === undefined) return;
+    const value = jumpEntry.trim();
+    const page = Number(value);
+    if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(page) || page < 1 || page > currentPdf.total) {
+      setJumpInvalid(true);
+      jumpField.current?.focus();
+      return;
+    }
+    setPdfJump({ fileId:file.id, page });
+    dismissJump();
+  };
+  const displayName = displayNames?.[index] ?? file.name;
+  const nameSuffix = displayName.startsWith(file.name) ? displayName.slice(file.name.length) : '';
   const currentScale = zoom === 'fit' ? fitScale : zoom;
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <div ref={ref} tabIndex={-1} className="mist-dialog mist-viewer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-file-preview={file.id} data-preview-kind={info.kind}>
       <div className="mist-viewer-h">
         <Tile icon={KIND_ICON[info.kind]} size="sm" />
-        <div className="mist-viewer-title"><div id={`${id}-title`} className="mist-h2" title={uiText(file.name)}>{file.name}</div><span className="mist-muted">{uiText(sub)}</span></div>
+        <div className="mist-viewer-title">
+          <div id={`${id}-title`} className="mist-h2" role="heading" aria-level={2} aria-label={displayName}
+            title={displayName} data-has-suffix={nameSuffix ? true : undefined}>
+            {nameSuffix ? <><span className="mist-viewer-filename">{file.name}</span><span>{nameSuffix}</span></> : displayName}
+          </div>
+          <span className="mist-muted">{sub}{pageLabel && <> · {canJump
+            ? <button ref={jumpTrigger} type="button" className="mist-viewer-page-jump" title={uiText('跳转页码')}
+                aria-expanded={jumpOpen} aria-controls={jumpOpen ? `${id}-page-jump` : undefined}
+                onClick={() => jumpOpen ? dismissJump() : setJumpEntry(String(currentPdf.page))}>{pageLabel}</button>
+            : pageLabel}</>}</span>
+        </div>
         <div className="mist-viewer-tools">
           {zoomable && blob && <div className="mist-viewer-group" role="group" aria-label={uiText("缩放")}>
             <IconButton icon={Minus} label={uiText("缩小")} size="sm" onClick={() => setZoom(z => stepZoom(z, -1, fitScale))} />
@@ -131,6 +185,14 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
         </div>
         <span className="mist-viewer-close"><IconButton icon={X} label={uiText("关闭")} size="sm" onClick={onClose} /></span>
       </div>
+      {canJump && jumpOpen && <form id={`${id}-page-jump`} className="mist-viewer-note mist-viewer-jump-form" onSubmit={submitJump}>
+        <TextInput ref={jumpField} className="mist-viewer-page-field" autoComplete="off" inputMode="numeric"
+          aria-label={uiText('PDF 页码')} aria-invalid={jumpInvalid || undefined}
+          aria-describedby={jumpInvalid ? `${id}-page-error` : undefined}
+          maxLength={12} value={jumpEntry} onChange={event => { setJumpEntry(event.target.value); setJumpInvalid(false); }} />
+        <Button type="submit" size="sm">{uiText('跳转')}</Button>
+        {jumpInvalid && <span id={`${id}-page-error`} role="alert">{ui`请输入 1 至 ${currentPdf.total} 的整数页码`}</span>}
+      </form>}
       {downloadError && <div className="mist-viewer-note"><Banner tone="bad" title={uiText("下载失败")}>{downloadError}</Banner></div>}
       <div className="mist-viewer-stage" data-kind={info.kind}>
         {info.kind === 'unsupported' ? <Unsupported reason={info.reason} onDownload={onDownload ? download : undefined} />
@@ -139,7 +201,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
             {onDownload && <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button>}
           </div>} /></div>
           : !blob ? <Loading />
-          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} initialPdfPage={initialPdfPage} />}
+          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPdfPosition={reportPdfPosition} onFail={setError} pdfJump={pdfJump?.fileId === file.id ? pdfJump : undefined} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} initialSheetRow={initialSheetRow} />}
       </div>
     </div></Portal>;
 }
@@ -149,7 +211,7 @@ function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () 
   return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
-type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void; initialPdfPage?: number };
+type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPdfPosition: (page: number, total: number) => void; onFail: (msg: string) => void; pdfJump?: {page:number}; initialPdfPage?: number; initialSheetName?: string; initialSheetRow?: number };
 function Renderer(p: RendererProps) {
   switch (p.kind) {
     case 'image': return <ImageView {...p} />;
@@ -195,16 +257,33 @@ async function loadPdfjs() {
   if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = worker.default + (worker.default.includes('?') ? '&' : '?') + 'module=1';
   return pdfjs;
 }
-function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: RendererProps) {
+// Page containers are in document order, so scrolling only needs to sample a few offsets.
+function pageAtScrollPosition(pane: HTMLDivElement): number {
+  const { children, scrollTop, scrollHeight, clientHeight } = pane;
+  const max = scrollHeight - clientHeight;
+  if (max > 1 && scrollTop >= max - 1) return children.length;
+  let first = 0, last = children.length - 1;
+  while (first < last) {
+    const middle = Math.ceil((first + last) / 2);
+    const page = children.item(middle) as HTMLElement;
+    if (page.offsetTop <= scrollTop + 1) first = middle;
+    else last = middle - 1;
+  }
+  return first + 1;
+}
+
+function PdfView({ blob, zoom, onFitScale, onPdfPosition, onFail, pdfJump, initialPdfPage }: RendererProps) {
   const box = React.useRef<HTMLDivElement>(null);
   const openingPage = React.useRef(initialPdfPage).current;
-  const initialZoom = React.useRef(zoom).current;
+  const lastZoom = React.useRef(zoom);
   const hasOpeningPage = openingPage !== undefined && Number.isSafeInteger(openingPage) && openingPage > 1;
-  const keepOpeningPosition = React.useRef(hasOpeningPage);
+  const targetPage = React.useRef(hasOpeningPage ? openingPage : undefined);
+  const handledJump = React.useRef<typeof pdfJump>(undefined);
   const positionFrame = React.useRef<number | null>(null);
+  const pageFrame = React.useRef<number | null>(null);
   const lastAlignment = React.useRef<{ top: number; max: number } | null>(null);
-  const releaseOpeningPosition = React.useCallback(() => {
-    keepOpeningPosition.current = false;
+  const releasePageAnchor = React.useCallback(() => {
+    targetPage.current = undefined;
     if (positionFrame.current !== null) window.cancelAnimationFrame(positionFrame.current);
     positionFrame.current = null;
   }, []);
@@ -217,7 +296,8 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
         const d = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false }).promise as unknown as PdfDoc; loaded = d;
         if (!live) { void d.destroy(); return; }
         const first = await d.getPage(1), vp = first.getViewport({ scale: 1 });
-        if (!live) return; setBase({ w: vp.width, h: vp.height }); setDoc(d); onPages(d.numPages);
+        if (!live) return; setBase({ w: vp.width, h: vp.height }); setDoc(d);
+        if (!hasOpeningPage) onPdfPosition(1, d.numPages);
       } catch (e) { if (live) { const name=(e as { name?: string })?.name; onFail(name === 'PasswordException' ? '该 PDF 设有打开密码，请下载后输入密码查看' : name === 'InvalidPDFException' ? 'PDF 无法解析，文件可能已损坏' : '预览加载失败，请刷新后重试'); } }
     })();
     return () => { live = false; if (loaded) void loaded.destroy(); };
@@ -230,50 +310,75 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
   const fit = base && width ? Math.max(0.2, Math.min(1.6, (width - 40) / base.w)) : 1;
   React.useEffect(() => { onFitScale(fit); }, [fit, onFitScale]);
   const scale = zoom === 'fit' ? fit : zoom;
-  const alignOpeningPage = React.useCallback(() => {
+  const alignPageAnchor = React.useCallback(() => {
     const scroll = box.current;
-    if (!keepOpeningPosition.current || !scroll || !doc || !width || openingPage === undefined) return;
-    const page = Math.min(openingPage, doc.numPages);
+    if (!scroll || !doc || !width || targetPage.current === undefined) return;
+    const page = Math.min(targetPage.current, doc.numPages);
     const target = scroll.children.item(page - 1);
-    if (page <= 1 || !(target instanceof HTMLElement)) return;
-    scroll.scrollTop = target.offsetTop;
+    if (!(target instanceof HTMLElement)) return;
+    scroll.scrollTop = page === 1 ? 0 : target.offsetTop;
     lastAlignment.current = { top: scroll.scrollTop, max: scroll.scrollHeight - scroll.clientHeight };
-  }, [doc, openingPage, width]);
+    onPdfPosition(page, doc.numPages);
+  }, [doc, width, onPdfPosition]);
+  const updateVisiblePage = React.useCallback(() => {
+    if (!doc || targetPage.current !== undefined || pageFrame.current !== null) return;
+    pageFrame.current = window.requestAnimationFrame(() => {
+      pageFrame.current = null;
+      const pane = box.current;
+      if (targetPage.current === undefined && pane?.children.length) onPdfPosition(pageAtScrollPosition(pane), doc.numPages);
+    });
+  }, [doc, onPdfPosition]);
+  React.useEffect(() => () => {
+    if (pageFrame.current !== null) window.cancelAnimationFrame(pageFrame.current);
+  }, []);
   const onPageLayout = React.useCallback(() => {
     // Mixed page dimensions replace estimates as nearby pages render. Batch realignment without loading more canvases.
-    if (!keepOpeningPosition.current || positionFrame.current !== null) return;
+    if (targetPage.current === undefined) { updateVisiblePage(); return; }
+    if (positionFrame.current !== null) return;
     positionFrame.current = window.requestAnimationFrame(() => {
       positionFrame.current = null;
-      alignOpeningPage();
+      alignPageAnchor();
     });
-  }, [alignOpeningPage]);
+  }, [alignPageAnchor, updateVisiblePage]);
   React.useLayoutEffect(() => {
-    if (zoom !== initialZoom) releaseOpeningPosition();
-    else alignOpeningPage();
+    if (lastZoom.current !== zoom) {
+      lastZoom.current = zoom;
+      releasePageAnchor();
+    }
+    if (pdfJump && handledJump.current !== pdfJump && doc && width) {
+      handledJump.current = pdfJump;
+      targetPage.current = pdfJump.page;
+    }
+    alignPageAnchor();
+    updateVisiblePage();
     return () => {
       if (positionFrame.current !== null) window.cancelAnimationFrame(positionFrame.current);
       positionFrame.current = null;
     };
-  }, [alignOpeningPage, initialZoom, releaseOpeningPosition, zoom]);
+  }, [alignPageAnchor, doc, pdfJump, releasePageAnchor, updateVisiblePage, width, zoom]);
   React.useEffect(() => {
     const dialog = box.current?.closest('[role="dialog"]');
-    if (!hasOpeningPage || !dialog) return;
+    if (!dialog) return;
     const scrollKeys = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '];
     const handleKey = (event: Event) => {
-      if (event instanceof KeyboardEvent && scrollKeys.includes(event.key)) releaseOpeningPosition();
+      if (!(event instanceof KeyboardEvent) || !scrollKeys.includes(event.key)) return;
+      const target = event.target instanceof HTMLElement ? event.target : undefined;
+      if (target?.closest('input, textarea, select, [contenteditable]') || event.key === ' ' && target?.closest('button')) return;
+      releasePageAnchor();
     };
     dialog.addEventListener('keydown', handleKey);
     return () => dialog.removeEventListener('keydown', handleKey);
-  }, [hasOpeningPage, releaseOpeningPosition]);
-  const releaseAfterScroll = ({ currentTarget: pane }: React.UIEvent<HTMLDivElement>) => {
-    if (!keepOpeningPosition.current || !lastAlignment.current) return;
+  }, [releasePageAnchor]);
+  const trackScroll = ({ currentTarget: pane }: React.UIEvent<HTMLDivElement>) => {
+    const alignment = lastAlignment.current;
     // A stable scroll range with a new position also covers native scrollbar navigation.
-    const { top, max } = lastAlignment.current;
-    if (pane.scrollHeight - pane.clientHeight === max && Math.abs(pane.scrollTop - top) > 1) releaseOpeningPosition();
+    if (targetPage.current !== undefined && alignment && pane.scrollHeight - pane.clientHeight === alignment.max
+      && Math.abs(pane.scrollTop - alignment.top) > 1) releasePageAnchor();
+    updateVisiblePage();
   };
-  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages" style={hasOpeningPage ? { position: 'relative' } : undefined}
-    onWheel={releaseOpeningPosition} onPointerDown={releaseOpeningPosition} onTouchStart={releaseOpeningPosition} onScroll={releaseAfterScroll}>
-    {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} onLayout={hasOpeningPage ? onPageLayout : undefined} />) : <Loading />}
+  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages"
+    onWheel={releasePageAnchor} onPointerDown={releasePageAnchor} onTouchStart={releasePageAnchor} onScroll={trackScroll}>
+    {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} onLayout={onPageLayout} />) : <Loading />}
   </div>;
 }
 function PdfPage({ doc, n, scale, base, root, onLayout }: { doc: PdfDoc; n: number; scale: number; base: { w: number; h: number }; root: React.RefObject<HTMLDivElement | null>; onLayout?: () => void }) {
@@ -323,8 +428,15 @@ function DocxView({ blob, onFail }: RendererProps) {
 
 const MAX_ROWS = 1000, MAX_COLS = 60;
 const colName = (i: number) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
-function SheetView({ blob, name, onFail }: RendererProps) {
-  const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean> } | null>(null), [sheet, setSheet] = React.useState('');
+function SheetView({ blob, name, onFail, initialSheetName, initialSheetRow }: RendererProps) {
+  const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean>; origins: Record<string,{row:number;col:number}> } | null>(null), [sheet, setSheet] = React.useState('');
+  const paneRef=React.useRef<HTMLDivElement>(null),targetRow=React.useRef<HTMLTableRowElement>(null);
+  React.useLayoutEffect(()=>{
+    const pane=paneRef.current,row=targetRow.current;
+    if(!pane||!row)return;
+    const viewport=pane.getBoundingClientRect(),rect=row.getBoundingClientRect();
+    pane.scrollTop+=rect.top-viewport.top-(viewport.height-rect.height)/2;
+  },[book,sheet,initialSheetRow]);
   React.useEffect(() => {
     let live = true;
     (async () => {
@@ -333,26 +445,44 @@ function SheetView({ blob, name, onFail }: RendererProps) {
         const ext = extOf(name);
         const wb = ext === 'csv' || ext === 'tsv' ? XLSX.read(await blob.text(), { type: 'string', raw: true, FS: ext === 'tsv' ? '\t' : undefined } as any) : XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: 'array', cellDates: true });
         const rows: Record<string, string[][]> = {}, truncated: Record<string, boolean> = {};
+        const origins:Record<string,{row:number;col:number}>={};
         for (const n of wb.SheetNames) {
-          const all = XLSX.utils.sheet_to_json<string[]>(wb.Sheets[n], { header: 1, raw: false, defval: '', blankrows: true }) as string[][];
+          const worksheet=wb.Sheets[n],range=XLSX.utils.decode_range(worksheet['!ref']??'A1');
+          const all = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, raw: false, defval: '', blankrows: true }) as string[][];
           let last = all.length; while (last > 0 && all[last - 1].every(v => String(v ?? '') === '')) last--;
           const used = all.slice(0, last);
+          const target=n===initialSheetName&&initialSheetRow!==undefined?initialSheetRow-range.s.r-1:-1;
+          const first=target>=0&&target<used.length?Math.floor(target/MAX_ROWS)*MAX_ROWS:0;
+          origins[n]={row:range.s.r+first,col:range.s.c};
           truncated[n] = used.length > MAX_ROWS || used.some(r => r.length > MAX_COLS);
-          rows[n] = used.slice(0, MAX_ROWS).map(r => r.slice(0, MAX_COLS).map(v => String(v ?? '')));
+          rows[n] = used.slice(first, first+MAX_ROWS).map(r => r.slice(0, MAX_COLS).map(v => String(v ?? '')));
         }
-        if (!live) return; setBook({ names: wb.SheetNames, rows, truncated }); setSheet(wb.SheetNames[0] || '');
+        if (!live) return;
+        const openingSheets = initialSheetName === undefined
+          ? wb.SheetNames
+          : wb.SheetNames.filter((_, index) => !wb.Workbook?.Sheets?.[index]?.Hidden);
+        setBook({ names: wb.SheetNames, rows, truncated, origins });
+        setSheet(openingSheets.find(sheetName => sheetName === initialSheetName) ?? openingSheets[0] ?? '');
       } catch { if (live) onFail('表格无法解析，请下载后用 Excel 打开'); }
     })();
     return () => { live = false; };
   }, [blob]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!book) return <Loading />;
   const rows = book.rows[sheet] || [], cols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  const origin=book.origins[sheet]??{row:0,col:0};
+  const target=sheet===initialSheetName?initialSheetRow:undefined;
   return <div className="mist-viewer-sheet">
     {book.names.length > 1 && <div className="mist-viewer-tabs" role="tablist" aria-label={uiText("工作表")}>{book.names.map(n => <button key={n} type="button" role="tab" aria-selected={n === sheet} className="mist-viewer-tab" onClick={() => setSheet(n)}>{n}</button>)}</div>}
-    {book.truncated[sheet] && <p className="mist-note">{uiText("仅显示前 ")}{MAX_ROWS}{uiText(" 行、")}{MAX_COLS}{uiText(" 列，完整内容请下载原件。")}</p>}
-    <div className="mist-viewer-scroll">{rows.length ? <table className="mist-viewer-table" aria-label={uiText(sheet)}>
-      <thead><tr><th aria-hidden="true" />{Array.from({ length: cols }, (_, i) => <th key={i} scope="col">{colName(i)}</th>)}</tr></thead>
-      <tbody>{rows.map((r, i) => <tr key={i}><th scope="row">{uiText(i + 1)}</th>{Array.from({ length: cols }, (_, j) => <td key={j}>{r[j] ?? ''}</td>)}</tr>)}</tbody>
+    {book.truncated[sheet] && <p className="mist-note">{origin.row>0?ui`显示第 ${origin.row+1} 至 ${origin.row+rows.length} 行，最多 ${MAX_COLS} 列。完整内容请下载原件。`:
+      <>{uiText("仅显示前 ")}{MAX_ROWS}{uiText(" 行、")}{MAX_COLS}{uiText(" 列，完整内容请下载原件。")}</>}</p>}
+    <div className="mist-viewer-scroll" ref={paneRef}>{rows.length ? <table className="mist-viewer-table" aria-label={uiText(sheet)}>
+      <thead><tr><th aria-hidden="true" />{Array.from({ length: cols }, (_, i) => <th key={i} scope="col">{colName(origin.col+i)}</th>)}</tr></thead>
+      <tbody>{rows.map((r,i)=>{
+        const row=origin.row+i+1,cited=row===target;
+        return <tr key={row} ref={cited?targetRow:undefined} data-cited={cited||undefined} aria-current={cited?'location':undefined}>
+          <th scope="row">{uiText(row)}</th>{Array.from({length:cols},(_,j)=><td key={j}>{r[j]??''}</td>)}
+        </tr>;
+      })}</tbody>
     </table> : <div className="mist-viewer-center"><EmptyState compact title={uiText("这个工作表是空的")} /></div>}</div>
   </div>;
 }
