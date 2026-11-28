@@ -125,8 +125,10 @@ it('resets a controlled search on opening and executes a real result after typin
     return <MistRoot><button onClick={() => setOpen(true)}>搜索</button><CommandPalette open={open} onClose={() => setOpen(false)} query={query} onQueryChange={setQuery}
       items={query === '订单' ? [{ id: 'order', group: '订单', label: '订单 SO-1', run }] : []} /></MistRoot>;
   }
-  const host = render(<Example />); click(host.querySelector<HTMLButtonElement>('button')!);
+  const host = render(<Example />), opener = host.querySelector<HTMLButtonElement>('button')!;
+  act(() => opener.focus()); click(opener);
   const input = host.querySelector<HTMLInputElement>('input')!;
+  expect(document.activeElement).toBe(input);
   expect(input.value).toBe('');
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '订单');
@@ -134,6 +136,7 @@ it('resets a controlled search on opening and executes a real result after typin
   });
   expect(host.querySelector('.mist-palette-it')?.textContent).toContain('订单 SO-1');
   key(input, 'Enter'); expect(run).toHaveBeenCalledTimes(1); expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(opener);
 });
 
 

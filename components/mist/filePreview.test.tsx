@@ -8,6 +8,7 @@ const pdfMock = vi.hoisted(() => ({ getDocument: vi.fn(), options: { workerSrc: 
 vi.mock('pdfjs-dist', () => ({ getDocument: pdfMock.getDocument, GlobalWorkerOptions: pdfMock.options }));
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/assets/pdf.worker.mjs' }));
 import { FilePreview, previewKind, formatFileSize, type PreviewFile } from './filePreview';
+import { Dialog } from './overlays';
 
 let host: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement('div'); document.body.append(host); root = createRoot(host); (URL as any).createObjectURL ??= () => 'blob:mock'; (URL as any).revokeObjectURL ??= () => {}; });
@@ -173,8 +174,35 @@ describe('附件预览浮层', () => {
     expect(document.body.textContent).toContain('1 / 2');
     await act(async () => btn('下一个附件').click()); await flush();
     expect(view.index).toBe(1); expect(document.querySelector('.mist-viewer-text')!.textContent).toBe('第二个文本');
-    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }))); await flush();
+    await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))); await flush();
     expect(view.index).toBe(0); expect(load).toHaveBeenCalledTimes(2);
+  });
+  it('附件快捷键只在前台预览内生效，保留浏览器组合键', async () => {
+    const files = [{ id: 'a', name: '正面.png' }, { id: 'b', name: '背面.png' }];
+    const load = async () => new Blob(['image'], { type: 'image/png' });
+    const onIndex = vi.fn();
+    let covered = false;
+    const draw = () => root.render(<><FilePreview files={files} index={0} load={load} onIndex={onIndex} onClose={() => {}}/>
+      <Dialog title="上层窗口" open={covered} onClose={() => { covered = false; draw(); }}/></>);
+    const press = (key: string, options: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+      act(() => { document.activeElement?.dispatchEvent(event); });
+      return event;
+    };
+    act(draw); await flush();
+    act(() => { covered = true; draw(); });
+    press('ArrowRight');
+    press('+');
+    expect(onIndex).not.toHaveBeenCalled();
+    expect(document.querySelector('.mist-viewer-zoom')?.textContent).toBe('适应');
+    press('Escape');
+    expect(press('ArrowRight', { altKey: true }).defaultPrevented).toBe(false);
+    expect(press('+', { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(document.querySelector('.mist-viewer-zoom')?.textContent).toBe('适应');
+    expect(press('ArrowRight').defaultPrevented).toBe(true);
+    expect(onIndex).toHaveBeenCalledExactlyOnceWith(1);
+    press('+');
+    expect(document.querySelector('.mist-viewer-zoom')?.textContent).not.toBe('适应');
   });
   it('同名附件的标题保留显示编号，读取与下载仍传原件', async () => {
     const files = [{ id: 'a', name: '条款.txt' }, { id: 'b', name: '条款.txt' }];
