@@ -94,6 +94,69 @@ it('refreshes the visible task list without requerying stable connection setting
  }finally{vi.useRealTimers();vi.restoreAllMocks();}
 });
 
+it('keeps cached task states accurate while the task list is offline or its refresh fails',async()=>{
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const online=vi.spyOn(navigator,'onLine','get').mockReturnValue(true);
+ const running={...row(),executor:'platform',state:'running',executionStage:'model'};
+ const finished={...running,id:'finished',name:'已核对邮件',state:'succeeded'};
+ let current=running;
+ let failRefresh=false;
+ const api=seam.api.getMockImplementation()!;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>url.endsWith('/agent-tasks')
+  ? failRefresh?Promise.reject(new Error('临时读取失败')):Promise.resolve({items:[current,finished],nextCursor:null})
+  : api(url,init));
+ act(paint);await flush();
+ expect(getByText(host,'正在等待模型')).toBeTruthy();
+ const listReads=()=>seam.api.mock.calls.filter(([url])=>String(url).endsWith('/agent-tasks')).length;
+ const beforeOffline=listReads();
+ online.mockReturnValue(false);
+ await act(async()=>window.dispatchEvent(new Event('offline')));
+ expect(listReads()).toBe(beforeOffline);
+ expect(getByText(host,'执行进度暂未更新')).toBeTruthy();
+ expect(getByText(host,'执行结束')).toBeTruthy();
+ failRefresh=true;
+ online.mockReturnValue(true);
+ await act(async()=>window.dispatchEvent(new Event('online')));
+ expect(listReads()).toBe(beforeOffline+1);
+ expect(getByText(host,'执行进度暂未更新')).toBeTruthy();
+ expect(getByText(host,'任务读取失败')).toBeTruthy();
+ failRefresh=false;
+ current={...running,state:'succeeded'};
+ await click(getByRole(host,'button',{name:'刷新'}));
+ expect(host.textContent).not.toContain('执行进度暂未更新');
+ expect(getByText(host,'核对邮件').closest('[role="row"]')?.textContent).toContain('执行结束');
+ online.mockRestore();
+});
+
+it('hides the cached retry time in task details until its own read recovers',async()=>{
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const online=vi.spyOn(navigator,'onLine','get').mockReturnValue(true);
+ const queued={...row(),executor:'platform',executionIssue:{code:'model_timeout',retryAt:'2026-11-01T00:05:00Z'}};
+ let detailFails=false;
+ const api=seam.api.getMockImplementation()!;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>url.endsWith('/task')
+  ? detailFails?Promise.reject(new Error('临时详情读取失败')):Promise.resolve({item:queued})
+  : url.endsWith('/agent-tasks')?Promise.resolve({items:[queued],nextCursor:null}):api(url,init));
+ act(paint);await flush();
+ await click(getByText(host,'核对邮件'));
+ const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+ expect(getByText(dialog,/下次重试/)).toBeTruthy();
+ online.mockReturnValue(false);
+ await act(async()=>window.dispatchEvent(new Event('offline')));
+ expect(getByText(dialog,'执行进度暂未更新')).toBeTruthy();
+ expect(dialog.textContent).not.toContain('下次重试');
+ detailFails=true;
+ online.mockReturnValue(true);
+ await act(async()=>window.dispatchEvent(new Event('online')));
+ expect(getByText(dialog,'执行进度暂未更新')).toBeTruthy();
+ expect(dialog.textContent).not.toContain('下次重试');
+ detailFails=false;
+ await act(async()=>window.dispatchEvent(new Event('focus')));
+ expect(dialog.textContent).not.toContain('执行进度暂未更新');
+ expect(getByText(dialog,/下次重试/)).toBeTruthy();
+ online.mockRestore();
+});
+
 it('checks connection metadata on the next visible poll after a transient failure',async()=>{
  vi.useFakeTimers();
  vi.spyOn(document,'hidden','get').mockReturnValue(false);
