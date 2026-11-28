@@ -6657,6 +6657,7 @@
   "此文件类型暂不支持": "This file type is not supported",
   "附件无法核对，请重新选择后再试": "Couldn't verify the attachments. Select them again and retry.",
   "暂未查到原提交回执": "The original submission receipt hasn't been found yet.",
+  "重发原任务": "Resend Original Task",
   "未找到补充附件的回执": "No receipt was found for the attached reply.",
   "已找回附件答复": "Reply with attachments recovered.",
   "请求缺少答复或附件": "The request is missing the reply or attachments.",

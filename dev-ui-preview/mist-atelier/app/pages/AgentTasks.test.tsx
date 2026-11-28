@@ -363,12 +363,30 @@ it('copies only a task-specific credential, conceals it in the page, and discard
  await click(getByRole(document.body,'button',{name:'复制配置'}));const config=JSON.parse(seam.copy.mock.calls[0][0]);expect(config.mcpServers['bambook-task'].headers).toEqual({'x-bambook-task-control':'private-task-control'});expect(JSON.stringify(config)).not.toContain('x-bambook-agent-key');
  seam.identity='B';seam.userId='other';act(paint);await flush();expect(document.body.innerHTML).not.toContain('private-task-control');
 });
-it('retries an uncertain original arrangement with the same request id and immutable fields',async()=>{
- let first:any;seam.api.mockImplementation((url:string,init:any)=>{if(init?.method==='POST'){if(!first){first=JSON.parse(init.body);return Promise.reject(new Error('网络中断'));}return Promise.resolve({item:row()});}return Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:{items:[row()],nextCursor:null});});
+it.each(['found','missing'])('reads an uncertain creation receipt before explicitly resending when it is %s',async receipt=>{
+ const posts:any[]=[],receiptReads:string[]=[];
+ seam.api.mockImplementation(async(url:string,init:any)=>{
+  if(init?.method==='POST'){posts.push(JSON.parse(init.body));if(posts.length===1)throw Error('网络中断');return {item:row()};}
+  if(url.includes('/agent-tasks/receipt/')){
+   receiptReads.push(url);
+   if(receipt==='missing')throw Object.assign(Error('未找到原回执'),{status:404});
+   return {item:row()};
+  }
+  return url.includes('agent-identities')?{items:[identity()]}:{items:[row()],nextCursor:null};
+ });
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));
  await act(async()=>{fireEvent.change(getByLabelText(document.body,/Agent连接/,{selector:'select'}),{target:{value:'identity'}});fireEvent.input(getByLabelText(document.body,/任务名称/,{selector:'input'}),{target:{value:'核对新来信'}});fireEvent.input(getByLabelText(document.body,/任务内容/,{selector:'textarea'}),{target:{value:'核对授权来信'}});});
  await click(getByRole(document.body,'button',{name:'安排任务',exact:true}));expect((getByLabelText(document.body,/任务名称/,{selector:'input'}) as HTMLInputElement).disabled).toBe(true);
- await click(getByRole(document.body,'button',{name:'核对原操作'}));const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(JSON.parse(writes[1][1].body)).toEqual(first);expect(queryByRole(document.body,'dialog',{name:'新建任务'})).toBeNull();
+ await click(getByRole(document.body,'button',{name:'核对原操作'}));
+ expect(posts).toHaveLength(1);
+ expect(receiptReads).toEqual([expect.stringMatching(new RegExp('/agent-tasks/receipt/'+posts[0].requestId+'$'))]);
+ if(receipt==='missing'){
+  expect(getByText(document.body,'暂未查到原提交回执')).toBeTruthy();
+  expect((getByLabelText(document.body,/任务名称/,{selector:'input'}) as HTMLInputElement).disabled).toBe(true);
+  await click(getByRole(document.body,'button',{name:'重发原任务'}));
+  expect(posts).toEqual([posts[0],posts[0]]);
+ }
+ expect(queryByRole(document.body,'dialog',{name:'新建任务'})).toBeNull();
 });
 
 it('refreshes the open task and its history even after it leaves the first page',async()=>{

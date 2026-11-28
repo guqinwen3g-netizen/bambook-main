@@ -44,7 +44,7 @@ const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{time
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
 type AnswerPlan={kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string;files?:readonly File[];receiptOnly?:true};
 type StatePlan={kind:TaskStateAction;requestId:string;row:AgentTaskView};
-type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|AnswerPlan|StatePlan|{kind:'issue';requestId:string;row:AgentTaskView};
+type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform';receiptMissing?:true}|AnswerPlan|StatePlan|{kind:'issue';requestId:string;row:AgentTaskView};
 const isStatePlan=(plan:Plan):plan is StatePlan=>plan.kind==='pause'||plan.kind==='resume'||plan.kind==='cancel';
 const STATE_CONTROL_PENDING={pause:'暂停结果未确认，可重试',resume:'继续结果未确认，可重试',cancel:'停止结果未确认，可重试'};
 const TASK_STATE_UNCHANGED={pause:'任务尚未暂停',resume:'任务尚未继续',cancel:'任务尚未停止'};
@@ -374,6 +374,8 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
   const attached=plan.kind==='answer'&&(!!plan.files?.length||plan.receiptOnly===true);
   const checkingAttachmentReceipt=attached&&(uncertain||plan.receiptOnly===true);
   const checkingState=isStatePlan(plan)&&uncertain;
+  const checkingCreation=plan.kind==='create'&&uncertain&&!plan.receiptMissing;
+  if(plan.kind==='create'&&plan.receiptMissing)setPlan({...plan,receiptMissing:undefined});
   try{
    let requestId=plan.requestId;
    if(attached&&!checkingAttachmentReceipt&&controlStorageScope){
@@ -394,7 +396,10 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
    }
    const body=plan.kind==='answer'?answerRequestBody({requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer},plan.files)
     :JSON.stringify(plan.kind==='create'?{requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:{requestId,version:plan.row.version});
-   const result=checkingState
+   const result=checkingCreation
+    ? await withRequestDeadline(abort,8000,'提交结果暂时无法核对',signal=>
+      mistApiRequest(base+'/receipt/'+encodeURIComponent(requestId),{signal,cache:'no-store'}))
+    : checkingState
     ? await withRequestDeadline(abort,8000,'任务暂时无法核对',signal=>
       mistApiRequest(base+'/'+encodeURIComponent(plan.row.id),{signal,cache:'no-store'}))
     : checkingAttachmentReceipt
@@ -405,8 +410,12 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
        signal=>mistApiRequest(url,{method:'POST',body,signal}))
       : isStatePlan(plan)
         ? await withRequestDeadline(abort,8000,STATE_CONTROL_PENDING[plan.kind],signal=>mistApiRequest(url,{method:'POST',body,signal}))
-        : await mistApiRequest(url,{method:'POST',body,signal:abort.signal});
+        : plan.kind==='create'
+          ? await withRequestDeadline(abort,8000,'提交结果待核对',signal=>mistApiRequest(url,{method:'POST',body,signal}))
+          : await mistApiRequest(url,{method:'POST',body,signal:abort.signal});
    if(!current())return;
+   if(checkingCreation&&(!result.item?.id||result.item.identityId!==plan.identityId
+    ||(result.item.executor??'external')!==plan.executor))throw new Error('提交结果暂时无法核对');
    if(isStatePlan(plan)){
     const item:AgentTaskView|undefined=result.item;
     if(item?.id!==plan.row.id)throw new Error('任务暂时无法核对');
@@ -449,6 +458,10 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
   }catch(e){
    if(!current()||(!attached&&abort.signal.aborted))return;
    const status=(e as {status?:number})?.status;
+   if(checkingCreation&&status===404){
+    setFailure('暂未查到原提交回执');setPlan({...plan,receiptMissing:true});
+    return;
+   }
    if(checkingState&&accessDenied(e)){
     hideDetailContents(plan.row.id,null,e instanceof Error?e.message:'任务暂时无法核对');
     return;
@@ -460,7 +473,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     return;
    }
    setFailure(e instanceof Error?e.message:'操作未完成，请重试');
-   setUncertain(checkingState||checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
+   setUncertain(checkingCreation||checkingState||checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
   }
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };
@@ -470,6 +483,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
   const target=agentSource(source);if(target)nav.go(target.view,target.id,target.target);
  };
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
+ const createMayWrite=create&&(!uncertain||create.receiptMissing);
  const answerQuestion=answer?.row.questions?.find(q=>q.id===answer.questionId);
  const answerPicker=taskAttachmentChoicesForQuestion(answerQuestion,answer?.row.attachments);
  const visualPages=taskVisualPdfPageChoices(answerQuestion,answer?.row.attachments,answer?.answer);
@@ -548,7 +562,7 @@ function TaskPanel({workspaceId,scope,onConnections,rowAction,refreshSignal,onTa
     </>}
    </div>}
   </Drawer>
-  <Dialog open={!!plan} onClose={closePlan} title={uiText(create?'新建任务':answer?'补充资料':plan?.kind==='issue'?'连接Agent':plan?.kind==='pause'?'暂停任务':plan?.kind==='resume'?'继续任务':'停止任务')} footer={<><Button disabled={busy} onClick={closePlan}>{uiText(uncertain?'关闭':'取消')}</Button><Button variant={plan?.kind==='cancel'?'danger':'primary'} loading={busy} disabled={busy||!!create&&(!create.identityId||!create.name.trim()||!create.instructions.trim()||create.executor==='platform'&&!platformAvailable)||!!answer&&!uncertain&&!answer.answer.trim()&&!answer.files?.length} onClick={()=>void submit()}>{uiText(uncertain?'核对原操作':create?'安排任务':answer?'提交答复':plan?.kind==='issue'?'生成任务连接':'确认')}</Button></>}>
+  <Dialog open={!!plan} onClose={closePlan} title={uiText(create?'新建任务':answer?'补充资料':plan?.kind==='issue'?'连接Agent':plan?.kind==='pause'?'暂停任务':plan?.kind==='resume'?'继续任务':'停止任务')} footer={<><Button disabled={busy} onClick={closePlan}>{uiText(uncertain?'关闭':'取消')}</Button><Button variant={plan?.kind==='cancel'?'danger':'primary'} loading={busy} disabled={busy||!!createMayWrite&&(!create.identityId||!create.name.trim()||!create.instructions.trim()||create.executor==='platform'&&!platformAvailable)||!!answer&&!uncertain&&!answer.answer.trim()&&!answer.files?.length} onClick={()=>void submit()}>{uiText(create?.receiptMissing?'重发原任务':uncertain?'核对原操作':create?'安排任务':answer?'提交答复':plan?.kind==='issue'?'生成任务连接':'确认')}</Button></>}>
    <div className="mist-col">{failure&&<Banner tone="bad" title={failure}/>}
     {create?.executor==='platform'&&!platformAvailable&&<Banner tone="bad" title={uiText('平台执行暂不可用')}/>}{create?<FormGrid><Field label={uiText('执行方式')} required full><Select value={create.executor} disabled={uncertain||busy} options={[{value:'external',label:uiText('外部客户端')},{value:'platform',label:uiText('平台执行')}]} onChange={e=>setPlan({...create,executor:e.target.value as 'external'|'platform'})}/></Field><Field label={uiText('Agent连接')} required full><Select value={create.identityId} disabled={uncertain} onChange={e=>setPlan({...create,identityId:e.target.value})} placeholder={uiText('请选择连接')} options={active.map(i=>({value:i.id,label:`${i.name} · ${uiText(i.mode==='read'?'只读':'可办理')}`}))}/></Field><Field label={uiText('任务名称')} required full><TextInput value={create.name} disabled={uncertain} onChange={e=>setPlan({...create,name:e.target.value})} maxLength={60}/></Field><Field label={uiText('任务内容')} required full><TextArea value={create.instructions} disabled={uncertain} onChange={e=>setPlan({...create,instructions:e.target.value})} maxLength={4000} rows={5}/></Field></FormGrid>:answer?<><KeyValue items={[{label:uiText('任务'),value:answer.row.name}]} />
     {answerPicker?.choices.length ? <>
