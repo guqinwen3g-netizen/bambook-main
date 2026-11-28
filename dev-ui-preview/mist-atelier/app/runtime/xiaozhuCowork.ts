@@ -77,6 +77,8 @@ const TASK_SEND_TIMEOUT_MS = 45_000;
 const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
 const BACKGROUND_PROGRESS_INTERVAL_MS = 3000;
 const CAPABILITY_RECOVERY_INTERVAL_MS = 30_000;
+const ATTACHMENT_RECEIPT_RETRY_DELAYS = [2_000,5_000];
+type AttachmentReceiptCheck = {attempt:number;controller?:AbortController;timer?:number;ready?:true};
 const BACKGROUND_PROGRESS_MAX_IN_FLIGHT = 3;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
@@ -232,9 +234,12 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   },[]);
   const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   const controlKeys=savedControls??localControls;
-  const attachmentAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
+  const attachmentAnswerChecks=React.useMemo(()=>new Map<string,AttachmentReceiptCheck>(),[scope,base]);
   const abortAttachmentAnswerChecks=React.useCallback(()=>{
-    for(const controller of attachmentAnswerChecks.values())controller?.abort();
+    for(const check of attachmentAnswerChecks.values()){
+      check.controller?.abort();
+      if(check.timer!==undefined)window.clearTimeout(check.timer);
+    }
     attachmentAnswerChecks.clear();
   },[attachmentAnswerChecks]);
   React.useEffect(()=>{
@@ -251,17 +256,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
   },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
-  const recoverAttachmentAnswers=React.useCallback(()=>{
-    if(!base||!enabled||!navigator.onLine)return;
+  const recoverAttachmentAnswers=React.useCallback(():void=>{
+    if(!base||!enabled||!navigator.onLine||document.visibilityState==='hidden')return;
     for(const task of currentTasks.current){
       const pending=controlKeys.get(task.id);
       if(pending?.action!=='answer'||!pending.hasAttachments||task.contentRestricted||controlRequests.current.has(task.id)
-        ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt)
-        ||attachmentAnswerChecks.has(pending.requestId))continue;
+        ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt))continue;
+      const previous=attachmentAnswerChecks.get(pending.requestId);
+      if(previous&&!previous.ready)continue;
       const controller=new AbortController(),authority=deniedHistory.current;
-      attachmentAnswerChecks.set(pending.requestId,controller);
+      const check:AttachmentReceiptCheck={attempt:(previous?.attempt??0)+1,controller};
+      attachmentAnswerChecks.set(pending.requestId,check);
       const current=()=>navigator.onLine&&!controller.signal.aborted&&deniedHistory.current===authority
-        &&live.current===scope&&attachmentAnswerChecks.get(pending.requestId)===controller
+        &&live.current===scope&&attachmentAnswerChecks.get(pending.requestId)===check
         &&controlKeys.get(task.id)===pending&&currentTasks.current.some(item=>item.id===task.id&&!item.contentRestricted);
       const forget=()=>{
         controlKeys.delete(task.id);
@@ -273,26 +280,44 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         setTasks(old=>old.map(previous=>mergeTaskUpdate(previous,item)));
         setControls(old=>({...old,[task.id]:{busy:false,attachmentAnswerRecovered:true}}));
       },error=>{
+        if(!current())return;
+        const status=Number((error as {status?:number})?.status);
         // An answered question with no receipt for this request belongs to a different submission.
-        if(current()&&(error as {status?:number})?.status===404)forget();
+        if(status===404){forget();return;}
+        const delay=ATTACHMENT_RECEIPT_RETRY_DELAYS[check.attempt-1];
+        if(delay===undefined||status===429||!transientHistoryRead(status))return;
+        check.timer=window.setTimeout(()=>{
+          if(attachmentAnswerChecks.get(pending.requestId)!==check)return;
+          check.timer=undefined;
+          check.ready=true;
+          recoverAttachmentAnswers();
+        },delay);
       }).finally(()=>{
-        if(attachmentAnswerChecks.get(pending.requestId)!==controller)return;
-        if(controlKeys.get(task.id)===pending)attachmentAnswerChecks.set(pending.requestId,null);
-        else attachmentAnswerChecks.delete(pending.requestId);
+        if(attachmentAnswerChecks.get(pending.requestId)!==check)return;
+        check.controller=undefined;
+        if(controlKeys.get(task.id)!==pending){
+          if(check.timer!==undefined)window.clearTimeout(check.timer);
+          attachmentAnswerChecks.delete(pending.requestId);
+        }
       });
     }
   },[base,enabled,scope,controlKeys,controlStorageScope,attachmentAnswerChecks]);
   React.useEffect(()=>{recoverAttachmentAnswers();},[tasks,recoverAttachmentAnswers]);
   React.useEffect(()=>{
     const reconnect=()=>{
-      for(const [id,controller] of attachmentAnswerChecks)if(!controller)attachmentAnswerChecks.delete(id);
+      for(const [id,check] of attachmentAnswerChecks)if(!check.controller){
+        if(check.timer!==undefined)window.clearTimeout(check.timer);
+        attachmentAnswerChecks.delete(id);
+      }
       recoverAttachmentAnswers();
     };
     window.addEventListener('offline',abortAttachmentAnswerChecks);
     window.addEventListener('online',reconnect);
+    document.addEventListener('visibilitychange',recoverAttachmentAnswers);
     return()=>{
       window.removeEventListener('offline',abortAttachmentAnswerChecks);
       window.removeEventListener('online',reconnect);
+      document.removeEventListener('visibilitychange',recoverAttachmentAnswers);
       abortAttachmentAnswerChecks();
     };
   },[abortAttachmentAnswerChecks,recoverAttachmentAnswers,attachmentAnswerChecks]);

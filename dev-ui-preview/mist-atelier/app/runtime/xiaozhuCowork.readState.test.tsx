@@ -794,6 +794,68 @@ it.each(['reconnect','denied'])('fences an in-flight restored attachment receipt
  }finally{network.mockRestore();saveTaskControls(store,new Map());}
 });
 
+it.each([true,false])('bounds retries for a transient attachment receipt (%s)',async(restores)=>{
+ const store='transient-upload',requestId='00000000-0000-4000-8000-000000000072';
+ saveTaskControls(store,new Map([['task',{action:'answer',questionId:'q1',version:2,requestId,fingerprint:'a'.repeat(64),hasAttachments:true}]]));
+ const saved=readTaskControls(store),attachment={id:'file',name:'scan.pdf',mimeType:'application/pdf',size:3};
+ const latest={...task,version:3,attachments:[attachment],questions:[{id:'q1',answer:'原件',answeredAt:task.updatedAt,attachmentIds:[attachment.id]}]};
+ let calls=0;
+ vi.useFakeTimers();
+ function Page(){channel=useXiaozhuCowork('workspace','account:workspace',true,undefined,undefined,saved,store);return <div/>;}
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.endsWith('/agent-tasks'))return {items:[latest],nextCursor:null};
+   if(url.includes('/answer/receipt/')){
+    expect(url.endsWith(requestId)).toBe(true);
+    if(++calls<2||!restores)throw Object.assign(new Error('回执暂时不可用'),{status:503});
+    return {item:latest,attachmentIds:[attachment.id]};
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<Page/>));
+  expect(calls).toBe(1);
+  await act(async()=>vi.advanceTimersByTimeAsync(1999));
+  expect(calls).toBe(1);
+  await act(async()=>vi.advanceTimersByTimeAsync(1));
+  expect(calls).toBe(2);
+  await act(async()=>vi.advanceTimersByTimeAsync(30_000));
+  expect(calls).toBe(restores?2:3);
+  expect(!!channel.controls.task?.attachmentAnswerRecovered).toBe(restores);
+  expect(readTaskControls(store).size).toBe(restores?0:1);
+  expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+ }finally{vi.useRealTimers();saveTaskControls(store,new Map());}
+});
+
+it('cancels a scheduled receipt retry after a permission denial',async()=>{
+ const store='denied-receipt-timer',requestId='00000000-0000-4000-8000-000000000073';
+ saveTaskControls(store,new Map([['task',{action:'answer',questionId:'q1',version:2,requestId,fingerprint:'a'.repeat(64),hasAttachments:true}]]));
+ const saved=readTaskControls(store);
+ const latest={...task,version:3,questions:[{id:'q1',answer:'原件',answeredAt:task.updatedAt}]};
+ let denied=false,reads=0;
+ vi.useFakeTimers();
+ function Page(){channel=useXiaozhuCowork('workspace','account:workspace',true,undefined,undefined,saved,store);return <div/>;}
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.endsWith('/agent-tasks')){
+    if(denied)throw Object.assign(new Error('权限不足'),{status:403});
+    return {items:[latest],nextCursor:null};
+   }
+   if(url.includes('/answer/receipt/')){reads++;throw Object.assign(new Error('回执暂时不可用'),{status:503});}
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<Page/>));
+  expect(reads).toBe(1);
+  denied=true;
+  await act(async()=>channel.reload());
+  await act(async()=>vi.advanceTimersByTimeAsync(30_000));
+  expect(reads).toBe(1);
+  expect(channel.tasks).toEqual([]);
+  expect(readTaskControls(store).size).toBe(1);
+ }finally{vi.useRealTimers();saveTaskControls(store,new Map());}
+});
+
 it('keeps the exact answer request after a fresh page without storing the answer',async()=>{
  const storageScope='["test-operator","workspace"]';
  const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给交期'}]};
