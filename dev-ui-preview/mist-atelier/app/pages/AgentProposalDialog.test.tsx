@@ -50,6 +50,29 @@ it('identifies a contract proposal by its order and original filename without pr
   expect(getConfirm(host).disabled).toBe(false);
  }finally{act(()=>root.unmount());host.remove();}
 });
+it('compares order draft payment notes and blocks confirmation when the draft note changes',()=>{
+ const{state,proposal}=contractProposalFixture();
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const order=state.orders[0],original=order.governance!.contract;
+ proposal.command.payload.input={...original,paymentNote:'拟改的付款说明'};
+ const host=document.createElement('div'),root=createRoot(host),run=vi.fn();
+ document.body.append(host);
+ const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{
+  render();
+  expect(host.textContent).toContain('当前付款说明 · T/T 100% 预付');
+  expect(host.textContent).toContain('拟改付款说明 · 拟改的付款说明');
+  expect(host.textContent).not.toContain('交货地点 · 上海');
+  expect(getConfirm(host).disabled).toBe(false);
+  original.paymentNote='另一会话最新付款说明';render();
+  expect(host.textContent).toContain('订单付款说明已更新，请重新提出提议');
+  expect(host.textContent).toContain('当前付款说明 · 另一会话最新付款说明');
+  expect(getConfirm(host).disabled).toBe(true);
+  act(()=>getConfirm(host).click());
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it.each(['order','file'])('blocks a saved contract proposal after its %s source becomes invisible',kind=>{
  const{state,proposal}=contractProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);

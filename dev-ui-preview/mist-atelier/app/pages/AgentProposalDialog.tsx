@@ -141,6 +141,14 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     if(orderContract&&currentContract&&path.startsWith('input.')){
       const key=path.slice(6).split('.')[0];
       if(stableJson((command.payload.input as Record<string,unknown>)[key])===stableJson((currentContract as unknown as Record<string,unknown>)[key]))return;
+      if(path==='input.paymentNote'&&typeof value==='string'){
+        if(rows.length+2>limit){omitted+=2;return;}
+        rows.push(
+          {field:uiText('当前付款说明'),path:'paymentNote.before',value:currentContract.paymentNote||uiText('未填写')},
+          {field:uiText('拟改付款说明'),path:'paymentNote.after',value:value||uiText('未填写')},
+        );
+        return;
+      }
     }
     if (value && typeof value === 'object') {
       const entries = Array.isArray(value) ? value.map((child, i) => [String(i + 1), child] as const) : Object.entries(value);
@@ -272,7 +280,12 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   const changesCustomerTerms=!!proposal&&['customer.update','market.customer.update'].includes(proposal.command.type)
     &&typeof patch?.terms==='string';
   const termsCustomer=changesCustomerTerms?state?.customers.find(customer=>customer.id===proposal?.command.payload.id):undefined;
-  const sourceFingerprint=sourceReview?.fingerprint??(termsCustomer?stableJson([termsCustomer.id,termsCustomer.terms]):'');
+  const draftInput=proposal?.command.payload.input as {paymentNote?:unknown}|undefined;
+  const suppliesOrderPaymentNote=proposal?.command.type==='order.governance.saveDraft'&&typeof draftInput?.paymentNote==='string';
+  const noteOrder=suppliesOrderPaymentNote?state?.orders.find(order=>order.id===proposal?.command.payload.orderId):undefined;
+  const currentDraft=noteOrder?.governance?.changeDraft?.contract??noteOrder?.governance?.contract;
+  const sourceFingerprint=sourceReview?.fingerprint??(termsCustomer?stableJson([termsCustomer.id,termsCustomer.terms])
+    :currentDraft?stableJson([noteOrder!.id,currentDraft.paymentNote]):'');
   const sourceReason=sourceReview?.reason??(changesCustomerTerms&&state&&!termsCustomer?'客户已不可见，请重新核对':'');
   const sourceBasis=React.useRef({key:'',fingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
   if(sourceBasis.current.key!==sourceKey)sourceBasis.current={key:sourceKey,fingerprint:''};
@@ -350,8 +363,8 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
       {orderSourceUnavailable&&<Banner tone="warn" title={uiText('订单或来源资料已不可见，请重新核对')} />}
       {(incoming?.reason||incomingChanged)&&<Banner tone="warn" title={uiText(incoming?.reason||'来样或工厂任务已变化，请重新提出提议')} />}
-      {(sourceReason||sourceChanged&&(!changesCustomerTerms||!awaitingReceipt))&&<Banner tone="warn"
-        title={uiText(sourceReason||(changesCustomerTerms?'客户付款条件已更新，请重新提出提议':'办理资料已变化，请重新提出提议'))}/>}
+      {(sourceReason||sourceChanged&&(!(changesCustomerTerms||suppliesOrderPaymentNote)||!awaitingReceipt))&&<Banner tone="warn"
+        title={uiText(sourceReason||(changesCustomerTerms?'客户付款条件已更新，请重新提出提议':suppliesOrderPaymentNote?'订单付款说明已更新，请重新提出提议':'办理资料已变化，请重新提出提议'))}/>}
       {reopening?.reason&&<Banner tone="warn" title={uiText(reopening.reason)} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{(incoming?[incoming.title]:sourceReview?[sourceReview.title]:reopening?['恢复开发案']:proposal.summary).map((line, i) => <span key={i}>{incoming||sourceReview||reopening?uiText(line):line}</span>)}</div>
