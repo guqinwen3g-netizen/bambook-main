@@ -221,6 +221,29 @@ describe('附件预览浮层', () => {
     expect(screen.getByRole('columnheader',{name:'B'})).toBeTruthy();
   });
 
+  it('Excel：给末行引用留出居中空间，切换到其他表后清除', async () => {
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['开头'], ['末行']]), '报价');
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['其它']]), '规格');
+    const blob = new Blob([XLSX.write(book, { type: 'array', bookType: 'xlsx' })]);
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.mist-viewer-scroll')) return new DOMRect(0, 100, 300, 300);
+      if (this.matches('table')) return new DOMRect(0, 100, 300, 520);
+      if (this.matches('tr[data-cited]')) return new DOMRect(0, 590, 300, 28);
+      return original.call(this);
+    });
+    try {
+      mount([{ id: 's', name: '报价.xlsx' }], async () => blob, { initialSheetName: '报价', initialSheetRow: 2 });
+      await screen.findByRole('cell', { name: '末行' });
+      const pane = document.querySelector<HTMLElement>('.mist-viewer-scroll')!;
+      expect(pane.style.getPropertyValue('--mist-sheet-citation-space')).toBe('134px');
+      expect(pane.scrollTop).toBe(354);
+      await act(async () => screen.getByRole('tab', { name: '规格' }).click());
+      expect(pane.style.getPropertyValue('--mist-sheet-citation-space')).toBe('');
+    } finally { geometry.mockRestore(); }
+  });
+
   it.each([
     ['辅料', '辅料'],
     ['内部草稿', '尺寸表'],
