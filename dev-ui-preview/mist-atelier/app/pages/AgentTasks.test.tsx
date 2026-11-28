@@ -805,7 +805,7 @@ it.each(['xlsx','pdf'])('submits the numbered %s selected in task details', asyn
  expect(JSON.parse(writes[0][1].body)).toMatchObject({version:3,questionId:'question',answer:choice});
 });
 
-it.each(['committed','missing','different','denied'])('reads the current answer before any retry (%s)',async outcome=>{
+it.each(['committed','missing','different','denied','read-only'])('reads the current answer before any retry (%s)',async outcome=>{
  const answer='保留原值，等待书面依据。';
  const question={id:'question',question:'请补充书面确认依据。',askedAt:'2026-11-01T00:10:00Z'};
  const waiting={...row(),state:'waiting_human',questions:[question]};
@@ -836,6 +836,7 @@ it.each(['committed','missing','different','denied'])('reads the current answer 
  const input=()=>getByLabelText(answerDialog(),/答复/,{selector:'textarea'}) as HTMLTextAreaElement;
  expect(input().value).toBe(' '+answer+' ');expect(input().disabled).toBe(true);
  if(outcome==='committed'||outcome==='different')current=answered;
+ if(outcome==='read-only')current={...waiting,canControl:false};
  checking=true;await click(getByRole(answerDialog(),'button',{name:'核对原操作'}));
  expect(writes).toHaveLength(1);expect(reads).toBeGreaterThanOrEqual(1);
  if(outcome==='missing'){
@@ -845,7 +846,60 @@ it.each(['committed','missing','different','denied'])('reads the current answer 
  }
  expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();
  if(outcome==='denied')expect(document.body.textContent).not.toContain(question.question);
+ else if(outcome==='read-only')expect(queryByRole(document.body,'button',{name:'补充资料',exact:true})).toBeNull();
  else expect(getByText(document.body,answered.questions[0].answer)).toBeTruthy();
+});
+it.each(['committed','retry','replace'])('restores a text answer by digest after reload (%s)',async outcome=>{
+ const scope='plain-answer-reload',answer='模拟交期已书面核对。',other='改用新的交期确认。';
+ const question={id:'question',question:'请提供书面交期。',askedAt:'2026-11-01T00:10:00Z'};
+ const waiting={...row(),state:'waiting_human',questions:[question],canSupplementAttachments:true};
+ const completed=(answer:string)=>({...waiting,state:'queued',version:4,questions:[{...question,answer,answeredAt:'2026-11-01T00:20:00Z'}]});
+ const mount=()=>root.render(<MistRoot><ToastProvider><AssistantConversationProvider scope="A:workspace" controlStorageScope={scope}><AgentTasks onConnections={()=>{}}/></AssistantConversationProvider></ToastProvider></MistRoot>);
+ const openAnswer=()=>click(getByRole(document.body,'button',{name:'补充资料',exact:true}));
+ const dialog=()=>getByRole(document.body,'dialog',{name:'补充资料'});
+ const input=()=>getByLabelText(dialog(),/答复/,{selector:'textarea'}) as HTMLTextAreaElement;
+ const fill=(value:string)=>act(async()=>fireEvent.input(input(),{target:{value}}));
+ const writes:Array<{requestId:string;answer:string}>=[];
+ let current=waiting;
+ seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(init?.method==='POST'){
+   writes.push(JSON.parse(String(init.body)));
+   if(writes.length===1){if(outcome==='committed')current=completed(answer);throw new Error('网络中断');}
+   current=completed(writes.at(-1)!.answer);return {item:current};
+  }
+  if(url.includes('agent-identities'))return {items:[identity()],nextCursor:null};
+  if(url.includes('/history'))return {items:[],nextCursor:null};
+  return url.endsWith('/task')?{item:current}:{items:[current],nextCursor:null};
+ });
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  act(mount);await flush();await click(getByText(host,'核对邮件'));await openAnswer();await fill(answer);
+  await click(getByRole(dialog(),'button',{name:'提交答复'}));
+  await act(async()=>waitFor(()=>expect(writes).toHaveLength(1)));
+  expect(readTaskControls(scope).get('task')).toMatchObject({action:'answer',requestId:writes[0].requestId,questionId:question.id,fingerprint:expect.stringMatching(/^[a-f0-9]{64}$/)});
+  expect(sessionStorage.getItem('mist.xiaozhu.controls:'+scope)).not.toContain(answer);
+  act(()=>root.render(null));act(mount);await flush();await click(getByText(host,'核对邮件'));
+  if(outcome==='committed'){
+   expect(getByText(document.body,answer)).toBeTruthy();expect(writes).toHaveLength(1);
+  }else{
+   await openAnswer();expect(input().value).toBe('');expect(input().disabled).toBe(true);
+   await click(getByRole(dialog(),'button',{name:'核对原操作'}));expect(writes).toHaveLength(1);
+   expect(input().disabled).toBe(false);await fill(other);
+   await click(getByRole(dialog(),'button',{name:'重发原答复'}));
+   await act(async()=>waitFor(()=>expect(getByText(dialog(),'输入与原答复不一致')).toBeTruthy()));
+   expect(writes).toHaveLength(1);
+   if(outcome==='replace'){
+    await click(getByRole(dialog(),'button',{name:'填写新答复'}));
+    await fill(other);await click(getByRole(dialog(),'button',{name:'提交答复'}));
+   }else{
+    await fill(answer);await click(getByRole(dialog(),'button',{name:'重发原答复'}));
+   }
+   await act(async()=>waitFor(()=>expect(writes).toHaveLength(2)));
+   if(outcome==='retry')expect(writes[1]).toEqual(writes[0]);
+   else expect(writes[1]).toMatchObject({requestId:expect.not.stringMatching(writes[0].requestId),answer:other});
+  }
+  expect(readTaskControls(scope).has('task')).toBe(false);
+ }finally{vi.unstubAllGlobals();sessionStorage.removeItem('mist.xiaozhu.controls:'+scope);}
 });
 it.each([false,true])('checks the exact receipt for an attachment answer and retries only an absent receipt (%s)',async missing=>{
  const question={id:'question',question:'请补交书面确认依据。',askedAt:'2026-11-01T00:10:00Z'};
