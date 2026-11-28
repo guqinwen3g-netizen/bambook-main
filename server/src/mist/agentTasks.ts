@@ -335,12 +335,14 @@ export async function markPlatformModelFallback(db:any,actor:AgentActor,lease:Ag
   await save(db,row,c,{...c,version:c.version+1,updatedAt:new Date(now).toISOString(),
     platform:{...c.platform,modelFallbackAt:now}});
 }
-export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLease,plan:PlatformTaskPlan,now:number){
+export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLease,plan:PlatformTaskPlan,now:number,prefetched=false){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
   const pending=c.platform.steps.at(-1);if(pending?.result===undefined&&pending)return pending;
   if(c.platform.steps.length>=PLATFORM_TASK_TURN_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到模型轮次上限',409);
-  const step=newPlatformTaskStep(plan,now),n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],modelFallbackAt:undefined,issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined}};
+  const step=newPlatformTaskStep(plan,now);
+  if(prefetched)step.prefetched=true;
+  const n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],modelFallbackAt:undefined,issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined}};
   if(c.platform.checkpointBeforeIssue!==undefined)n.checkpoint=c.platform.checkpointBeforeIssue;
   await save(db,row,c,n);return step;
 }
@@ -651,7 +653,7 @@ export async function agentDailyUsage(db: any, workspaceId: string, ownerId: str
   for (const row of rows) {
     let c: TaskRecord; try { c = record(row, workspaceId); } catch { continue; }
     if (c.executor !== 'platform') continue;
-    const today = (c.platform?.steps ?? []).filter(s => typeof s.at === 'string' && mistBusinessDate(s.at) === date).length;
+    const today = (c.platform?.steps ?? []).filter(s => s.prefetched !== true && typeof s.at === 'string' && mistBusinessDate(s.at) === date).length;
     companyTurns += today;
     if (c.ownerId === ownerId) { turns += today; if (mistBusinessDate(c.createdAt) === date) tasks++; }
   }
@@ -669,7 +671,7 @@ export async function platformTaskUsage(db: any, workspaceId: string, month: str
     let c: TaskRecord;
     try { c = record(row, workspaceId); if(c.executor!=='platform'||mistBusinessDate(c.createdAt).slice(0,7)!==month)continue; } catch { continue; }
     const u = out.get(c.ownerId) ?? { ownerId: c.ownerId, ownerName: c.ownerName, tasks: 0, modelTurns: 0, runtimeMs: 0 };
-    u.tasks++; u.modelTurns += c.platform?.steps?.length ?? 0; u.runtimeMs += c.runtimeUsedMs || 0; out.set(c.ownerId, u);
+    u.tasks++; u.modelTurns += c.platform?.steps?.filter(step => step.prefetched !== true).length ?? 0; u.runtimeMs += c.runtimeUsedMs || 0; out.set(c.ownerId, u);
   }
   return [...out.values()].sort((a, b) => b.modelTurns - a.modelTurns || a.ownerName.localeCompare(b.ownerName));
 }

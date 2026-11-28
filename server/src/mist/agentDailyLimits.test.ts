@@ -7,6 +7,7 @@ import type{MistPlatformTaskWorker}from'./platformTaskWorker';
 import type{LlmCompletionInput}from'../ai/llmProviders';
 import{agentDailyUsage,taskRecord}from'./agentTasks';
 import{agentDailyLimits}from'./agentLimits';
+import{mistBusinessDate}from'../shared/mistBusinessClock';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'agent-daily-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.restoreAllMocks();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
@@ -60,4 +61,31 @@ it('applies the company cap across everyone and shows it to the company admin',a
  expect(JSON.stringify((await f.create('platform').expect(429)).body)).toContain('公司今日小竹用量已达上限');
  const usage=(await f.human.get(f.base+'/personal-agent/usage?month='+new Date().toISOString().slice(0,7)).expect(200)).body;
  if(usage.scope==='company')expect(usage.today).toMatchObject({companyTurns:10,companyTurnLimit:10});
+});
+
+it('allows the last model turn after automatic order preparation and counts only the model plan',async()=>{
+ vi.stubEnv('MIST_AGENT_DAILY_TURNS_PER_USER','10');
+ let mail='',turn=0;
+ const complete=vi.fn(async()=>++turn<=8
+  ?tool('bambook_get',{type:'email',id:mail})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原件。'}));
+ const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;
+ f.worker.start(3_600_000);
+ await f.create('platform').expect(201);await f.drain();
+ expect(complete).toHaveBeenCalledTimes(9);
+ const order=f.workspace.state.orders[0];
+ const {item}=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对关联订单',
+  instructions:'只读核对关联的模拟订单。',intentRefs:[{kind:'orders',id:order.id}],
+ }).expect(201)).body;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(10);
+ const done=(await f.human.get(f.base+'/agent-tasks/'+item.id).expect(200)).body.item;
+ expect(done).toMatchObject({state:'succeeded',trail:[expect.objectContaining({kind:'read',completed:true})]});
+ const {value}=await taskRecord(f.local.database,f.workspace.id,item.id);
+ expect(value.platform?.steps.map(step=>step.prefetched)).toEqual([true,undefined]);
+ const month=mistBusinessDate(new Date()).slice(0,7);
+ const usage=(await f.human.get(f.base+'/personal-agent/usage?month='+month).expect(200)).body;
+ expect(usage.today.turns).toBe(10);
+ expect(usage.items).toMatchObject([{modelTurns:10}]);
+ await f.create('platform').expect(429);
 });
