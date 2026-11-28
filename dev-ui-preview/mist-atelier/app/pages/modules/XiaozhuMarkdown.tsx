@@ -74,7 +74,7 @@ function mentionsAnotherSource(node: Node): boolean {
 
 function citedPdfPage(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):number|undefined {
   if(file.mimeType!=='application/pdf'&&!/\.pdf$/i.test(file.name))return;
-  const scoped=suffix.replace(/^[ \t]*[：:]?[ \t]*/,'');
+  const scoped=suffix.replace(/^[ \t]*(?:[：:]|的)?[ \t]*/u,'');
   const prefix = /^[（(]?[ \t]*/.exec(scoped)?.[0].length ?? 0;
   const direct = PDF_PAGE_REFERENCE.exec(scoped.slice(prefix));
   const lastPage=direct?null:/^共[ \t]*([1-9]\d*)[ \t]*页[；;，,][ \t]*(?:末页|最后一页)[ \t]*[（(][ \t]*第[ \t]*([1-9]\d*)[ \t]*页[ \t]*[）)]/.exec(scoped);
@@ -176,11 +176,9 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   files.forEach((file, index) => {
     if (file.name) byName.set(file.name, byName.has(file.name) ? undefined : index);
   });
-  const aliases=new Map<string,number>();
   taskAttachmentLabels(files).forEach((label,index)=>{
     if(label===files[index].name||byName.has(label))return;
     byName.set(label,index);
-    aliases.set(label,index);
   });
   const toAttachment=(index:number,child:Link['children'][number],following:string,target?:TaskAttachmentTarget):Link=>{
     const page=typeof target==='number'?target:citedPdfPage(following,files[index],reads);
@@ -192,7 +190,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
       ...(typeof worksheet==='object'?{'data-task-attachment-row':worksheet.row}:{})}},children:[child]};
   };
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
-  const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
+  const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=(?:的[ \\t]*)?第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
   const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
   const linkAttachmentTable = (table:Table, headingFile?:number) => {
     const [header,...rows]=table.children;
@@ -361,13 +359,26 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
       }
       const visit = (parent: Parent, following='') => {
         const children=parent.children;
+        const suffixes:string[]=[];
+        let suffix=following;
+        // Formatting nodes can split one citation. Stop at line breaks and nonliteral content.
+        for(let position=children.length-1;position>=0;position--){
+          const child=children[position];
+          suffixes[position]=suffix;
+          const label=singleLabel(child);
+          const firstLine=(label||inlineTextStart(child)).split('\n',1)[0];
+          suffix=label&&firstLine===label?firstLine+suffix:firstLine;
+        }
         parent.children = children.flatMap<Node>((child,position) => {
-          const next=position+1<children.length?inlineTextStart(children[position+1]):following;
+          const next=suffixes[position];
           if ('children' in child && Array.isArray(child.children) && child.type !== 'link' && child.type !== 'linkReference')
             visit(child as Parent,child.type==='strong'||child.type==='emphasis'?next:'');
           if(child.type==='inlineCode'&&'value' in child&&typeof child.value==='string'){
-            const index=aliases.get(child.value);
-            if(index!==undefined)return [toAttachment(index,{type:'inlineCode',value:child.value},next)];
+            const index=byName.get(child.value);
+            if(index!==undefined){
+              const file=files[index],page=citedPdfPage(next,file,reads);
+              if(page!==undefined||file.name!==child.value)return [toAttachment(index,{type:'inlineCode',value:child.value},next,page)];
+            }
           }
           if (child.type !== 'text' || !('value' in child) || typeof child.value !== 'string') return [child];
           const value = child.value, parts: (Link | Text)[] = [];
