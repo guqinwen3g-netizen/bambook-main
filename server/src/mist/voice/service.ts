@@ -10,6 +10,7 @@ import { VOICE_ENDPOINT, VOICE_INPUT_RATE, VOICE_OUTPUT_RATE, voiceConfig, voice
 const fail = (code: string, message: string, status = 400): never => { throw new MistApiError(code, message, status); };
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 const TICKET_TTL = 30_000, CALL_TTL = 15 * 60_000, MAX_BUFFER = 1_048_576;
+const AUDIO_OUTPUT_TIMEOUT_MS = 15_000;
 const ACCESS_CHANGED_CODE = 'VOICE_ACCESS_CHANGED';
 const ACCESS_CHANGED_MESSAGE = '语音授权已变化，请重新连接';
 export type VoiceBinding = {
@@ -90,12 +91,16 @@ export class MistVoiceService {
     let frameAt = this.now(), bytes = 0, messages = 0, lastPongAt = this.now(), pingAt = this.now();
     let bindingChange: Promise<void> = Promise.resolve();
     let suppressAudio = false, lastResponseId = '';
+    let audioOutput: { responseId: string; at: number } | undefined;
+    const matchesAudioOutput = (responseId: string) => audioOutput
+      && (!responseId || !audioOutput.responseId || audioOutput.responseId === responseId);
     const blockedResponses = new Set<string>();
     const handled = new Map<string, { work: Promise<unknown>; binding: Promise<void>; taskId?: string }>();
     const send = (payload: unknown) => { if (closed) return; if (browser.readyState === WebSocket.OPEN && browser.bufferedAmount < MAX_BUFFER) browser.send(JSON.stringify(payload)); else if (browser.bufferedAmount >= MAX_BUFFER) close(); };
     const upstream = (payload: unknown) => { if (closed) return; if (provider.readyState === WebSocket.OPEN && provider.bufferedAmount < MAX_BUFFER) provider.send(JSON.stringify(payload)); else if (provider.bufferedAmount >= MAX_BUFFER) close(); };
     const interrupt = () => {
       suppressAudio = true;
+      audioOutput = undefined;
       if (lastResponseId) blockedResponses.add(lastResponseId);
       if (blockedResponses.size > 32) blockedResponses.delete(blockedResponses.values().next().value!);
       upstream({ type: 'response.cancel', event_id: randomUUID() });
@@ -146,7 +151,13 @@ export class MistVoiceService {
       if (ready && speech) upstream(voiceSpeak(speech, question ? '请在原事项查看问题并补充资料。' : task.state === 'failed' ? '任务未完成，请在原事项查看原因。' : '任务已经处理，请在原事项查看结果。'));
     };
     const poll = setInterval(() => {
-      if (polling || closed || !ready) return; polling = true;
+      if (closed || !ready) return;
+      if (audioOutput && this.now() - audioOutput.at >= AUDIO_OUTPUT_TIMEOUT_MS) {
+        error('VOICE_AUDIO_STALLED', '语音播报超时，已交办事项继续执行');
+        return;
+      }
+      if (polling) return;
+      polling = true;
       void (async () => {
         if (this.now() - lastPongAt > 45_000) { error('VOICE_DISCONNECTED', '语音已断开，已交办事项继续执行'); return; }
         if (this.now() - pingAt >= 20_000) { browser.ping(); pingAt = this.now(); }
@@ -245,15 +256,31 @@ export class MistVoiceService {
       // An idle cancellation has no acknowledgement in the real service. The
       // next distinct audio-start event is the boundary; late old-response data
       // stays blocked even if it arrives after the next response has begun.
-      if (payload.type === 'response.canceled') return;
       const responseId = typeof payload.response_id === 'string' ? payload.response_id : '';
       if (responseId && blockedResponses.has(responseId)) return;
-      if (payload.type === 'response.output_audio.started') { lastResponseId = responseId; suppressAudio = false; return; }
+      if (payload.type === 'response.canceled') {
+        if (matchesAudioOutput(responseId)) audioOutput = undefined;
+        return;
+      }
+      if (payload.type === 'response.output_audio.started') {
+        lastResponseId = responseId;
+        suppressAudio = false;
+        audioOutput = { responseId, at: this.now() };
+        return;
+      }
       if (payload.type === 'response.output_audio.delta') {
         const audio = payload.audio ?? payload.delta;
-        if (!suppressAudio && typeof audio === 'string' && audio.length <= MAX_BUFFER && /^[A-Za-z0-9+/]*={0,2}$/.test(audio)) send({ type: 'audio', audio });
+        if (!suppressAudio && typeof audio === 'string' && audio.length <= MAX_BUFFER && /^[A-Za-z0-9+/]*={0,2}$/.test(audio)) {
+          if (audio.length && (!audioOutput || matchesAudioOutput(responseId))) {
+            audioOutput = { responseId: responseId || audioOutput?.responseId || '', at: this.now() };
+          }
+          send({ type: 'audio', audio });
+        }
       } else if (payload.type === 'response.output_text.delta' || payload.type === 'response.output_text.done') send({ type: 'reply', final: payload.type.endsWith('.done'), text: voiceText(payload) });
-      else if (payload.type === 'response.output_audio.done') send({ type: 'audio_done' });
+      else if (payload.type === 'response.output_audio.done') {
+        if (matchesAudioOutput(responseId)) audioOutput = undefined;
+        send({ type: 'audio_done' });
+      }
     });
     browser.on('message', (raw, binary) => {
       if (!ready || closed) return;
