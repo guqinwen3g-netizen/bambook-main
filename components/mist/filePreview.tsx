@@ -98,7 +98,9 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
     if (jumpOpen) { jumpField.current?.focus(); jumpField.current?.select(); }
   }, [jumpOpen]);
   const cache = React.useRef(new Map<string, Promise<Blob>>());
-  const [blob, setBlob] = React.useState<Blob | null>(null), [error, setError] = React.useState(''), [downloadError, setDownloadError] = React.useState('');
+  const [blob, setBlob] = React.useState<Blob | null>(null), [downloadError, setDownloadError] = React.useState('');
+  const [error, setError] = React.useState<{message?:string;retryable:boolean}>();
+  const reportFailure = (message?:string, retryable=false) => setError({message,retryable});
   const [readAttempt, retryRead] = React.useReducer((attempt: number) => attempt + 1, 0);
   const [zoom, setZoom] = React.useState<Zoom>('fit'), [rotate, setRotate] = React.useState(0), [fitScale, setFitScale] = React.useState(1);
   const [pdfPosition, setPdfPosition] = React.useState<{fileId:string;page:number;total:number}>();
@@ -110,10 +112,10 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   const info = file ? previewKind(file) : { kind: 'unsupported' as PreviewKind };
   React.useEffect(() => {
     if (!file) return; let live = true;
-    setBlob(null); setError(''); setDownloadError(''); setZoom('fit'); setRotate(0); setFitScale(1); setPdfPosition(undefined); setJumpEntry(undefined); setJumpInvalid(false); setPdfJump(undefined);
+    setBlob(null); setError(undefined); setDownloadError(''); setZoom('fit'); setRotate(0); setFitScale(1); setPdfPosition(undefined); setJumpEntry(undefined); setJumpInvalid(false); setPdfJump(undefined);
     if (info.kind === 'unsupported') return;
     let p = cache.current.get(file.id); if (!p) { p = load(file); cache.current.set(file.id, p); p.catch(() => cache.current.delete(file.id)); }
-    p.then(b => { if (live) setBlob(b); }, e => { if (live) setError(e instanceof Error ? e.message : '附件读取失败'); });
+    p.then(b => { if (live) setBlob(b); }, e => { if (live) reportFailure(e instanceof Error ? e.message : '附件读取失败',true); });
     return () => { live = false; };
   }, [file?.id, readAttempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const many = files.length > 1;
@@ -196,12 +198,12 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
       {downloadError && <div className="mist-viewer-note"><Banner tone="bad" title={uiText("下载失败")}>{downloadError}</Banner></div>}
       <div className="mist-viewer-stage" data-kind={info.kind}>
         {info.kind === 'unsupported' ? <Unsupported reason={info.reason} onDownload={onDownload ? download : undefined} />
-          : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("预览未能打开")} description={uiText(error)} action={(!blob || onDownload) && <div className="mist-row">
-            {!blob && <Button onClick={retry}>{uiText('重试')}</Button>}
+          : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("预览未能打开")} description={error.message ? uiText(error.message) : undefined} action={(error.retryable || onDownload) && <div className="mist-row">
+            {error.retryable && <Button onClick={retry}>{uiText('重试')}</Button>}
             {onDownload && <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button>}
           </div>} /></div>
           : !blob ? <Loading />
-          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPdfPosition={reportPdfPosition} onFail={setError} pdfJump={pdfJump?.fileId === file.id ? pdfJump : undefined} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} initialSheetRow={initialSheetRow} />}
+          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPdfPosition={reportPdfPosition} onFail={reportFailure} pdfJump={pdfJump?.fileId === file.id ? pdfJump : undefined} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} initialSheetRow={initialSheetRow} />}
       </div>
     </div></Portal>;
 }
@@ -211,7 +213,7 @@ function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () 
   return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
-type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPdfPosition: (page: number, total: number) => void; onFail: (msg: string) => void; pdfJump?: {page:number}; initialPdfPage?: number; initialSheetName?: string; initialSheetRow?: number };
+type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPdfPosition: (page: number, total: number) => void; onFail: (msg?: string,retryable?:boolean) => void; pdfJump?: {page:number}; initialPdfPage?: number; initialSheetName?: string; initialSheetRow?: number };
 function Renderer(p: RendererProps) {
   switch (p.kind) {
     case 'image': return <ImageView {...p} />;
@@ -298,7 +300,13 @@ function PdfView({ blob, zoom, onFitScale, onPdfPosition, onFail, pdfJump, initi
         const first = await d.getPage(1), vp = first.getViewport({ scale: 1 });
         if (!live) return; setBase({ w: vp.width, h: vp.height }); setDoc(d);
         if (!hasOpeningPage) onPdfPosition(1, d.numPages);
-      } catch (e) { if (live) { const name=(e as { name?: string })?.name; onFail(name === 'PasswordException' ? '该 PDF 设有打开密码，请下载后输入密码查看' : name === 'InvalidPDFException' ? 'PDF 无法解析，文件可能已损坏' : '预览加载失败，请刷新后重试'); } }
+      } catch (e) {
+        if (!live) return;
+        const name=(e as { name?: string })?.name;
+        if (name === 'PasswordException') onFail('该 PDF 设有打开密码，请下载后输入密码查看');
+        else if (name === 'InvalidPDFException') onFail('PDF 无法解析，文件可能已损坏');
+        else onFail(undefined,true);
+      }
     })();
     return () => { live = false; if (loaded) void loaded.destroy(); };
   }, [blob]); // eslint-disable-line react-hooks/exhaustive-deps
