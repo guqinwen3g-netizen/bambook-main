@@ -17,8 +17,12 @@ it('opens a row from the row itself but leaves in-row controls to their own hand
   expect(open).toHaveBeenCalledTimes(1);
   act(() => (host.querySelector('button') as HTMLElement).click());
   expect(act1).toHaveBeenCalledTimes(1); expect(open).toHaveBeenCalledTimes(1);
-  act(() => { (host.querySelector('button') as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+  const onButton = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  act(() => { (host.querySelector('button') as HTMLElement).dispatchEvent(onButton); });
   expect(open).toHaveBeenCalledTimes(1);
-  act(() => { row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+  expect(onButton.defaultPrevented).toBe(false);
+  const onRow = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  act(() => { row.dispatchEvent(onRow); });
   expect(open).toHaveBeenCalledTimes(2);
+  expect(onRow.defaultPrevented).toBe(true);
 });
