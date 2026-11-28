@@ -660,6 +660,36 @@ it.each([
  expect(taskDialog().textContent).toContain(scenario.done);
 });
 
+it.each(['masked','denied'])('hides the old detail during a %s control check and restores the request after regrant',async access=>{
+ const active={...row(),executor:'platform',state:'waiting_time',canControl:true,result:'原始报告需要重新授权。'};
+ const paused={...active,state:'paused',version:active.version+1};
+ let restricted=false,final=false;
+ seam.api.mockImplementation(async(url:string,init:any)=>{
+  if(init?.method==='POST')throw Error('回执未送达');
+  if(url.endsWith('/task')){
+   if(restricted&&access==='denied')throw Object.assign(Error('任务无权访问'),{status:403});
+   if(restricted)return {item:{...active,name:'Agent任务',state:'access_changed',contentRestricted:true,instructions:'',result:''}};
+   return {item:final?paused:active};
+  }
+  return url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[],nextCursor:null}:{items:[active],nextCursor:null};
+ });
+ act(paint);await flush();await click(getByText(host,active.name));
+ const detail=()=>getByRole(document.body,'dialog',{name:active.name});
+ const open=()=>click(getByRole(detail(),'button',{name:'暂停任务',exact:true}));
+ const operation=()=>getByRole(document.body,'dialog',{name:'暂停任务',exact:true});
+ await open();await click(getByRole(operation(),'button',{name:'确认',exact:true}));
+ restricted=true;
+ await click(getByRole(operation(),'button',{name:'核对原操作'}));
+ expect(queryByRole(document.body,'dialog',{name:'暂停任务',exact:true})).toBeNull();
+ expect(document.body.textContent).not.toContain(active.result);
+ restricted=false;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ await open();final=true;
+ await click(getByRole(operation(),'button',{name:'核对原操作'}));
+ expect(detail().textContent).toContain('已暂停');
+ expect(seam.api.mock.calls.filter(([url,init])=>url.endsWith('/task/pause')&&init?.method==='POST')).toHaveLength(1);
+});
+
 it('does not replace a committed task control receipt with an older focus read',async()=>{
  const active={...row(),executor:'platform',state:'running'};
  const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
