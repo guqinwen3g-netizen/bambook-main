@@ -82,12 +82,13 @@ export function Portal({ children }: { children: React.ReactNode }) {
 export type DialogProps = { open: boolean; onClose: () => void; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon; tone?: 'accent' | 'bad' | 'warn' | 'ok'; children?: React.ReactNode; footer?: React.ReactNode; width?: number };
 /** 居中弹窗：只用于需要打断的确认（删除、提交不可撤回操作）。普通编辑用 Drawer 或页内表单。 */
 export function Dialog({ open, onClose, title, description, icon, tone = 'accent', children, footer, width }: DialogProps) {
+  const nested = useInModal();
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   useModalFocus(open, onClose, ref);
   if (!open) return null;
   return <Portal><div className="mist-scrim" onClick={onClose} />
-    <div ref={ref} id={id} tabIndex={-1} className="mist-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined} style={width ? { width: `min(${width}px, 92vw)` } : undefined}>
+    <div ref={ref} id={id} tabIndex={-1} className="mist-dialog" data-nested={nested || undefined} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined} style={width ? { width: `min(${width}px, 92vw)` } : undefined}>
       <div className="mist-dialog-h">{icon && <Tile icon={icon} tone={tone} />}<div style={{ flex: 1 }}><div id={`${id}-title`} className="mist-h2">{uiText(title)}</div>{description && <p id={`${id}-description`}>{uiText(description)}</p>}</div><IconButton icon={X} label={uiText("关闭")} size="sm" onClick={onClose} /></div>
       {children && <div className="mist-dialog-body"><InModalContext.Provider value={true}>{uiText(children)}</InModalContext.Provider></div>}
       {footer && <div className="mist-dialog-foot">{footer}</div>}
@@ -98,12 +99,13 @@ export function Dialog({ open, onClose, title, description, icon, tone = 'accent
 export type DrawerProps = { open: boolean; onClose: () => void; title: React.ReactNode; sub?: React.ReactNode; leading?: React.ReactNode; tone?: 'ai'; size?: 'md' | 'lg'; children: React.ReactNode; footer?: React.ReactNode; bodyless?: boolean };
 /** 右侧抽屉：快速查看/编辑记录、AI 助手。不离开当前列表。 */
 export function Drawer({ open, onClose, title, sub, leading, tone, size, children, footer, bodyless }: DrawerProps) {
+  const nested = useInModal();
   const ref = React.useRef<HTMLElement>(null);
   const id = React.useId();
   useModalFocus(open, onClose, ref);
   if (!open) return null;
   return <Portal><div className="mist-scrim" onClick={onClose} />
-    <aside ref={ref} id={id} tabIndex={-1} className="mist-drawer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={sub ? `${id}-description` : undefined} data-size={size === 'lg' ? 'lg' : undefined}>
+    <aside ref={ref} id={id} tabIndex={-1} className="mist-drawer" data-nested={nested || undefined} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={sub ? `${id}-description` : undefined} data-size={size === 'lg' ? 'lg' : undefined}>
       <div className="mist-drawer-h" data-tone={tone}>{leading}<div><b id={`${id}-title`}>{uiText(title)}</b>{sub && <small id={`${id}-description`}>{uiText(sub)}</small>}</div><IconButton icon={X} label={uiText("关闭")} onClick={onClose} /></div>
       <InModalContext.Provider value={true}>{bodyless ? children : <div className="mist-drawer-body">{uiText(children)}</div>}
       {footer && <div className="mist-drawer-foot">{footer}</div>}</InModalContext.Provider>
