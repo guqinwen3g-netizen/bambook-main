@@ -6,13 +6,13 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import {AssistantPage} from './PlatformPages';
 import {getByRole} from '@testing-library/dom';
-import {Nav} from '../../nav';
+import {Nav,readMistRoute,type Route} from '../../nav';
 const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true,chatPermission:true}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mistApiRequest:(...a:any[])=>mock.api(...a)}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope==='ai:chat'?mock.chatPermission:scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
-const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
+const view=(active=true, taskId?:string,section='tasks',sourcePosition?:Route['sourcePosition'])=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{}),sourcePosition},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>{
   const result=body&&typeof body==='object'&&(body as {mode?:unknown}).mode==='read_only'
     ? {contextToken:crypto.randomUUID(),...body}:body;
@@ -112,6 +112,39 @@ it('keeps an authorized read-only turn usable and omits it after access is withd
   expect(host.textContent).toContain('部分历史答复需重新核对');
   await question('撤权后继续提问');await click('发送');
   expect(requests[1]).toMatchObject({history:[]});
+});
+
+it('restores the exact report citation when returning from an order to the same conversation',async()=>{
+ const report={id:'source-return-task',name:'核对原订单',conversationId:'c_source_return',executor:'platform',
+  identityId:'personal',state:'succeeded',instructions:'核对原订单',result:'请查看已核对的 SO-SELECTED。',
+  questions:[],waitingProposalIds:[],version:3,createdAt:'2026-11-27T03:00:00Z',updatedAt:'2026-11-27T03:01:00Z'};
+ const original={state:history.state,url:location.href};
+ mock.fetch.mockResolvedValue(response({configured:true}));
+ mock.api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+  if(url.endsWith('/agent-tasks/'+report.id))return {item:report};
+  if(url.endsWith('/agent-tasks'))return {items:[report],nextCursor:null};
+  return {items:[],restrictedIds:[]};
+ });
+ const citation=()=>host.querySelector<HTMLButtonElement>('.mist-xz-md button.mist-xz-ref');
+ try{
+  history.replaceState({},'','?view=assistant&section=task-origin&id='+report.id);
+  await mount();
+  await act(async()=>root!.render(view(true,report.id,'task-origin')));
+  await act(async()=>citation()!.click());
+  expect(go).toHaveBeenCalledWith('orders/detail','order',undefined);
+  const saved=readMistRoute().sourcePosition;
+  expect(saved).toMatchObject({view:'assistant',scope:'session-a:workspace',conversationId:report.conversationId,taskId:report.id,version:report.version,citation:0});
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true,report.id,'task-origin',saved)));
+  await act(async()=>{await new Promise(resolve=>requestAnimationFrame(resolve));});
+  expect(document.activeElement).toBe(citation());
+  await act(async()=>root!.render(view(false)));
+  report.version++;
+  await act(async()=>root!.render(view(true,report.id,'task-origin',saved)));
+  await act(async()=>{await new Promise(resolve=>requestAnimationFrame(resolve));});
+  expect(document.activeElement).not.toBe(citation());
+ }finally{history.replaceState(original.state,'',original.url);}
 });
 
 it('preserves work-log expansion when returning from an order within the same account and workspace', async () => {

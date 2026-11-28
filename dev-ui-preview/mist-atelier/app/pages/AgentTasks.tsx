@@ -554,7 +554,7 @@ function TaskReport({ task }: { task: AgentTaskView }) {
   nav.go(view, id, target);
  };
  React.useLayoutEffect(() => {
-  if (sourcePosition?.view !== 'assistant' || sourcePosition.scope !== scope || sourcePosition.taskId !== task.id
+  if (sourcePosition?.view !== 'assistant' || sourcePosition.conversationId || sourcePosition.scope !== scope || sourcePosition.taskId !== task.id
    || sourcePosition.version !== task.version || sourcePosition.updatedAt !== task.updatedAt) return;
   const button = reportBody.current?.querySelectorAll<HTMLButtonElement>('button.mist-xz-ref')[sourcePosition.citation];
   const body = button?.closest<HTMLElement>('.mist-drawer-body');

@@ -30,7 +30,7 @@ import { calculatePlatformBom, calculatePlatformPricing, platformBusinessDate, p
 import { mistMoneyMinor, isActiveMistInvoice, isRecognizedMistInvoice } from '../../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
-import { useNav } from '../../nav';
+import { readMistRoute, rememberMistSource, useNav, type Route, type RouteTarget } from '../../nav';
 import { ModuleWorkbench, ModuleEditorDialog, ModuleEditorPage, downloadModuleCsv, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 import { RisksPage } from './RisksPage';
 import { TeamBoard } from './TeamBoard';
@@ -176,6 +176,13 @@ function matchesReadOnlySource(source: unknown, selectedIds: readonly string[]):
 const NO_ASSISTANT_FILES: File[] = [];
 const NO_ASSISTANT_ATTACHMENT_REFS: AssistantAttachmentRef[] = [];
 
+function threadCitationScroller(thread:HTMLElement){
+  for(let node:HTMLElement|null=thread;node&&node!==document.documentElement;node=node.parentElement){
+    if(node.scrollHeight>node.clientHeight&&/^(?:auto|scroll|overlay|hidden)$/.test(getComputedStyle(node).overflowY))return node;
+  }
+  return document.scrollingElement;
+}
+
 export function AssistantPage(){
   const nav=useNav(),tasksOpen=nav.route.section==='tasks'||nav.route.section==='agent';
   const rulesRoute=nav.route.section==='automations';
@@ -198,6 +205,8 @@ export function AssistantPage(){
   const rulesOpen=!readOnlyRoute&&!tasksOpen&&(rulesRoute||automations);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
   const composerDock=React.useRef<HTMLDivElement>(null);
+  const clickedCitation=React.useRef<HTMLButtonElement|null>(null);
+  const restoredCitation=React.useRef<Route['sourcePosition']>(undefined);
   const originRead=React.useRef<AbortController|undefined>(undefined);
   const originHandled=React.useRef('');
   const [originStatus,setOriginStatus]=React.useState<'loading'|'unavailable'>();
@@ -616,16 +625,60 @@ export function AssistantPage(){
   // 执行中跟随新步骤；长回答完成后，从提问和第一行读起。
   const follow=()=>{const el=scrollRef.current;if(!el)return;const turns=el.querySelectorAll('.mist-xz-turn'),last=turns[turns.length-1] as HTMLElement|undefined;const bottom=el.scrollHeight-el.clientHeight;if(last&&['queued','running'].includes(last.dataset.taskState??'')){el.scrollTop=Math.max(0,bottom);return;}const start=last?last.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-16:bottom;el.scrollTop=Math.max(0,Math.min(bottom,start));};
   const threadKey=visibleTasks.map(t=>t.id+t.updatedAt).join()+visibleMessages.length+busy;
+  const openThreadSource=(view:string,id:string,target?:RouteTarget)=>{
+    if(!view)return;
+    const button=clickedCitation.current,region=scrollRef.current;
+    const body=button?.closest('.mist-xz-md');
+    const taskId=body?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId;
+    const task=visibleTasks.find(item=>item.id===taskId&&!item.contentRestricted&&item.state!=='access_changed');
+    if(button&&body&&region?.contains(button)&&task){
+      const citation=[...body.querySelectorAll('button.mist-xz-ref')].indexOf(button);
+      const scroller=threadCitationScroller(region);
+      const top=scroller&&scroller!==document.scrollingElement?scroller.getBoundingClientRect().top:0;
+      const offset=button.getBoundingClientRect().top-top;
+      if(citation>=0)rememberMistSource(readMistRoute(),{view:'assistant',scope,conversationId,taskId:task.id,
+        version:task.version,updatedAt:task.updatedAt,citation,offset});
+    }
+    w.go(view,id,target);
+  };
+  const sourcePosition=nav.route.sourcePosition;
+  const returnedPosition=sourcePosition?.view==='assistant'&&sourcePosition.scope===scope
+    &&sourcePosition.conversationId===conversationId&&Number.isFinite(sourcePosition.offset)?sourcePosition:undefined;
+  const returnedTask=returnedPosition&&visibleTasks.find(item=>item.id===returnedPosition.taskId&&!item.contentRestricted
+    &&item.state!=='access_changed'&&item.version===returnedPosition.version&&item.updatedAt===returnedPosition.updatedAt);
+  React.useLayoutEffect(()=>{
+    if(!returnedTask||!returnedPosition||returnedPosition===restoredCitation.current)return;
+    const region=scrollRef.current;
+    const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===returnedTask.id);
+    const button=turn?.querySelectorAll<HTMLButtonElement>('.mist-xz-md button.mist-xz-ref')[returnedPosition.citation];
+    if(!region||!button)return;
+    atBottomRef.current=false;
+    const frame=requestAnimationFrame(()=>{
+      if(!button.isConnected)return;
+      const scroller=threadCitationScroller(region);
+      const top=scroller&&scroller!==document.scrollingElement?scroller.getBoundingClientRect().top:0;
+      const delta=button.getBoundingClientRect().top-top-returnedPosition.offset;
+      if(scroller?.scrollTo)scroller.scrollTo({top:scroller.scrollTop+delta,behavior:'instant'});
+      else if(scroller)scroller.scrollTop+=delta;
+      else button.scrollIntoView?.({block:'nearest'});
+      button.focus({preventScroll:true});
+      restoredCitation.current=returnedPosition;
+    });
+    return()=>cancelAnimationFrame(frame);
+  },[returnedPosition,returnedTask]);
   React.useEffect(()=>{
     if(!originFocus||originFocus.conversationId!==conversationId)return;
     const region=scrollRef.current;
     const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===originFocus.taskId);
     if(!region||!turn)return;
+    // A history entry with an exact citation takes precedence over the usual jump to task start.
+    if(returnedPosition&&returnedTask?.id===originFocus.taskId
+      &&turn.querySelectorAll('.mist-xz-md button.mist-xz-ref')[returnedPosition.citation]){setOriginFocus(undefined);return;}
     // Narrow Mist layouts scroll the document instead of the thread.
     if(getComputedStyle(region).overflowY==='visible'&&typeof turn.scrollIntoView==='function')turn.scrollIntoView({block:'start',inline:'nearest'});
     else region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
     setOriginFocus(undefined);
-  },[originFocus,conversationId,threadKey]);
+  },[originFocus,conversationId,threadKey,returnedPosition,returnedTask]);
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
   React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)follow();});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
@@ -692,9 +745,11 @@ export function AssistantPage(){
         {(cowork.sendError||cowork.hasPendingSubmission&&!cowork.loading)&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText(cowork.sendError||'提交结果待核对')} actions={cowork.hasPendingSubmission?<Button disabled={busy||cowork.checkingReceipt} loading={cowork.checkingReceipt} onClick={()=>void cowork.checkSubmission()}>{uiText('核对提交结果')}</Button>:undefined}/></div>}
         {recoveredSubmission&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="ok" title={uiText('已找回提交的任务')}/></div>}
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
-          <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
+          <div className="mist-xz-scroll" ref={scrollRef} onClickCapture={event=>{
+            clickedCitation.current=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.mist-xz-md button.mist-xz-ref'):null;
+          }} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
-              {useTaskThread?<XiaozhuThread tasks={visibleTasks} staleProgressIds={cowork.staleProgressIds} onRecheckProgress={cowork.recheckProgress} onCheckAttachmentReceipt={cowork.checkAttachmentReceipt} offerProgressRecheck={taskCreationUnavailable} workLog={{expanded:workLogExpanded,setExpanded:setWorkLogExpanded}} answerDraft={{read:(taskId,questionId)=>answerDrafts.get(taskAnswerDraftKey(taskId,questionId))?.text??'',write:setAnswerDraft,readFiles:conversation.readAnswerFiles,writeFiles:conversation.setAnswerFiles}} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall&&!uncheckedAttachments.length?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text,files)=>void cowork.answer(t,id,text,files)} onCheckAnswer={(t,id)=>void cowork.checkAnswer(t,id)} onCancel={t=>void cowork.cancel(t)} onResume={cowork.available?t=>void cowork.resume(t):undefined} onCheckStop={t=>void cowork.checkStop(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onRefreshProposals={refreshConfirmations} refreshingProposals={w.loading||w.saving} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
+              {useTaskThread?<XiaozhuThread tasks={visibleTasks} staleProgressIds={cowork.staleProgressIds} onRecheckProgress={cowork.recheckProgress} onCheckAttachmentReceipt={cowork.checkAttachmentReceipt} offerProgressRecheck={taskCreationUnavailable} workLog={{expanded:workLogExpanded,setExpanded:setWorkLogExpanded}} answerDraft={{read:(taskId,questionId)=>answerDrafts.get(taskAnswerDraftKey(taskId,questionId))?.text??'',write:setAnswerDraft,readFiles:conversation.readAnswerFiles,writeFiles:conversation.setAnswerFiles}} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall&&!uncheckedAttachments.length?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text,files)=>void cowork.answer(t,id,text,files)} onCheckAnswer={(t,id)=>void cowork.checkAnswer(t,id)} onCancel={t=>void cowork.cancel(t)} onResume={cowork.available?t=>void cowork.resume(t):undefined} onCheckStop={t=>void cowork.checkStop(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={openThreadSource} onProposal={setProposalId} onRefreshProposals={refreshConfirmations} refreshingProposals={w.loading||w.saving} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
               :<div className="mist-xz-thread">{visibleMessages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id,target)=>w.go(view,id,target)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
                 <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
                 {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}
