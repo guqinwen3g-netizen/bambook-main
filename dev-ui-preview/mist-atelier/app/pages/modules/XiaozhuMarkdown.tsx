@@ -265,10 +265,28 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
       return position===0?line.children:[separators[position-1],...line.children];
     });
   };
+  const linkAttachmentLeadLine = (paragraph: Paragraph) => {
+    const {lines,separators}=splitSectionLines(paragraph.children);
+    if(lines.length<2)return;
+    const headingParts=lines[0].map(singleLabel);
+    if(headingParts.some(part=>!part))return;
+    const heading=headingParts.join('').trim();
+    const [mention,other]=heading.matchAll(pattern);
+    if(!mention||other||mention.index!==0)return;
+    const annotation=heading.slice(mention[0].length).trim();
+    if(annotation&&(!/^[（(][^（）()]+[）)]$/u.test(annotation)||ATTACHMENT_EXT_IN_PROSE.test(annotation)))return;
+    const index=byName.get(mention[0]);
+    if(index===undefined)return;
+    const body:Paragraph={type:'paragraph',children:lines.slice(1).flatMap((line,position)=>
+      position===0?line:[separators[position],...line])};
+    linkSectionReference(body,index);
+    paragraph.children=[...lines[0],separators[0],...body.children];
+  };
   return {
     names,
     plugin: () => (tree: Root) => {
       if (!names.length) return;
+      for(const node of tree.children)if(node.type==='paragraph')linkAttachmentLeadLine(node);
       for (let position=1;position<tree.children.length;position++) {
         const heading = tree.children[position-1];
         if (heading.type !== 'heading' && heading.type !== 'paragraph') continue;

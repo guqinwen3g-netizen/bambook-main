@@ -103,6 +103,27 @@ it('keeps the observed page link when a page result also explains its missing te
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it.each(['','（依据您提供的原件进行核对）'])('keeps page and worksheet row citations below an attachment name in the same paragraph (%s)',async annotation=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const pdf={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:100};
+ const sheet={id:'quote',name:'sparse.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const reads=[
+  {at:'',kind:'read' as const,label:'PDF',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[3]},
+  {at:'',kind:'read' as const,label:'Excel',taskAttachmentId:sheet.id,taskAttachmentObservedSheets:['报价'],taskAttachmentObservedSheetRows:[{sheet:'报价',row:47}]},
+ ];
+ const text=`scan.pdf${annotation}\n第 3 页：编号 SCAN-QC-7158。\n\nsparse.xlsx${annotation}\n工作表：报价 第 47 行：原币 EUR。\n\nscan.pdf（与 other.pdf 一起核对）\n第 3 页：不可归属。`;
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[pdf,sheet]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const page=host.querySelectorAll<HTMLButtonElement>('button[title="第 3 页"]');
+  expect(page).toHaveLength(1);
+  const row=host.querySelector<HTMLButtonElement>('button[title="工作表 报价 第 47 行"]')!;
+  expect(row).toBeTruthy();
+  await act(async()=>{page[0].click();row.click();});
+  expect(preview.mock.calls).toEqual([[pdf,3],[sheet,{sheet:'报价',row:47}]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it.each(['两页均无 PDF 可提取文字','这两页没有可提取的文字层'])('links observed PDF pages after the scan explanation %s',async explanation=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

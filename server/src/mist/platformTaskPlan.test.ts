@@ -210,6 +210,18 @@ it('recognizes a single explicitly requested PDF page without interpreting a wid
  expect([...exclusive.allowedFiles!]).toEqual(['pdf2']);
 });
 
+it('limits a PDF visual read requested after the user adds the missing originals',()=>{
+ const file={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200};
+ const prompt='三份原件还没上传，请先在原任务问我要附件。收到后请目视核对 scan.pdf 第 3 页。';
+ expect(requestedTaskAttachmentScope([],prompt).pdfRanges.size).toBe(0);
+ const {pdfRanges,pdfVisualRanges}=requestedTaskAttachmentScope([file],prompt);
+ expect(pdfRanges.get(file.id)).toEqual({from:3,to:3});
+ expect(pdfVisualRanges.get(file.id)).toEqual({from:3,to:3});
+  const sheet={id:'sheet',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:1200};
+  const worksheet=requestedTaskAttachmentScope([sheet],'收到附件后，请只读取 quote.xlsx 的工作表「报价」第 23 行。').worksheet;
+  expect(worksheet).toMatchObject({fileId:'sheet',worksheet:'报价',rows:[{from:23,to:23}]});
+});
+
 it('binds a PDF page limit to an exact name or numbered original in its own clause',()=>{
  const named={id:'terms',name:'terms.pdf',mimeType:'application/pdf',size:1};
  const files=[...mixedFiles,named];

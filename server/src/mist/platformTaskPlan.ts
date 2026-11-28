@@ -113,10 +113,16 @@ function readPdfPageList(first:PdfPageRange,tail:string,item:RegExp,wider:RegExp
   return {ranges,tail,invalid:wider.test(tail)};
 }
 
+function attachmentScopeRequest(instructions:string) {
+  // A request to inspect an original after it arrives still governs that
+  // original once the owner adds it to the task.
+  return splitTaskRequest(instructions).replace(/(^|[。；;，,\n])[ \t]*收到(?:原件|附件|文件)?后[ \t]*[，,]?[ \t]*/gu,'$1');
+}
+
 function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]):PdfSelection {
   const pdfRanges=new Map<string,PdfPageScope>(),pdfVisualRanges=new Map<string,PdfPageScope>();
   const confirmedPdfChoices=new Set<string>();
-  const request=splitTaskRequest(instructions);
+  const request=attachmentScopeRequest(instructions);
   const files=attachments.filter(isTaskPdf);
   if(!files.length)return {pdfRanges,pdfVisualRanges,confirmedPdfChoices};
   const namesIn=taskAttachmentNames(attachments);
@@ -198,7 +204,7 @@ function worksheetRowsAt(text:string,english:boolean){
 }
 
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
-  const request=splitTaskRequest(instructions);
+  const request=attachmentScopeRequest(instructions);
   const workbooks=taskWorkbookChoices(attachments);
   if(!workbooks.length)return;
   const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[「“"]([^」”"\n]{1,31})[」”"]|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
