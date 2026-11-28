@@ -23,6 +23,16 @@ type LinkScope = {
   onOpenAttachment?: (file: TaskAttachment,target?:TaskAttachmentTarget) => void;
 };
 const MarkdownLinks = React.createContext<LinkScope | null>(null);
+function recordKey(view:string,id:string,target?:RouteTarget){
+  const coordinates=Object.entries(target??{}).filter(([,value])=>value!==undefined).sort(([a],[b])=>a.localeCompare(b));
+  return JSON.stringify([view,id,coordinates]);
+}
+
+export function reportCitationButtons(root:ParentNode,key?:string){
+  return [...root.querySelectorAll<HTMLButtonElement>('button.mist-xz-ref')]
+    .filter(button=>key===undefined||button.dataset.reportRecord===key);
+}
+
 const markdownComponents: Components = {
   // Attachment-derived Markdown must not initiate requests to a model-supplied image host.
   img: ({alt}) => <span>{alt}</span>,
@@ -39,9 +49,9 @@ const markdownComponents: Components = {
     if(file&&onOpenAttachment)return <button type="button" className="mist-xz-ref" title={title}
       onClick={()=>target===undefined?onOpenAttachment(file):onOpenAttachment(file,target)}>{children}</button>;
     const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
-    if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => hit.target ? onOpen(hit.view, hit.id, hit.target) : onOpen(hit.view, hit.id)}>{children}</button>;
+    if (hit) return <button type="button" className="mist-xz-ref" data-report-record={recordKey(hit.view,hit.id,hit.target)} data-code={/\d/.test(hit.text) || undefined} onClick={() => hit.target ? onOpen(hit.view, hit.id, hit.target) : onOpen(hit.view, hit.id)}>{children}</button>;
     const source=agentSource(href);
-    if(source)return <button type="button" className="mist-xz-ref" onClick={()=>onOpen(source.view,source.id,source.target)}>{children}</button>;
+    if(source)return <button type="button" className="mist-xz-ref" data-report-record={recordKey(source.view,source.id,source.target)} onClick={()=>onOpen(source.view,source.id,source.target)}>{children}</button>;
     return href && /^https?:/i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>;
   },
   table: ({ children }) => <div className="mist-xz-table"><table>{children}</table></div>,

@@ -114,11 +114,13 @@ it('keeps an authorized read-only turn usable and omits it after access is withd
   expect(requests[1]).toMatchObject({history:[]});
 });
 
-it('restores the exact report citation when returning from an order to the same conversation',async()=>{
+it('restores the same report citation after an earlier unrelated reference disappears',async()=>{
  const report={id:'source-return-task',name:'核对原订单',conversationId:'c_source_return',executor:'platform',
-  identityId:'personal',state:'succeeded',instructions:'核对原订单',result:'请查看已核对的 SO-SELECTED。',
+  identityId:'personal',state:'succeeded',instructions:'核对原订单',result:'对照 SO-EARLIER。先看 SO-SELECTED，再核对 SO-SELECTED。另有 SO-LATER。',
   questions:[],waitingProposalIds:[],version:3,createdAt:'2026-11-27T03:00:00Z',updatedAt:'2026-11-27T03:01:00Z'};
  const original={state:history.state,url:location.href};
+ const selectedOrder=mock.workspace.state.orders[0];
+ mock.workspace.state.orders.push({...selectedOrder,id:'earlier',code:'SO-EARLIER'},{...selectedOrder,id:'later',code:'SO-LATER'});
  mock.fetch.mockResolvedValue(response({configured:true}));
  mock.api.mockImplementation(async(url:string)=>{
   if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
@@ -126,7 +128,8 @@ it('restores the exact report citation when returning from an order to the same 
   if(url.endsWith('/agent-tasks'))return {items:[report],nextCursor:null};
   return {items:[],restrictedIds:[]};
  });
- const citation=()=>host.querySelector<HTMLButtonElement>('.mist-xz-md button.mist-xz-ref');
+ const citation=()=>[...host.querySelectorAll<HTMLButtonElement>('.mist-xz-md button.mist-xz-ref')]
+  .filter(button=>button.textContent==='SO-SELECTED')[1];
  try{
   history.replaceState({},'','?view=assistant&section=task-origin&id='+report.id);
   await mount();
@@ -134,8 +137,10 @@ it('restores the exact report citation when returning from an order to the same 
   await act(async()=>citation()!.click());
   expect(go).toHaveBeenCalledWith('orders/detail','order',undefined);
   const saved=readMistRoute().sourcePosition;
-  expect(saved).toMatchObject({view:'assistant',scope:'session-a:workspace',conversationId:report.conversationId,taskId:report.id,version:report.version,citation:0});
+  expect(saved).toMatchObject({view:'assistant',scope:'session-a:workspace',conversationId:report.conversationId,taskId:report.id,
+   version:report.version,citation:1,recordKey:citation()!.dataset.reportRecord});
   await act(async()=>root!.render(view(false)));
+  mock.workspace.state={...mock.workspace.state,orders:mock.workspace.state.orders.filter((order:{id:string})=>order.id!=='earlier')};
   await act(async()=>root!.render(view(true,report.id,'task-origin',saved)));
   await act(async()=>{await new Promise(resolve=>requestAnimationFrame(resolve));});
   expect(document.activeElement).toBe(citation());

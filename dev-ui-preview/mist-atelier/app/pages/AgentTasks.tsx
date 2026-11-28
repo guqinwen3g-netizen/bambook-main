@@ -1,6 +1,6 @@
 import { agentQuestionCopy } from './agentQuestionCopy';
 import {agentSource} from '../runtime/agentSource';
-import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
+import {XiaozhuMarkdown,reportCitationButtons} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
 import {XiaozhuAttachmentChoices,XiaozhuVisualPageChoices,XiaozhuWorksheetChoices} from './modules/XiaozhuAttachmentChoices';
 import {XiaozhuAnswerFiles} from './modules/XiaozhuAnswerFiles';
@@ -545,10 +545,11 @@ function TaskReport({ task }: { task: AgentTaskView }) {
   const button = clickedSource.current;
   const body = button?.closest<HTMLElement>('.mist-drawer-body');
   if (route.view === 'assistant' && route.section === 'tasks' && route.id === task.id && body && button && reportBody.current) {
-   const citation = [...reportBody.current.querySelectorAll('button.mist-xz-ref')].indexOf(button);
+   const recordKey=button.dataset.reportRecord;
+   const citation=reportCitationButtons(reportBody.current,recordKey).indexOf(button);
    if (citation >= 0) {
     const offset = button.getBoundingClientRect().top - body.getBoundingClientRect().top;
-    rememberMistSource(route, { view:'assistant', scope, taskId:task.id, version:task.version, updatedAt:task.updatedAt, citation, offset });
+    rememberMistSource(route, { view:'assistant', scope, taskId:task.id, version:task.version, updatedAt:task.updatedAt, citation, offset, recordKey });
    }
   }
   nav.go(view, id, target);
@@ -556,7 +557,7 @@ function TaskReport({ task }: { task: AgentTaskView }) {
  React.useLayoutEffect(() => {
   if (sourcePosition?.view !== 'assistant' || sourcePosition.conversationId || sourcePosition.scope !== scope || sourcePosition.taskId !== task.id
    || sourcePosition.version !== task.version || sourcePosition.updatedAt !== task.updatedAt) return;
-  const button = reportBody.current?.querySelectorAll<HTMLButtonElement>('button.mist-xz-ref')[sourcePosition.citation];
+  const button=reportBody.current&&reportCitationButtons(reportBody.current,sourcePosition.recordKey)[sourcePosition.citation];
   const body = button?.closest<HTMLElement>('.mist-drawer-body');
   if (!button || !body || !Number.isFinite(sourcePosition.offset)) return;
   // Let both drawers finish their initial focus before restoring the original citation.

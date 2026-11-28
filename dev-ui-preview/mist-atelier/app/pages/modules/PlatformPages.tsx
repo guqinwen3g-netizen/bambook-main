@@ -49,7 +49,7 @@ import { AgentProposalDialog } from '../AgentProposalDialog';
 import { recordIndex } from '../../runtime/xiaozhuRecords';
 import { XiaozhuComposer, XiaozhuEmpty, voiceInCall } from './XiaozhuShell';
 import { XiaozhuTurnShell } from './XiaozhuThread';
-import { XiaozhuMarkdown } from './XiaozhuMarkdown';
+import { XiaozhuMarkdown, reportCitationButtons } from './XiaozhuMarkdown';
 import { COWORK_ACTIVE, conversationsOf, formatTaskQuestion, isCurrentTaskStatusQuestion, newConversationId, selectedTaskIntentRefs, splitRequest, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
 import { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import { FileName } from '../../runtime/files';
@@ -632,12 +632,13 @@ export function AssistantPage(){
     const taskId=body?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId;
     const task=visibleTasks.find(item=>item.id===taskId&&!item.contentRestricted&&item.state!=='access_changed');
     if(button&&body&&region?.contains(button)&&task){
-      const citation=[...body.querySelectorAll('button.mist-xz-ref')].indexOf(button);
+      const recordKey=button.dataset.reportRecord;
+      const citation=reportCitationButtons(body,recordKey).indexOf(button);
       const scroller=threadCitationScroller(region);
       const top=scroller&&scroller!==document.scrollingElement?scroller.getBoundingClientRect().top:0;
       const offset=button.getBoundingClientRect().top-top;
       if(citation>=0)rememberMistSource(readMistRoute(),{view:'assistant',scope,conversationId,taskId:task.id,
-        version:task.version,updatedAt:task.updatedAt,citation,offset});
+        version:task.version,updatedAt:task.updatedAt,citation,offset,recordKey});
     }
     w.go(view,id,target);
   };
@@ -646,34 +647,58 @@ export function AssistantPage(){
     &&sourcePosition.conversationId===conversationId&&Number.isFinite(sourcePosition.offset)?sourcePosition:undefined;
   const returnedTask=returnedPosition&&visibleTasks.find(item=>item.id===returnedPosition.taskId&&!item.contentRestricted
     &&item.state!=='access_changed'&&item.version===returnedPosition.version&&item.updatedAt===returnedPosition.updatedAt);
+  const returnedTaskId=returnedTask?.id;
   React.useLayoutEffect(()=>{
-    if(!returnedTask||!returnedPosition||returnedPosition===restoredCitation.current)return;
+    if(!returnedTaskId||!returnedPosition||returnedPosition===restoredCitation.current)return;
+    // Opening a task origin can add or remove a loading row above the report.
+    if(originTaskId&&(originStatus==='loading'||openedOrigin?.scope!==scope||openedOrigin.conversationId!==conversationId))return;
     const region=scrollRef.current;
-    const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===returnedTask.id);
-    const button=turn?.querySelectorAll<HTMLButtonElement>('.mist-xz-md button.mist-xz-ref')[returnedPosition.citation];
+    const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===returnedTaskId);
+    const body=turn?.querySelector('.mist-xz-md');
+    const button=body&&reportCitationButtons(body,returnedPosition.recordKey)[returnedPosition.citation];
     if(!region||!button)return;
     atBottomRef.current=false;
-    const frame=requestAnimationFrame(()=>{
-      if(!button.isConnected)return;
+    const align=()=>{
       const scroller=threadCitationScroller(region);
       const top=scroller&&scroller!==document.scrollingElement?scroller.getBoundingClientRect().top:0;
       const delta=button.getBoundingClientRect().top-top-returnedPosition.offset;
+      if(Math.abs(delta)<1)return;
       if(scroller?.scrollTo)scroller.scrollTo({top:scroller.scrollTop+delta,behavior:'instant'});
       else if(scroller)scroller.scrollTop+=delta;
       else button.scrollIntoView?.({block:'nearest'});
+    };
+    let observer:ResizeObserver|undefined;
+    const inputs=['pointerdown','keydown','wheel','touchstart'];
+    const stopAnchoring=()=>{
+      observer?.disconnect();
+      for(const input of inputs)window.removeEventListener(input,stopAnchoring,true);
+      button.removeEventListener('blur',stopAnchoring);
+    };
+    const frame=requestAnimationFrame(()=>{
+      if(!button.isConnected)return;
+      align();
       button.focus({preventScroll:true});
       restoredCitation.current=returnedPosition;
+      // Header/status rows may still resize. Keep the citation in place until the person resumes reading.
+      if(typeof ResizeObserver!=='undefined'&&document.activeElement===button){
+        observer=new ResizeObserver(align);
+        observer.observe(region.closest('.mist-xz')??region);
+        observer.observe(region);
+        for(const input of inputs)window.addEventListener(input,stopAnchoring,{capture:true,once:true});
+        button.addEventListener('blur',stopAnchoring,{once:true});
+      }
     });
-    return()=>cancelAnimationFrame(frame);
-  },[returnedPosition,returnedTask]);
+    return()=>{cancelAnimationFrame(frame);stopAnchoring();};
+  },[returnedPosition,returnedTaskId,originTaskId,originStatus,openedOrigin,scope,conversationId]);
   React.useEffect(()=>{
     if(!originFocus||originFocus.conversationId!==conversationId)return;
     const region=scrollRef.current;
     const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===originFocus.taskId);
     if(!region||!turn)return;
     // A history entry with an exact citation takes precedence over the usual jump to task start.
-    if(returnedPosition&&returnedTask?.id===originFocus.taskId
-      &&turn.querySelectorAll('.mist-xz-md button.mist-xz-ref')[returnedPosition.citation]){setOriginFocus(undefined);return;}
+    const body=turn.querySelector('.mist-xz-md');
+    if(returnedPosition&&returnedTask?.id===originFocus.taskId&&body
+      &&reportCitationButtons(body,returnedPosition.recordKey)[returnedPosition.citation]){setOriginFocus(undefined);return;}
     // Narrow Mist layouts scroll the document instead of the thread.
     if(getComputedStyle(region).overflowY==='visible'&&typeof turn.scrollIntoView==='function')turn.scrollIntoView({block:'start',inline:'nearest'});
     else region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
