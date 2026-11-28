@@ -31,6 +31,107 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('uses only current supplied text and attachments, even if the planner asks to search business records', async()=>{
+ const finish=(result:string)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result});
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>finish('本人提供的交期是十二月十日。'))
+  .mockResolvedValueOnce(finish('OLD-BUSINESS-REPORT-MARKER'))
+  .mockResolvedValueOnce(tool('bambook_query',{type:'order',q:'旧订单'}))
+  .mockResolvedValueOnce(tool('bambook_file_text',{fileId:'not-a-supplied-file'}));
+ const f=await fixture(complete), conversationId='c_supplied_material';
+ f.worker.start(3_600_000);
+ const endpoint=f.base+'/personal-agent/tasks';
+ const previous=(await f.human.post(endpoint).send({
+  requestId:randomUUID(),name:'旧报告',instructions:'检查前一轮业务记录。',conversationId,
+ }).expect(201)).body.item;
+ await f.drain();
+ const businessRead=vi.spyOn(f.repository,'getForAgent');
+ const fileRead=vi.spyOn(f.repository,'fileText');
+ const task=(await f.human.post(endpoint)
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'仅核对口述与附件',conversationId,
+   instructions:'请交办只读核对。只用我提供的模拟数据。请汇报给出的交期。',historyTaskIds:[previous.id]}))
+  .attach('attachments',Buffer.from('本轮模拟交期十二月十日。KEEP-CURRENT'),'terms.txt').expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'本人提供的交期是十二月十日。'});
+ expect(businessRead).not.toHaveBeenCalled();
+ expect(fileRead).toHaveBeenCalledTimes(1);
+ expect(fileRead.mock.calls[0][2]).toBe(task.attachments[0].id);
+ for(const [prompt] of complete.mock.calls.slice(1)){
+  expect(prompt.messages[0].content).toContain('KEEP-CURRENT');
+  expect(prompt.messages[0].content).not.toContain('OLD-BUSINESS-REPORT-MARKER');
+  expect(prompt.messages[0].content).not.toContain('not-a-supplied-file');
+  expect(prompt.systemPrompt).not.toContain('bambook_query');
+ }
+ expect(complete.mock.calls.at(-1)?.[0].systemPrompt).toContain('范围外操作未执行');
+});
+
+it.each([false,true])('replans a frozen report that predates the supplied-material scope (inherited report: %s)',async inherited=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'本人提供的交期是十二月十日。'}));
+ const f=await fixture(complete),conversationId='c_legacy_material_scope';
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ let priorId:string|undefined;
+ if(inherited){
+  complete.mockResolvedValueOnce(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'OLD-ORDER-FACT'}));
+  priorId=(await f.human.post(f.base+'/personal-agent/tasks').send({
+   requestId:randomUUID(),name:'前一份报告',instructions:'汇报原业务。',conversationId,
+  }).expect(201)).body.item.id;
+  await f.drain();
+  complete.mockClear();
+ }
+ const item=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对给出的交期',instructions:'只用我提供的数据。模拟交期十二月十日。',conversationId,
+ }).expect(201)).body.item;
+ await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,item.id),at=new Date().toISOString();
+  await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{...row.result,__agentTask:{...value,
+   ...(priorId?{conversationHistory:{taskIds:[priorId],authorityTaskIds:[priorId]}}:{}),
+   checkpoint:'OLD-ORDER-FACT',platform:{...value.platform,nextRunAt:Date.now(),steps:[
+    ...(inherited?[]:[{id:'platform_old_read',at,plan:{name:'bambook_query',arguments:{type:'order'}},result:{label:'OLD-ORDER-FACT'}}]),
+    {id:'platform_old_finish',at,plan:{name:'bambook_task',arguments:{action:'finish',outcome:'succeeded',result:'OLD-ORDER-FACT'}}},
+   ]}}}}});
+ });
+ await f.drain();
+ expect(complete).toHaveBeenCalledOnce();
+ expect(complete.mock.calls[0][0].messages[0].content).not.toContain('OLD-ORDER-FACT');
+ expect(await f.current(item.id)).toMatchObject({state:'succeeded',result:'本人提供的交期是十二月十日。'});
+});
+
+it('keeps a scoped finish on restart after a rejected file request',async()=>{
+ const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'failed',result:'不应重新请求模型。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const item=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对给出的交期',instructions:'只用我提供的数据。模拟交期十二月十日。',
+ }).expect(201)).body.item;
+ await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,item.id),at=new Date().toISOString();
+  await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{...row.result,__agentTask:{...value,
+   platform:{...value.platform,nextRunAt:Date.now(),steps:[
+    {id:'platform_denied_file',at,plan:{name:'bambook_file_text',arguments:{fileId:'other'}},result:{error:true,providedMaterialScopeRejected:true}},
+    {id:'platform_scoped_finish',at,plan:{name:'bambook_task',providedMaterialsOnly:true,arguments:{requestId:'platform_scoped_finish',action:'finish',outcome:'succeeded',result:'十二月十日。'}}},
+   ]}}}}});
+ });
+ await f.drain();
+ expect(complete).not.toHaveBeenCalled();
+ expect(await f.current(item.id)).toMatchObject({state:'succeeded',result:'十二月十日。'});
+});
+
+it('does not bypass the supplied-material scope when a live business record is also referenced',async()=>{
+ const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'不得执行。'}));
+ const f=await fixture(complete),order=f.workspace.state.orders[0];
+ f.worker.start(3_600_000);
+ const read=vi.spyOn(f.repository,'getForAgent');
+ const item=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对交期',instructions:'只用我提供的数据。请核对关联订单。',
+  intentRefs:[{kind:'orders',id:order.id}],
+ }).expect(201)).body.item;
+ await f.drain();
+ expect(read).not.toHaveBeenCalled();
+ expect(complete).not.toHaveBeenCalled();
+ expect(await f.current(item.id)).toMatchObject({state:'failed',result:expect.stringContaining('请提供要核对的原件')});
+});
+
 it('sends one shared object-type definition and source receipts without duplicating the UI trail',async()=>{
  let input:LlmCompletionInput|undefined;
  const f=await fixture(async prompt=>{input=prompt;return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟订单。'});});

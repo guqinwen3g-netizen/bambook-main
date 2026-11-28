@@ -54,7 +54,7 @@ import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTask
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
-import {requestedTaskAttachmentScope,explicitPdfVisualPages,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
+import {requestedTaskAttachmentScope,explicitPdfVisualPages,requestsProvidedMaterialsOnly,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {ensurePersonalIdentity,personalIdentityId,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
@@ -327,8 +327,14 @@ export class MistRepository {
   }
   async platformTaskContext(prior:AgentActor):Promise<PlatformTaskContext>{
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
-    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;
+    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;
       const task=taskView(c,actor,Date.now());
+      const steps=structuredClone(c.platform?.steps??[]),requiresRead=platformTaskRequiresRead(c),locale=c.locale??'zh-CN';
+      if(requestsProvidedMaterialsOnly(c.instructions))return {
+        task,steps,requiresRead,locale,providedMaterialsOnly:true,hasTaskHistory:!!c.conversationHistory?.taskIds.length,
+        taskReadRefs:[],decisions:[],
+      };
+      const visible=(await this.preparedView(db,row,actor)).state;
       let taskReadRefs = c.intentRefs ?? [];
       if (c.conversationHistory?.taskIds.length) {
         const history = await Promise.all(c.conversationHistory.taskIds.map(async id => (await taskRecord(db,row.id,id)).value));
@@ -352,7 +358,7 @@ export class MistRepository {
           : undefined;
       const proposalReadBack=ref&&decision&&typeof decision.stepOffset==='number'&&!c.requiredRead
         ? {proposalId:decision.proposalId,outcome:decision.outcome,ref,stepOffset:decision.stepOffset}:undefined;
-      return{task,taskReadRefs,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),proposalReadBack,steps:structuredClone(c.platform?.steps??[]),decisions:proposals.map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+      return{task,taskReadRefs,locale,businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead,...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),proposalReadBack,steps,decisions:proposals.map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
   }
   async platformTaskReadRequirements(prior:AgentActor){
     const lease=prior.agentTaskLease;
@@ -511,6 +517,8 @@ export class MistRepository {
   private async refreshTaskCondition(db:any,actor:TokenPayload,row:MistWorkspaceRow,c:TaskRecord,now:number){
     if(c.state!=='waiting_condition')return c;
     const bounded={...actor,permissionCeiling:[...c.ceiling]};this.assertTaskSources(row,bounded,c);
+    if(requestsProvidedMaterialsOnly(c.instructions))
+      return checkTaskCondition(db,bounded,c.workspaceId,c.id,now,()=>false);
     const visible=this.accessView(row, bounded, scopeOf(row)).state;
     return checkTaskCondition(db,bounded,c.workspaceId,c.id,now,condition=>taskConditionChanged(condition,visible,bounded));
   }
@@ -1163,7 +1171,9 @@ export class MistRepository {
       }:undefined;
       const history=personalHistory ? {
         ...personalHistory,
-        prepare:(instructions:string)=>this.prepareTaskHistory(db,row,actor,taskInput.conversationId as string|undefined,personalHistory.requestedIds??[],instructions,visible,refs),
+        prepare:(instructions:string)=>requestsProvidedMaterialsOnly(instructions)
+          ? Promise.resolve({taskIds:[],authorityTaskIds:[]})
+          : this.prepareTaskHistory(db,row,actor,taskInput.conversationId as string|undefined,personalHistory.requestedIds??[],instructions,visible,refs),
       }:undefined;
       const result=await createTask(db,actor,workspaceId,taskInput,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId,refs,attachments,[],history);
       const c=(await taskRecord(db,workspaceId,result.id)).value;
