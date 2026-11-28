@@ -213,7 +213,22 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
+        const {pdfRanges,pdfVisualRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,scopeCorrection}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
+        if(scopeCorrection){
+          const {allowed,...correction}=scopeCorrection;
+          const files=context.task.attachments??[];
+          const index=files.findIndex(attachment=>attachment.id===correction.fileId);
+          const name=taskAttachmentLabels(files)[index]??(correction.kind==='pdf'?'PDF':'Excel');
+          const ranges=allowed.map(({from,to})=>from===to?String(from):from+'–'+to).join(', ');
+          const pdf=correction.kind==='pdf';
+          const question=context.locale==='en-US'
+            ? `${name} conflicts with the original scope. Enter ${pdf?'pages':'rows'} within ${ranges}, or “Use the original range”.`
+            : `${name} 的${pdf?'页码':'行号'}与原要求冲突。请填写 ${ranges} 范围内的${pdf?'页码':'行号'}，或回复「按原范围」。`;
+          await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
+            requestId:'platform-scope-correction-'+job.taskId+'-'+(context.task.questions?.length??0),question,
+          },correction);
+          return;
+        }
         if(pdfScopeConflict){
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
             requestId:'platform-pdf-range-conflict-'+job.taskId,outcome:'failed',result:'PDF 页码范围无效。请注明确切页码或页段后重新提交。',
@@ -372,6 +387,20 @@ export class MistPlatformTaskWorker{
                 : '';
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
+              const confirmedScopeCorrections=modelTask.questions?.flatMap(question=>{
+                const correction=question.attachmentScopeCorrection;
+                if(!correction||!question.answeredAt)return [];
+                const file=attachments?.find(attachment=>attachment.id===correction.fileId);
+                if(!file)return [];
+                const pages=pdfRanges.get(correction.fileId);
+                const label='reportLabel' in file?file.reportLabel:file.name;
+                const scope=correction.kind==='pdf'&&pages?{pages:pages.windows??[pages]}
+                  : correction.kind==='worksheet'&&worksheetScope?.fileId===correction.fileId
+                    ? {worksheet:worksheetScope.worksheet,rows:worksheetScope.rows}:undefined;
+                return scope?[{file:label,...scope}]:[];
+              });
+              if(confirmedScopeCorrections?.length)
+                modelTask.questions=modelTask.questions?.map(({attachmentScopeCorrection:_scopeCorrection,...question})=>question);
               if(worksheetScope?.rows&&modelTask.questions)
                 modelTask.questions=modelTask.questions.filter(question=>question.question!==WORKBOOK_SELECTION_QUESTION);
               if(worksheetScope?.needsWorksheetChoice&&modelTask.questions?.length){
@@ -432,7 +461,8 @@ export class MistPlatformTaskWorker{
                 : ambiguousOrderLineReads
                   ? '\nambiguousOrderLineReads 是同一款号的全部候选订单行完整回执。本人明确要求处理该款号的全部条目时按其范围核对。只处理其中一条且本人没有用数量、品名、颜色等区分到唯一时，先用 bambook_task 的 question 询问。先简短问要处理哪一条，再用编号列出候选，每项单独一行，写品名与数量、单位，必要时加单价或规格；不要只重复款号，也不要显示内部 ID。本人答复后继续原任务。身份仍不明确时继续询问，明确后才按正常预演与确认提交。'
                   : '';
-              const evidence={history,...(imageSources?.length?{imageSources}:{}),...(pdfPageImages.length?{pdfPageImages}:{})};
+              const evidence={history,...(imageSources?.length?{imageSources}:{}),...(pdfPageImages.length?{pdfPageImages}:{}),
+                ...(confirmedScopeCorrections?.length?{confirmedScopeCorrections}:{})};
               const facts=providedOnly?{
                 task:{instructions:splitTaskRequest(modelTask.instructions),answers:modelTask.questions?.flatMap(question=>question.answeredAt?[question.answer]:[]),attachments},
                 ...evidence,
@@ -462,7 +492,10 @@ export class MistPlatformTaskWorker{
               if(context.hasTaskHistory)await checkModelAuthority(false);
               const scopedCorrection=providedOnly&&context.steps.some(previous=>scopeDisposition(previous)?.providedMaterialScopeRejected)
                 ? '\n先前的范围外操作未执行。只在本轮材料内回答或向本人询问，不重复该操作。' : '';
-              const evidenceRules=attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+pdfVisualRule;
+              const correctionRule=confirmedScopeCorrections?.length
+                ? '\nconfirmedScopeCorrections 是本人确认后的原件范围，取代前面相冲突的旧页码或行号。沿用同一次补答里的其他事实，只报告实际核对的范围。'
+                : '';
+              const evidenceRules=attachmentRules+correctionRule+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+pdfVisualRule;
               const sourceRules=providedOnly?PROVIDED_MATERIAL_PROMPT+scopedCorrection+evidenceRules
                 :MODEL_PROMPT_PREFIX+evidenceRules+answerRule+decisionRule+customerCommandRule+lineIndexRule+namedLineRule+(draftCommand?'\n'+ORDER_DRAFT_RULE:'')+historyRule;
               const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:sourceRules+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);

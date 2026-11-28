@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{attachmentScopeCorrectionRanges,compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 import {composeTaskInstructions} from '../shared/mistTaskHistoryText';
 
@@ -252,6 +252,30 @@ it('intersects an Excel row scope from the answer with the original scope',()=>{
   answer:'请只读取 quote.xlsx 的工作表「报价」第 45 至第 47 行。'};
  expect(requestedTaskAttachmentScope([file],'请只读取 quote.xlsx 的工作表「报价」第 23 至第 46 行。',[answered]).worksheet)
   .toMatchObject({fileId:file.id,worksheet:'报价',rows:[{from:45,to:46}]});
+});
+it('accepts common page and row phrasing within the matching bounded range',()=>{
+ const prompt={sourceQuestionId:'answer',fileId:'file',kind:'pdf' as const,allowed:[{from:2,to:4},{from:6,to:6}]};
+ expect(attachmentScopeCorrectionRanges('第 2 页至第 4 页、 第 6 页',prompt))
+  .toEqual([{from:2,to:4},{from:6,to:6}]);
+ expect(attachmentScopeCorrectionRanges('第 2 页至第 6 页',prompt)).toBeUndefined();
+ expect(attachmentScopeCorrectionRanges('第 2 行至第 4 行',prompt)).toBeUndefined();
+ expect(attachmentScopeCorrectionRanges('第 2 行至第 4 行',{...prompt,kind:'worksheet'})).toEqual([{from:2,to:4}]);
+});
+it('preserves the valid PDF range when correcting an Excel range in the same answer',()=>{
+ const pdf={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200};
+ const sheet={id:'sheet',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:1200};
+ const initial='请只读取 scan.pdf 第 2 至第 4 页。请只读取 quote.xlsx 的工作表「报价」第 23、47 行。';
+ const answer={id:'supplied',question:'请补交原件。',askedAt:'',answeredAt:'2026-11-28T00:01:00Z',
+  answer:'请只读取 scan.pdf 第 3 页。请只读取 quote.xlsx 的工作表「报价」第 36 行。',attachmentIds:[pdf.id,sheet.id]};
+ const waiting=requestedTaskAttachmentScope([pdf,sheet],initial,[answer]);
+ expect(waiting.scopeCorrection).toMatchObject({sourceQuestionId:answer.id,fileId:sheet.id,kind:'worksheet'});
+ const correction={id:'correction',question:'请更正行号。',askedAt:'',answeredAt:'2026-11-28T00:02:00Z',
+  answer:'第 23 至 47 行',attachmentScopeCorrection:{sourceQuestionId:answer.id,fileId:sheet.id,kind:'worksheet' as const}};
+ expect(requestedTaskAttachmentScope([pdf,sheet],initial,[answer,correction]).scopeCorrection).toEqual(waiting.scopeCorrection);
+ const resolved=requestedTaskAttachmentScope([pdf,sheet],initial,[answer,{...correction,answer:'按原范围'}]);
+ expect(resolved.scopeCorrection).toBeUndefined();
+ expect(resolved.pdfRanges.get(pdf.id)).toEqual({from:3,to:3});
+ expect(resolved.worksheet).toMatchObject({fileId:sheet.id,worksheet:'报价',rowScopeConflict:false,rows:[{from:23,to:23},{from:47,to:47}]});
 });
 it('binds a PDF page limit to an exact name or numbered original in its own clause',()=>{
  const named={id:'terms',name:'terms.pdf',mimeType:'application/pdf',size:1};

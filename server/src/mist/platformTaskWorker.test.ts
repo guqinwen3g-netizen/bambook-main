@@ -69,6 +69,67 @@ it('appends a supplied original with an exact, replayable answer receipt on the 
  await f.human.get(receipt).expect(404);
 });
 
+it.each(['PDF','Excel'])('corrects a conflicting supplemental %s range on the same task',async(kind)=>{
+ const isPdf=kind==='PDF';
+ const name=isPdf?'scope.pdf':'scope.xlsx';
+ const original=isPdf?'请只读取 scope.pdf 第 2 至第 4 页。':'请只读取 scope.xlsx 的工作表「报价」第 2 至第 4 行。';
+ const conflict=isPdf?'请只读取 scope.pdf 第 5 页。':'请只读取 scope.xlsx 的工作表「报价」第 5 行。';
+ const format=isPdf?(number:number)=>'第 '+number+' 页':(number:number)=>'第 '+number+' 行';
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对正确范围。'});
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>finish)
+  .mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请补交原件。'}));
+ const f=await fixture(complete);
+ const read=vi.spyOn(f.repository,'fileText');
+ f.worker.start(3_600_000);
+ const body=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),
+  name:'核对附件范围',instructions:'只用我提供的资料。'+original}).expect(201)).body.item;
+ await f.drain();
+ const first=await f.current(body.id);
+ const endpoint=f.base+'/agent-tasks/'+body.id+'/answer';
+ const workbook=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet(['ONE','TWO','THREE','FOUR','FIVE'].map(value=>[value])),'报价');
+ const bytes=isPdf?pdf('Scope correction',5):XLSX.write(workbook,{type:'buffer',bookType:'xlsx'});
+ const supplied=(await f.human.post(endpoint).field('answer',JSON.stringify({requestId:randomUUID(),
+  version:first.version,questionId:first.questions[0].id,answer:conflict})).attach('attachments',bytes,name).expect(200)).body.item;
+ await f.drain();
+ const waiting=await f.current(body.id);
+ expect(waiting).toMatchObject({id:body.id,state:'waiting_human'});
+ expect(waiting.canSupplementAttachments).toBeUndefined();
+ expect(waiting.questions.at(-1).question).toContain(name);
+ expect(waiting.questions.at(-1).question).toContain('2–4');
+ expect(read).not.toHaveBeenCalled();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const correction={requestId:randomUUID(),version:waiting.version,questionId:waiting.questions.at(-1).id,answer:format(5)};
+ await f.human.post(endpoint).send(correction).expect(422);
+ await f.human.post(endpoint).field('answer',JSON.stringify({...correction,answer:format(3)}))
+  .attach('attachments',bytes,name).expect(422);
+ expect(await f.current(body.id)).toMatchObject({state:'waiting_human',version:waiting.version});
+ expect(read).not.toHaveBeenCalled();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const accepted={...correction,answer:format(3)};
+ await f.human.post(endpoint).send(accepted).expect(200);
+ await f.drain();
+ await f.human.post(endpoint).send(accepted).expect(200);
+ const finished=await f.current(body.id);
+ expect(finished).toMatchObject({id:body.id,state:'succeeded',attachments:supplied.attachments});
+ expect(finished.questions).toHaveLength(2);
+ expect(finished.questions[0].answer).toBe(conflict);
+ expect(complete).toHaveBeenCalledTimes(2);
+ const payload=complete.mock.calls.at(-1)![0].messages[0].content;
+ const evidence=JSON.parse(payload.slice(payload.indexOf('{')));
+ expect(evidence.confirmedScopeCorrections).toEqual(isPdf
+  ?[{file:name,pages:[{from:3,to:3}]}]:[{file:name,worksheet:'报价',rows:[{from:3,to:3}]}]);
+ expect(payload).not.toContain(supplied.questions[0].id);
+ const source=evidence.history.recent.find((item:{name:string})=>item.name==='bambook_file_text').result;
+ if(isPdf){
+  expect(source.range).toMatchObject({pageFrom:3,pageTo:3});
+ }else{
+  expect(source.worksheetRowScope).toEqual([{from:3,to:3}]);
+  expect(source.text).toContain('THREE');
+  expect(source.text).not.toContain('FOUR');
+ }
+});
+
 it('checks cumulative attachment limits before completing the original question',async()=>{
  const f=await fixture(async()=>tool('bambook_task',{action:'question',question:'请补充资料。'}));
  f.worker.start(3_600_000);

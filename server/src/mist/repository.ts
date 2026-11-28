@@ -16,7 +16,7 @@ import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { TokenPayload } from '../auth/service';
-import type { AgentTaskIntentRef, AgentTaskQuestion } from '../shared/mistAgentTasks';
+import type { AgentTaskIntentRef, AgentTaskQuestion, AttachmentScopeCorrection } from '../shared/mistAgentTasks';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
 import { freshMistAuthority, type FreshAuthority } from './authority';
 import { fail, MistApiError } from './errors';
@@ -1300,7 +1300,8 @@ export class MistRepository {
     const previous=await this.receipt(prior,workspaceId,input.requestId as string).catch((e:any)=>{if(['NOT_FOUND','RECEIPT_NOT_FOUND'].includes(e.code))return null;throw e;});
     for(let n=0;;n++){const ws=await this.get(prior,workspaceId);try{return await this.execute(prior,workspaceId,{requestId:input.requestId as string,expectedRevision:previous?.expectedRevision??ws.revision,command:{type:'agent.task.cancel',payload:{id:taskId,version:input.version as number}}});}catch(e:any){if(e.code!=='REVISION_CONFLICT'||n>=2||previous)throw e;}}
   }
-  async agentTaskRuntime(prior:TokenPayload,workspaceId:string,action:'heartbeat'|'checkpoint'|'question'|'wait'|'finish',input:Record<string,unknown>){
+  async agentTaskRuntime(prior:TokenPayload,workspaceId:string,action:'heartbeat'|'checkpoint'|'question'|'wait'|'finish',
+    input:Record<string,unknown>,correction?:AttachmentScopeCorrection){
     if(!isAgentActor(prior)||!prior.agentTaskLease||prior.agentTaskLease.workspaceId!==workspaceId)fail('FORBIDDEN','请使用本任务执行连接',403);
     return this.connectionTransaction(async db=>{
       if(action==='heartbeat')return heartbeatTask(db,await this.taskAccess(db,prior,workspaceId),prior.agentTaskLease!,input.sequence,Date.now());
@@ -1310,7 +1311,7 @@ export class MistRepository {
         const bounded={...actor,permissionCeiling:[...c.ceiling]},visible=this.accessView(row, bounded, scopeOf(row)).state;
         return prepareTaskCondition(target,c.sources,visible,bounded);
       });
-      return action==='question'?askTaskQuestion(db,actor,prior.agentTaskLease!,input,Date.now()):action==='checkpoint'?checkpointTask(db,actor,prior.agentTaskLease!,input,Date.now()):finishTask(db,actor,prior.agentTaskLease!,input,Date.now());
+      return action==='question'?askTaskQuestion(db,actor,prior.agentTaskLease!,input,Date.now(),correction):action==='checkpoint'?checkpointTask(db,actor,prior.agentTaskLease!,input,Date.now()):finishTask(db,actor,prior.agentTaskLease!,input,Date.now());
     });
   }
   async reserveAgentTaskRequest(prior:AgentActor,requestId:string,input:unknown){

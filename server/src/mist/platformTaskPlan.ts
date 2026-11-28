@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type {AgentTaskIntentRef,AgentTaskIssueCode,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
+import type {AgentTaskIntentRef,AgentTaskIssueCode,AgentTaskQuestion,AgentTaskView,AttachmentScopeCorrection} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_VISUAL_PAGE_LIMIT, type PdfVisualCandidate, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION, WORKSHEET_NAME_QUESTION, isWorksheetNameQuestion } from '../shared/mistTaskAttachments';
@@ -343,6 +343,32 @@ function intersectRanges(left:readonly PdfPageRange[],right:readonly PdfPageRang
   }));
 }
 
+type AttachmentScopePrompt = AttachmentScopeCorrection & {allowed: readonly PdfPageRange[]};
+
+export function matchesAttachmentScopeCorrection(left:AttachmentScopeCorrection|undefined,right:AttachmentScopeCorrection) {
+  return left?.sourceQuestionId===right.sourceQuestionId&&left.kind===right.kind&&left.fileId===right.fileId;
+}
+
+/** A correction can select only pages/rows that were permitted before the conflicting answer. */
+export function attachmentScopeCorrectionRanges(input:string,prompt:AttachmentScopePrompt):readonly PdfPageRange[]|undefined {
+  const text=input.normalize('NFKC').trim().replace(/[。.]$/u,'').trim();
+  if(/^(?:按原范围|use the original range)$/iu.test(text))return prompt.allowed;
+  const pdf=prompt.kind==='pdf';
+  const rangeText=pdf?text.replace(/^pages?\s+/iu,'').replace(/\s*页(?=\s*(?:[,、和与及至到–—-]|$))/gu,'')
+    :text.replace(/^rows?\s+/iu,'').replace(/\s*行(?=\s*(?:[,、和与及至到–—-]|$))/gu,'');
+  const ranges:PdfPageRange[]=[];
+  for(const item of rangeText.split(/\s*[,、和与及]\s*/u)){
+    const match=/^(?:第\s*)?([1-9]\d*)(?:\s*(?:至|到|to|[-–—])\s*(?:第\s*)?([1-9]\d*))?$/iu.exec(item);
+    if(!match)return;
+    const from=Number(match[1]),to=Number(match[2]??match[1]);
+    if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>to
+      ||!prompt.allowed.some(window=>from>=window.from&&to<=window.to))return;
+    ranges.push({from,to});
+  }
+  const merged=mergePdfRanges(ranges);
+  return merged.windows??[merged];
+}
+
 function narrowWorksheet(original:ReturnType<typeof requestedWorkbookWorksheet>,supplement:ReturnType<typeof requestedWorkbookWorksheet>) {
   if(!supplement)return original;
   if(!original)return supplement;
@@ -362,12 +388,20 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   const {pdfRanges,pdfVisualRanges,confirmedPdfChoices}=original;
   let {pdfChoice,pdfScopeConflict}=original;
   let worksheet=requestedWorkbookWorksheet(attachments,instructions,questions);
+  let scopeCorrection:AttachmentScopePrompt|undefined;
+  const correctedRanges=(prompt:AttachmentScopePrompt)=>{
+    const reply=[...questions].reverse().find(question=>question.answeredAt
+      &&matchesAttachmentScopeCorrection(question.attachmentScopeCorrection,prompt));
+    const ranges=reply?.answer?attachmentScopeCorrectionRanges(reply.answer,prompt):undefined;
+    if(!ranges)scopeCorrection??=prompt;
+    return ranges;
+  };
   const originalAllowed=new Set(pdfRanges.keys());
   if(worksheet?.fileId)originalAllowed.add(worksheet.fileId);
   // A correction in a supplement applies only to the files delivered with
   // that answer. It can narrow the task's original bounds, never expand them.
   for(const question of questions){
-    if(!question.answeredAt||!question.answer||!question.attachmentIds?.length)continue;
+    if(question.attachmentScopeCorrection||!question.answeredAt||!question.answer||!question.attachmentIds?.length)continue;
     const supplied=attachments.filter(file=>question.attachmentIds!.includes(file.id));
     const supplemental=pdfSelection(supplied,question.answer,questions);
     pdfScopeConflict||=supplemental.pdfScopeConflict;
@@ -375,10 +409,16 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
     for(const fileId of supplemental.confirmedPdfChoices)confirmedPdfChoices.add(fileId);
     for(const [fileId,requested] of supplemental.pdfRanges){
       const previous=pdfRanges.get(fileId);
-      const ranges=previous?intersectRanges(previous.windows??[previous],requested.windows??[requested]):requested.windows??[requested];
+      let ranges:readonly PdfPageRange[]=previous?intersectRanges(previous.windows??[previous],requested.windows??[requested]):requested.windows??[requested];
+      const disjoint=!!previous&&!ranges.length;
+      if(disjoint)ranges=correctedRanges({sourceQuestionId:question.id,fileId,kind:'pdf',allowed:previous.windows??[previous]})??[];
       if(!ranges.length){pdfScopeConflict=true;continue;}
       pdfRanges.set(fileId,mergePdfRanges(ranges));
-      const existingImage=pdfVisualRanges.get(fileId),requestedImage=supplemental.pdfVisualRanges.get(fileId);
+      const existingImage=pdfVisualRanges.get(fileId),supplementalImage=supplemental.pdfVisualRanges.get(fileId);
+      // The correction changes location. Preserve a visual request if it covered the entire supplemental range.
+      const requestedImage=disjoint&&supplementalImage
+        ? JSON.stringify(supplementalImage)===JSON.stringify(requested)?mergePdfRanges(ranges):undefined
+        : supplementalImage;
       const image=existingImage??requestedImage;
       if(!image)continue;
       const selected=intersectRanges(ranges,image.windows??[image]);
@@ -386,20 +426,27 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
       if(visual.length)pdfVisualRanges.set(fileId,mergePdfRanges(visual));
       else pdfVisualRanges.delete(fileId);
     }
-    worksheet=narrowWorksheet(worksheet,requestedWorkbookWorksheet(supplied,question.answer,questions));
+    const supplementalWorksheet=requestedWorkbookWorksheet(supplied,question.answer,questions);
+    const narrowed=narrowWorksheet(worksheet,supplementalWorksheet);
+    if(narrowed?.rowScopeConflict&&worksheet?.fileId&&worksheet.rows&&!worksheet.rowScopeConflict
+      &&worksheet.worksheet&&worksheet.worksheet===supplementalWorksheet?.worksheet
+      &&worksheet.fileId===supplementalWorksheet.fileId&&supplementalWorksheet.rows&&!supplementalWorksheet.rowScopeConflict){
+      const rows=correctedRanges({sourceQuestionId:question.id,fileId:worksheet.fileId,kind:'worksheet',allowed:worksheet.rows});
+      worksheet=rows?{...narrowed,rows,rowScopeConflict:false}:narrowed;
+    }else worksheet=narrowed;
   }
   const request = splitTaskRequest(instructions);
   const allExcluded = EXCLUDE_ALL_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
   const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
-  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>(),pdfVisualChoice:undefined,pdfVisualCandidates:undefined};
+  if(allExcluded)return {pdfRanges:new Map<string,PdfPageScope>(),pdfVisualRanges:new Map<string,PdfPageScope>(),worksheet:undefined,allowedFiles:new Set<string>(),pdfVisualChoice:undefined,pdfVisualCandidates:undefined,scopeCorrection:undefined};
   const visualSelection=pdfChoice||pdfScopeConflict?undefined:selectVisualPdfPages(attachments,instructions,questions,pdfRanges,pdfVisualRanges);
   const pdfVisualChoice=visualSelection?.question;
   const pdfVisualCandidates=visualSelection?.candidates;
   const scopedNames=new Set(attachments.filter(file=>pdfRanges.has(file.id)).map(file=>file.name));
   const siblings=attachments.filter(file=>!pdfRanges.has(file.id)&&(scopedNames.has(file.name)||confirmedPdfChoices.has(file.id)));
-  if(!othersExcluded&&!siblings.length&&!visualSelection?.excluded.size)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates};
+  if(!othersExcluded&&!siblings.length&&!visualSelection?.excluded.size)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,scopeCorrection};
 
   const allowed=othersExcluded?originalAllowed:new Set(pdfRanges.keys());
   if(!othersExcluded&&worksheet?.fileId)allowed.add(worksheet.fileId);
@@ -412,10 +459,10 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   }
   if(!othersExcluded){
     const excludedSiblings=[...siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id),...(visualSelection?.excluded??[])];
-    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
+    return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,scopeCorrection,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
   }
   for(const id of visualSelection?.excluded??[])allowed.delete(id);
-  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,allowedFiles:allowed};
+  return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates,scopeCorrection,allowedFiles:allowed};
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */

@@ -161,6 +161,33 @@ it('binds spreadsheet table row citations to the exact file, worksheet, and obse
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('links a verified worksheet row below a workbook heading later in a mixed report paragraph',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const pdf={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:100};
+ const workbook={id:'quote',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const reads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[3]},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:workbook.id,
+   taskAttachmentObservedSheets:['报价'],taskAttachmentObservedSheetRows:[{sheet:'报价',row:47}]},
+ ];
+ const text=[
+  'scan.pdf 第 3 页（按所附图片目视核对）：SCAN CODE SCAN-QC-7158。',
+  'quote.xlsx（工作表：报价）',
+  '工作表：报价 第 47 行：ROW-47-KEEP，EUR，19.8。第 46 行未返回可核对正文，无法确认。',
+  '工作表：报价 第 46 行：无可核对正文。',
+  '另见 contract.xlsx。',
+  '工作表：报价 第 47 行：以上一行提及的文件为准。',
+ ].join('\n');
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[pdf,workbook]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button[title]')];
+  expect(buttons.map(button=>button.title)).toEqual(['第 3 页','工作表 报价','工作表 报价 第 47 行','工作表 报价']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[pdf,3],[workbook,'报价'],[workbook,{sheet:'报价',row:47}],[workbook,'报价']]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet rows and keeps other rows at worksheet level',async()=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

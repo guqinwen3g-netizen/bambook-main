@@ -251,10 +251,9 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     container.children.splice(0,1,toAttachment(index,{type:'text',value:label},'',page??rowRef?.target??sheet),
       ...(remainder ? [{type:'text' as const,value:remainder}] : []));
   };
-  const linkSectionReference = (paragraph: Paragraph, index: number, range?:CitationPageRange) => {
-    const {lines,separators}=splitSectionLines(paragraph.children);
+  const linkSectionLines = (lines: ReportInline[][], index: number, range?:CitationPageRange) => {
     let sameSource=true, continuedRange=false;
-    paragraph.children=lines.flatMap((children,position)=>{
+    for(const children of lines){
       const line:Paragraph={type:'paragraph',children};
       if(mentionsAnotherSource(line))sameSource=false;
       const text=children.map(inlineTextStart).join('');
@@ -262,31 +261,45 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
       const rangeContinues=!!page&&/^[ \t]*[）)]?[ \t]*(?:至|到|[-~–—/,，、]|和|或|及|and|to)[ \t]*$/i.test(text.slice(page[0].length));
       if(sameSource&&!continuedRange&&!rangeContinues)linkSectionLine(line,index,range);
       continuedRange=rangeContinues;
-      return position===0?line.children:[separators[position-1],...line.children];
-    });
+    }
   };
-  const linkAttachmentLeadLine = (paragraph: Paragraph) => {
+  const joinSectionLines = (lines:ReportInline[][],separators:ReportInline[]) =>
+    lines.flatMap((children,position)=>position===0?children:[separators[position-1],...children]);
+  const linkSectionReference = (paragraph: Paragraph, index: number, range?:CitationPageRange) => {
     const {lines,separators}=splitSectionLines(paragraph.children);
-    if(lines.length<2)return;
-    const headingParts=lines[0].map(singleLabel);
+    linkSectionLines(lines,index,range);
+    paragraph.children=joinSectionLines(lines,separators);
+  };
+  const attachmentHeadingIndex = (line: ReportInline[]) => {
+    const headingParts=line.map(singleLabel);
     if(headingParts.some(part=>!part))return;
     const heading=headingParts.join('').trim();
     const [mention,other]=heading.matchAll(pattern);
     if(!mention||other||mention.index!==0)return;
     const annotation=heading.slice(mention[0].length).trim();
     if(annotation&&(!/^[（(][^（）()]+[）)]$/u.test(annotation)||ATTACHMENT_EXT_IN_PROSE.test(annotation)))return;
-    const index=byName.get(mention[0]);
-    if(index===undefined)return;
-    const body:Paragraph={type:'paragraph',children:lines.slice(1).flatMap((line,position)=>
-      position===0?line:[separators[position],...line])};
-    linkSectionReference(body,index);
-    paragraph.children=[...lines[0],separators[0],...body.children];
+    return byName.get(mention[0]);
+  };
+  const linkAttachmentLeadLines = (paragraph: Paragraph) => {
+    const {lines,separators}=splitSectionLines(paragraph.children);
+    if(lines.length<2)return;
+    let activeIndex:number|undefined, start=0;
+    for(const [position,line] of lines.entries()){
+      const index=attachmentHeadingIndex(line);
+      if(index===undefined)continue;
+      if(activeIndex!==undefined)linkSectionLines(lines.slice(start,position),activeIndex);
+      activeIndex=index;
+      start=position+1;
+    }
+    if(activeIndex===undefined)return;
+    linkSectionLines(lines.slice(start),activeIndex);
+    paragraph.children=joinSectionLines(lines,separators);
   };
   return {
     names,
     plugin: () => (tree: Root) => {
       if (!names.length) return;
-      for(const node of tree.children)if(node.type==='paragraph')linkAttachmentLeadLine(node);
+      for(const node of tree.children)if(node.type==='paragraph')linkAttachmentLeadLines(node);
       for (let position=1;position<tree.children.length;position++) {
         const heading = tree.children[position-1];
         if (heading.type !== 'heading' && heading.type !== 'paragraph') continue;
