@@ -2319,6 +2319,21 @@ it('keeps excluded images out of a retry that renders an allowed PDF page',async
  for(const [input] of complete.mock.calls)expect(input.images?.map(image=>image.name)).toEqual(['scan.pdf 第 3 页']);
 });
 
+it('keeps a read-only task prompt focused on available tools',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只读核对完成。'}));
+ const f=await fixture(complete,{mode:'read'});
+ f.worker.start(3_600_000);
+ const created=await f.create('platform');
+ await f.drain();
+ expect(await f.current(created.id)).toMatchObject({state:'succeeded',mode:'read',result:'只读核对完成。'});
+ const prompt=complete.mock.calls[0][0].systemPrompt;
+ expect(prompt).toContain('"name":"bambook_get"');
+ expect(prompt).toContain('"name":"bambook_task"');
+ expect(prompt).not.toContain('"name":"bambook_preview"');
+ expect(prompt).not.toContain('"name":"bambook_execute"');
+ expect(prompt).not.toContain('预演遇版本冲突');
+});
+
 it('keeps the image-only plan focused on its source and omits task UI metadata',async()=>{
  const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'图片已核对。'}));
  const f=await fixture(complete);
