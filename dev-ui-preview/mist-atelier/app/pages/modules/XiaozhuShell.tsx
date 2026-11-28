@@ -3,7 +3,7 @@ import React from 'react';
 import { ArrowDown, ArrowUp, AtSign, AudioLines, Mic, MicOff, Paperclip, PhoneOff, Square, X, CalendarClock, Landmark, Mail, ListTodo, Sparkles } from 'lucide-react';
 import { AIBadge, AssistantEyes, Icon, IconButton } from '../../../../../components/mist';
 import { uiText } from '../../../../../services/interfaceLanguage';
-import { TASK_ATTACHMENT_ACCEPT } from '../../../../../server/src/shared/mistTaskAttachments';
+import { TASK_ATTACHMENT_ACCEPT, taskAttachmentLabels } from '../../../../../server/src/shared/mistTaskAttachments';
 import type { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import type { AssistantAttachmentRef } from '../../runtime/assistantConversation';
 import { TASK_INSTRUCTION_LIMIT } from '../../runtime/xiaozhuCowork';
@@ -11,8 +11,8 @@ import { TASK_INSTRUCTION_LIMIT } from '../../runtime/xiaozhuCowork';
 type Voice = ReturnType<typeof usePersonalAgentVoice>;
 export const voiceInCall = (voice: Voice) => voice.state === 'connecting' || voice.state === 'listening' || voice.state === 'speaking';
 
-export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working, onStop, stopping, onLatest, sources, onRemoveSource, onAttach, files, onAddFiles, onRemoveFile, attachmentRefs, onRemoveAttachmentRef, voice, voiceAvailable, field, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; working?: boolean; onStop?: () => void; stopping?: boolean; onLatest?: () => void;
+export function XiaozhuComposer({ value, onChange, onSend, ready, busy, submissionStatus, working, onStop, stopping, onLatest, sources, onRemoveSource, onAttach, files, onAddFiles, onRemoveFile, attachmentRefs, onRemoveAttachmentRef, voice, voiceAvailable, field, placeholder, disabled }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; submissionStatus?: string; working?: boolean; onStop?: () => void; stopping?: boolean; onLatest?: () => void;
   sources: Array<{ id: string; label: string }>; onRemoveSource: (s: { id: string; label: string }) => void; onAttach: () => void;
   files: File[]; onAddFiles?: (files: File[]) => void; onRemoveFile: (index: number) => void;
   attachmentRefs: AssistantAttachmentRef[]; onRemoveAttachmentRef: (fileId: string) => void;
@@ -27,6 +27,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
     ...files.map((file, index) => ({ key: 'new:' + index, name: file.name, remove: () => onRemoveFile(index) })),
     ...attachmentRefs.map(file => ({ key: file.fileId, name: file.name, remove: () => onRemoveAttachmentRef(file.fileId) })),
   ];
+  const attachmentLabels=taskAttachmentLabels(attachments);
   const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
   const latestButton = onLatest && <IconButton icon={ArrowDown} label={uiText('回到最新')} onClick={onLatest} />;
   if (inCall) return <div className="mist-xz-composer mist-xz-call" data-state={voice.state}>
@@ -49,12 +50,26 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
       if (acceptsFiles) onAddFiles?.(Array.from(event.dataTransfer.files));
     }}>
     {voice.state === 'error' && voice.error && <p className="mist-xz-note" role="alert">{uiText(voice.error)}</p>}
-    {!!attachments.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>{attachments.map(file =>
-      <span key={file.key} className="mist-xz-source" data-attachment><Icon icon={Paperclip} size="xs" /><span title={file.name}>{file.name}</span>
-        <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+file.name} disabled={busy} onClick={file.remove} />
+    {!!attachments.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>{attachments.map((file,index) =>
+      <span key={file.key} className="mist-xz-source" data-attachment><Icon icon={Paperclip} size="xs" /><span title={attachmentLabels[index]}>{attachmentLabels[index]}</span>
+        <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+attachmentLabels[index]} disabled={busy} onClick={file.remove} />
       </span>)}</div>}
     {sources.length > 0 && <div className="mist-xz-sources">{sources.map(s => <span key={s.id} className="mist-xz-source"><span>{uiText(s.label)}</span><IconButton size="sm" icon={X} label={uiText('移除 ' + s.label)} disabled={busy} onClick={() => onRemoveSource(s)} /></span>)}</div>}
-    <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={TASK_INSTRUCTION_LIMIT} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onKeyDown={e => {
+    <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={TASK_INSTRUCTION_LIMIT} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onPaste={event => {
+      if (!acceptsFiles) return;
+      const incoming = Array.from(event.clipboardData.files);
+      if (!incoming.length) {
+        for (const item of Array.from(event.clipboardData.items)) {
+          if (item.kind !== 'file') continue;
+          const file = item.getAsFile();
+          if (file) incoming.push(file);
+        }
+      }
+      if (!incoming.length) return;
+      // Leave plain-text insertion to the textarea when a paste includes both files and text.
+      if (!event.clipboardData.getData('text/plain')) event.preventDefault();
+      onAddFiles?.(incoming);
+    }} onKeyDown={e => {
       if (e.nativeEvent.isComposing) return;
       const before=value.slice(0,e.currentTarget.selectionStart);
       if (e.key === '@' && (!before || /[\s，。；、：]$/.test(before))) { e.preventDefault(); onAttach(); }
@@ -69,9 +84,10 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
       <IconButton icon={AtSign} label={uiText('引用业务记录')} disabled={busy || disabled} onClick={onAttach} />
       <span className="mist-spacer" />
       {latestButton}
-      {(busy || working && !value.trim()) && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText(stopping?'正在核对停止结果':'停止生成')} disabled={stopping} onClick={onStop}><Icon icon={Square} size="sm" /></button>
+      {submissionStatus && <span className="mist-sub" role="status">{submissionStatus}</span>}
+      {!submissionStatus && (busy || working && !value.trim()) && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText(stopping?'正在核对停止结果':'停止生成')} disabled={stopping} onClick={onStop}><Icon icon={Square} size="sm" /></button>
         : !attachments.length && !value.trim() && voiceAvailable && !busy ? <button type="button" className="mist-send" data-kind="voice" aria-label={uiText('语音通话')} title={uiText('语音通话')} onClick={() => void voice.start()}><Icon icon={AudioLines} size="sm" /></button>
-        : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
+        : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready || !!submissionStatus} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
     </div>
   </div>;
 }
