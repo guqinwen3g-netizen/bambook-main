@@ -2319,6 +2319,29 @@ it('keeps excluded images out of a retry that renders an allowed PDF page',async
  for(const [input] of complete.mock.calls)expect(input.images?.map(image=>image.name)).toEqual(['scan.pdf 第 3 页']);
 });
 
+it('keeps the image-only plan focused on its source and omits task UI metadata',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'图片已核对。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const image=await sharp({create:{width:4,height:4,channels:3,background:'#eecc00'}}).png().toBuffer();
+ const created=(await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify({
+  requestId:randomUUID(),name:'核对标签',instructions:'查看标签并报告编号。',
+ })).attach('attachments',image,'tag.png').expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(created.id)).toMatchObject({state:'succeeded',result:'图片已核对。'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input=complete.mock.calls[0][0],message=input.messages[0].content;
+ const facts=JSON.parse(message.slice(message.indexOf('{')));
+ expect(facts.task).toMatchObject({instructions:'查看标签并报告编号。',mode:created.mode,expiresAt:created.expiresAt,
+  attachments:[{id:'attachment_1',name:'tag.png'}]});
+ for(const key of ['id','identityId','ownerId','conversationId','version','lastHeartbeatAt','canControl','executionStageSince'])
+  expect(facts.task).not.toHaveProperty(key);
+ expect(input.systemPrompt).not.toContain('PDF 的 pdfTextByPage');
+ expect(input.systemPrompt).not.toContain('worksheetComplete 为 true');
+ expect(input.systemPrompt).toContain('task.attachments');
+});
+
 it('does not build the workspace page response while a mixed-file task has no history or proposals',async()=>{
  const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对三份原件。'}));
  const f=await fixture(complete);
