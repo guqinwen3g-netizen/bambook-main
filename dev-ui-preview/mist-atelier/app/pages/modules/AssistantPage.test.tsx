@@ -1051,6 +1051,26 @@ it('retains the answer, references and an unfinished question when returning fro
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Unfinished follow-up');
 });
 
+it('waits for the company binding before allowing drafts, then allows offline drafting',async()=>{
+  const bound = mock.workspace;
+  mock.workspace = { ...bound, workspace: undefined, state: null, loading: true };
+  mock.fetch.mockResolvedValue(response({configured:false}));
+  await mount();
+  const composer = () => getByRole(host,'textbox',{name:'向助手提问'}) as HTMLTextAreaElement;
+  const suggestions = () => Array.from(host.querySelectorAll<HTMLButtonElement>('button.mist-xz-tile'));
+  expect(composer().disabled).toBe(true);
+  expect(suggestions().length).toBeGreaterThan(0);
+  expect(suggestions().every(suggestion=>suggestion.disabled)).toBe(true);
+  expect(button('引用业务记录')?.disabled).toBe(true);
+  await act(async()=>{mock.workspace=bound;root!.render(view());});
+  expect(composer().disabled).toBe(false);
+  expect(suggestions().some(suggestion=>!suggestion.disabled)).toBe(true);
+  await question('暂存的模拟问题');
+  expect(composer().value).toBe('暂存的模拟问题');
+  expect(button('发送')?.disabled).toBe(true);
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
 it('clears retained conversation when the authenticated session changes outside the assistant page',async()=>{
   mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));
   await mount(); await question('Private account-A question');
