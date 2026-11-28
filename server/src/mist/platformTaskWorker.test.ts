@@ -978,6 +978,54 @@ it.each(['confirmed','rejected'] as const)('reads the selected order draft befor
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
+it('reads back a confirmed draft removal even after reading the removed line',async()=>{
+ let orderId:string,removedId:string,kept:Record<string,unknown>,contract:Record<string,unknown>;
+ let calls=0;
+ const complete=vi.fn(async(input:LlmCompletionInput)=>{
+  calls++;
+  if(calls===1)return tool('bambook_get',{type:'order_line',id:removedId});
+  if(calls===2)return tool('bambook_execute',{command:{type:'order.governance.saveDraft',
+   payload:{orderId,input:contract,lines:[kept]}}});
+  const prompt=input.messages[0].content;
+  const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
+  const read=facts.history.recent.find((step:{operationId:string})=>step.operationId===facts.proposalReadBack?.operationId);
+  expect(read).toMatchObject({name:'bambook_get',result:{object:{id:orderId,data:{qty:10,amount:120,lines:1}}}});
+  return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已移除 SIM-REMOVE，保留 SIM-KEEP。'});
+ });
+ const f=await fixture(complete),line={fulfillmentMode:'cmt',cmtIncludedItems:[],name:'模拟外套',img:'coat',qty:10,unit:'件',price:12};
+ const created=await f.command('order.create',{
+  type:'garment',customerId:f.workspace.state.customers[0].id,season:'AW26',currency:'USD',due:'2027-01-28',ownerId:'local-operator',
+  governance:{kind:'external',poNumber:'SIM-REMOVE-READBACK',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'TT',
+   depositPercent:30,preShipmentPercent:30,paymentNote:'见提单副本',incoterm:'FOB',deliveryPlace:'上海'},
+  lines:[{...line,style:'SIM-KEEP'},{...line,style:'SIM-REMOVE',qty:24,price:14}],
+ });
+ orderId=created.body.receipt.result.orderId;
+ const state=created.body.workspace.state;
+ contract=state.orders.find((order:{id:string})=>order.id===orderId).governance.contract;
+ const retained=state.orderLines.find((item:{style:string})=>item.style==='SIM-KEEP');
+ removedId=state.orderLines.find((item:{style:string})=>item.style==='SIM-REMOVE').id;
+ kept={...line,id:retained.id,style:'SIM-KEEP'};
+ delete kept.img;
+ f.worker.start(3_600_000);
+ const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'复核模拟草稿条目',instructions:'只拟移除引用草稿中的 SIM-REMOVE。',intentRefs:[{kind:'orders',id:orderId}],
+ }).expect(201);
+ await f.drain();
+ const pending=await f.current(task.id);
+ expect(pending.state).toBe('waiting_human');
+ expect((await taskRecord(f.local.database,f.workspace.id,task.id)).value.sources).toEqual(expect.arrayContaining([
+  expect.objectContaining({path:'orderLines',id:removedId,fullReadHash:expect.any(String)}),
+ ]));
+ const confirmation=await f.command('agent.proposal.confirm',{id:pending.waitingProposalIds[0]});
+ expect.soft(confirmation.body.workspace.state.orderLines.filter((item:{orderId:string})=>item.orderId===orderId)).toEqual([retained]);
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已移除 SIM-REMOVE，保留 SIM-KEEP。'});
+ expect(complete).toHaveBeenCalledTimes(3);
+ await f.command('order.governance.saveDraft',{orderId,input:contract,lines:[{...kept,img:'clay'}]});
+ const {body:{workspace}}=await f.human.get(f.base).expect(200);
+ expect(workspace.state.orderLines.find((item:{id:string})=>item.id===retained.id).img).toBe('clay');
+});
+
 it('turns a business command the model executes into an owner proposal, waits for confirmation and then continues',async()=>{
  // customer.update 属中风险：平台执行器经 bambook_execute 只能得到 awaiting_confirmation 提议，本人确认后任务继续，不能直接改客户。
  let index=0,customer='';const complete=vi.fn(async()=>[

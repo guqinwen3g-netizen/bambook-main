@@ -667,9 +667,32 @@ export async function saveTaskSources(db: any, actor: TokenPayload, lease: Agent
   if(JSON.stringify(c.sources)===JSON.stringify(sources)&&!satisfied&&!refusalRead)return;
   await save(db,row,c,{...c,version:c.version+1,sources,...(satisfied?{requiredRead:undefined}:{}),...(refusalRead?{lastProposalDecision:{...c.lastProposalDecision!,readBack:true}}:{})});
 }
-export async function advanceTaskSources(db:any,actor:TokenPayload,workspaceId:string,taskId:string,keys:string[][]|null,revision:number){
-  if(!keys)return;const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);let changed=false;
-  const sources=c.sources.map(ref=>{if(ref.observedRevision===undefined)return ref;const prefix=ref.path.split('.').map(k=>'k:'+k);const touched=keys.filter(key=>prefix.every((p,i)=>key[i]===p)&&(key.length<=prefix.length||key[prefix.length]==='i:'+ref.id));if(!touched.length)return ref;changed=true;if(ref.path==='email.messages'){const fields={...ref.fieldRevisions};for(const key of touched){const field=key[prefix.length+1];if(field?.startsWith('k:'))fields[field.slice(2)]=revision;}return{...ref,fieldRevisions:fields};}return{...ref,observedRevision:revision};});
+export async function advanceTaskSources(db:any,actor:TokenPayload,workspaceId:string,taskId:string,keys:string[][]|null,revision:number,
+  removal?:{orderId:string;lineIds:ReadonlySet<string>},
+){
+  if(!keys&&!removal?.lineIds.size)return;
+  const{row,value:c}=await taskRecord(db,workspaceId,taskId);
+  owner(actor,c);
+  let changed=false;
+  const sources=c.sources.map(ref=>{
+    if(ref.path==='orderLines'&&removal?.lineIds.has(ref.id)){
+      // Preserve the historical receipt without treating it as a live full read.
+      const {fullReadHash:_full,fieldRevisions:_fields,observedRevision:_revision,...historical}=ref;
+      changed=true;
+      return {...historical,removedFromOrderId:removal.orderId};
+    }
+    if(!keys||ref.observedRevision===undefined)return ref;
+    const prefix=ref.path.split('.').map(k=>'k:'+k);
+    const touched=keys.filter(key=>prefix.every((p,i)=>key[i]===p)&&(key.length<=prefix.length||key[prefix.length]==='i:'+ref.id));
+    if(!touched.length)return ref;
+    changed=true;
+    if(ref.path==='email.messages'){
+      const fields={...ref.fieldRevisions};
+      for(const key of touched){const field=key[prefix.length+1];if(field?.startsWith('k:'))fields[field.slice(2)]=revision;}
+      return {...ref,fieldRevisions:fields};
+    }
+    return {...ref,observedRevision:revision};
+  });
   if(changed)await save(db,row,c,{...c,version:c.version+1,sources});
 }
 export function readTaskRecord(row:any,workspaceId:string){return record(row,workspaceId);}

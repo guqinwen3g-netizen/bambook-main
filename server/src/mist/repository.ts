@@ -1797,7 +1797,20 @@ export class MistRepository {
         if (dryRun) throw new MistPreviewOutcome({ revision: row.revision, result: applied.result, events: (applied.state.events ?? []).filter((event: { id: string }) => !previousEvents.has(event.id)).map((event: { text: string }) => taxBaseHidden ? maskTaxBaseText(event.text) : event.text), changes: changeKeys ?? null });
         const nextRevision = row.revision + 1;
         const sourceTask=isAgentActor(prior)?prior.agentTaskLease?.taskId:humanTaskProposal?.taskId;
-        if(sourceTask&&!EMAIL_SERVER_COMMAND.test(command?.type??''))await advanceTaskSources(db,actor,workspaceId,sourceTask,changeKeys,nextRevision);
+        if(sourceTask&&!EMAIL_SERVER_COMMAND.test(command?.type??'')){
+          let removal:{orderId:string;lineIds:Set<string>}|undefined;
+          if(confirmProposalId&&humanTaskProposal?.taskId===sourceTask&&command.type==='order.governance.saveDraft'
+            &&typeof command.payload.orderId==='string'&&Array.isArray(command.payload.lines)){
+            const orderId=command.payload.orderId;
+            const remaining=new Set(applied.state.orderLines.map((line:{id:string})=>line.id));
+            const lineIds=new Set<string>();
+            for(const line of row.state.orderLines){
+              if(line.orderId===orderId&&!remaining.has(line.id))lineIds.add(line.id);
+            }
+            if(lineIds.size)removal={orderId,lineIds};
+          }
+          await advanceTaskSources(db,actor,workspaceId,sourceTask,changeKeys,nextRevision,removal);
+        }
         const saved = await db.mistWorkspace.update({ where: { id: workspaceId }, data: { state: applied.state, name: identifier(applied.state.settings.workspaceName, '公司名称'), revision: nextRevision } });
         if (scope) ROW_SCOPE.set(saved, scope);
         OWN_TEAMS.set(saved, OWN_TEAMS.get(row) ?? []);
