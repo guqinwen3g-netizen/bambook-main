@@ -88,6 +88,21 @@ it('opens an explicitly cited checked PDF page and keeps ambiguous or unchecked 
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('links the observed PDF pages after a scan explanation under the exact filename',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const file={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:100};
+ const reads=[{at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:'scan',taskAttachmentObservedPages:[3,5]}];
+ const text='### scan.pdf\n\n两页均无 PDF 可提取文字，以下内容仅依据本人指定的页面图像目视核对。\n\n- 第 3 页：编号 7158。\n- 第 4 页：未读。\n- 第 5 页：编号 9251。';
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[file]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const pages=[...host.querySelectorAll('button[title]')];
+  expect(pages.map(button=>button.getAttribute('title'))).toEqual(['第 3 页','第 5 页']);
+  await act(async()=>pages.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[file,3],[file,5]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet names and keeps unread or other-file tabs at workbook level',async()=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);

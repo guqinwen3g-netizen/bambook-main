@@ -53,7 +53,7 @@ import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTask
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
-import {requestedTaskAttachmentScope,explicitPdfVisualPage,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
+import {requestedTaskAttachmentScope,explicitPdfVisualPages,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {ensurePersonalIdentity,personalIdentityId,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
@@ -2234,7 +2234,7 @@ export class MistRepository {
     });
   }
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache,
-    scan?:{fileId:string;page:number;sha256:string},
+    scan?:{fileId:string;pages:readonly number[];sha256:string},
   ):Promise<Array<{name:string;url:string;pdfPage?:{file:string;page:number}}>> {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
     const {allowedFiles,pdfRanges,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
@@ -2255,32 +2255,40 @@ export class MistRepository {
       }
       return { name, url };
     }));
-    const selected=explicitPdfVisualPage(instructions,pdfRanges);
-    if(!scan||pdfChoice||pdfScopeConflict||selected?.fileId!==scan.fileId||selected.page!==scan.page
+    const selected=explicitPdfVisualPages(instructions,pdfRanges);
+    if(!scan||pdfChoice||pdfScopeConflict||selected?.fileId!==scan.fileId
+      ||!scan.pages.length||scan.pages.some(page=>!selected.pages.includes(page))
       ||(allowedFiles&&!allowedFiles.has(scan.fileId)))return prepared;
     const index=files.findIndex(file=>file.id===scan.fileId&&file.sha256===scan.sha256);
     if(index<0)return prepared;
-    const file=files[index],bytes=await this.files.read(workspaceId,file),cacheId=file.id+':pdf:'+scan.page;
-    const cached=rendered.get(cacheId);
-    let url=cached?.sha256===scan.sha256?cached.url:undefined;
-    if(!url){
-      const image=await renderPdfPageImage(bytes,scan.page);
-      if(!image)return prepared;
-      const jpeg=await sharp(image,{limitInputPixels:2_560_000}).jpeg({quality:82}).toBuffer().catch(()=>undefined);
-      if(!jpeg)return prepared;
-      url='data:image/jpeg;base64,'+jpeg.toString('base64');
+    const file=files[index],bytes=await this.files.read(workspaceId,file);
+    const scanned:Array<{page:number;cacheId:string;url:string}>=[];
+    for(const page of new Set(scan.pages)){
+      const cacheId=file.id+':pdf:'+page,cached=rendered.get(cacheId);
+      let url=cached?.sha256===scan.sha256?cached.url:undefined;
+      if(!url){
+        const image=await renderPdfPageImage(bytes,page);
+        if(!image)continue;
+        const jpeg=await sharp(image,{limitInputPixels:2_560_000}).jpeg({quality:82}).toBuffer().catch(()=>undefined);
+        if(!jpeg)continue;
+        url='data:image/jpeg;base64,'+jpeg.toString('base64');
+      }
+      scanned.push({page,cacheId,url});
     }
+    if(!scanned.length)return prepared;
     const current=await this.privateTaskAttachments(prior,workspaceId);
     const stillVisible=current.files.find(item=>item.id===file.id);
     const currentScope=requestedTaskAttachmentScope(current.files,current.instructions,current.questions);
-    const currentPage=explicitPdfVisualPage(current.instructions,currentScope.pdfRanges);
+    const currentPage=explicitPdfVisualPages(current.instructions,currentScope.pdfRanges);
     if(!stillVisible||!this.sameTaskAttachment(file,stillVisible)||currentScope.pdfChoice||currentScope.pdfScopeConflict
-      ||currentPage?.fileId!==scan.fileId||currentPage.page!==scan.page
+      ||currentPage?.fileId!==scan.fileId||scanned.some(item=>!currentPage.pages.includes(item.page))
       ||currentScope.allowedFiles&&!currentScope.allowedFiles.has(file.id))fail('FILE_NOT_FOUND','附件不在当前任务内',404);
     await this.files.read(workspaceId,stillVisible);
-    if(rendered.size<TASK_ATTACHMENT_COUNT&&url.length<=MAX_CACHED_TASK_IMAGE_URL_LENGTH)rendered.set(cacheId,{sha256:scan.sha256,url});
     const label=labels[index];
-    return [...prepared,{name:label+' 第 '+scan.page+' 页',url,pdfPage:{file:label,page:scan.page}}];
+    return [...prepared,...scanned.map(({page,cacheId,url})=>{
+      if(rendered.size<TASK_ATTACHMENT_COUNT&&url.length<=MAX_CACHED_TASK_IMAGE_URL_LENGTH)rendered.set(cacheId,{sha256:scan.sha256,url});
+      return {name:label+' 第 '+page+' 页',url,pdfPage:{file:label,page}};
+    })];
   }
   /** 复用附件下载的同一授权（canReadFile）后提取有界正文摘录；不返回字节。 */
   async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {

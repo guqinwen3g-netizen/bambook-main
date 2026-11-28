@@ -227,7 +227,14 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
         const lead = readLead(heading);
         const index = lead?.index ?? byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
         if (index === undefined) continue;
-        const details = tree.children[position];
+        let details = tree.children[position];
+        if(heading.type==='heading'&&details.type==='paragraph'&&!mentionsAnotherSource(details)
+          &&(/^application\/pdf\b/i.test(files[index].mimeType)||/\.pdf$/i.test(files[index].name))){
+          const intro=details.children.map(inlineTextStart).join('');
+          if(/(?:无|没有)[^。；\n]{0,24}可提取文字|\bno extractable text\b/i.test(intro)
+            &&/图像|目视|扫描|\b(?:image|visual)/i.test(intro))details=tree.children[position+1];
+        }
+        if(!details)continue;
         if (details.type === 'paragraph') linkSectionReference(details,index,lead?.range);
         if (details.type === 'list') {
           for (const item of details.children) {

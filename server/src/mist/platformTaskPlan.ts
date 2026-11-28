@@ -231,14 +231,16 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */
-export function explicitPdfVisualPage(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>){
+export function explicitPdfVisualPages(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>){
   const request=splitTaskRequest(instructions);
   if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
     ||/(?:不要|禁止|无需|不用)\s*(?:目视|看图|用?\s*OCR)|\b(?:do not|without)\s+(?:use\s+)?OCR\b/i.test(request)
     ||pdfRanges.size!==1)return undefined;
   const [entry]=pdfRanges;
-  const [fileId,range]=entry;
-  return !range.windows&&range.from===range.to?{fileId,page:range.from}:undefined;
+  const [fileId,range]=entry,windows=range.windows??[range];
+  if(windows.reduce((count,window)=>count+window.to-window.from+1,0)>3)return undefined;
+  const pages=windows.flatMap(window=>Array.from({length:window.to-window.from+1},(_,index)=>window.from+index));
+  return pages.length?{fileId,pages}:undefined;
 }
 
 export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:ReadonlyMap<string,PdfPageScope>,

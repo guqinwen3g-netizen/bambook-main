@@ -1126,12 +1126,12 @@ it.each([false,true])('keeps a valid development draft proposal visible across r
  await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
 });
 
-function pdf(text:string, pageCount=1,dense=false,noTextPage?:number){
+function pdf(text:string, pageCount=1,dense=false,noTextPage?:number|number[]){
  const font=3+2*pageCount;
  const objects=['<</Type/Catalog/Pages 2 0 R>>',`<</Type/Pages/Kids[${Array.from({length:pageCount},(_,i)=>`${3+2*i} 0 R`).join(' ')}]/Count ${pageCount}>>`];
  for(let page=1;page<=pageCount;page++){
    const extra=dense?Array.from({length:5},(_,index)=>`BT /F1 9 Tf 10 ${120+14*index} Td (Page ${page}, line ${index}: synthetic detailed invoice terms) Tj ET`).join('\n'):'';
-   const stream=page===noTextPage?'':`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET\n${extra}`;
+   const stream=(Array.isArray(noTextPage)?noTextPage.includes(page):page===noTextPage)?'':`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET\n${extra}`;
    objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 ${dense?200:100}]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
  }
  objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');
@@ -1172,12 +1172,32 @@ it.each([true,false])('only supplies an explicitly requested scanned PDF page as
  const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
  if(visual){
   expect(input.images).toEqual([expect.objectContaining({name:'scan.pdf 第 3 页',url:expect.stringMatching(/^data:image\/jpeg;base64,/)} )]);
-  expect(facts.pdfPageImage).toEqual({file:'scan.pdf',page:3});
+  expect(facts.pdfPageImages).toEqual([{file:'scan.pdf',page:3}]);
  }else{
   expect(input.images).toBeUndefined();
-  expect(facts).not.toHaveProperty('pdfPageImage');
+  expect(facts).not.toHaveProperty('pdfPageImages');
  }
  expect(text).not.toContain('OUTSIDE-PAGE-5');
+});
+
+it('sends selected scanned pages without the intervening pages or other attachments',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对指定两页。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对两个扫描页',
+   instructions:'请只目视核对 scan.pdf 第 3 页和第 5 页。不要读取其他附件。'}))
+  .attach('attachments',pdf('OUTSIDE-PAGE-6',6,false,[3,5]),'scan.pdf')
+  .attach('attachments',pdf('OUTSIDE-OTHER-FILE'),'another.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ const input=complete.mock.calls[0][0],text=input.messages[0].content;
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ expect(input.images?.map(image=>image.name)).toEqual(['scan.pdf 第 3 页','scan.pdf 第 5 页']);
+ expect(facts.pdfPageImages).toEqual([{file:'scan.pdf',page:3},{file:'scan.pdf',page:5}]);
+ expect(facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text')
+  .map((step:{result:{range:{pageFrom:number;pageTo:number}}})=>[step.result.range.pageFrom,step.result.range.pageTo])).toEqual([[3,3],[5,5]]);
+ expect(text).not.toContain('Page 4: general terms');
+ expect(text).not.toContain('OUTSIDE-OTHER-FILE');
 });
 
 it('reads the short tail of each PDF before asking the model to prepare the report', async () => {
