@@ -193,6 +193,11 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   // Older native clients have a closed type enum. Keep broad REST results compatible until explicit opt-in.
   const mailRecordReadOptions=(req:Request)=>{if(req.query.includeMailRecords!==undefined&&req.query.includeMailRecords!=='1')fail('INVALID_INPUT','邮件读取能力参数无效',400);return{excludeTypes:req.query.includeMailRecords==='1'?[]:['email_draft','email_send']};};
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
+  router.get('/workspaces/:id/agent-tasks/receipt/:requestId',run(async(req,res)=>{
+    exactBody(req.query,[]);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({item:await repository.getAgentTaskReceipt(actor(req),req.params.id,req.params.requestId)});
+  }));
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
   router.get('/workspaces/:id/agent-tasks/:taskId/attachments/:fileId', run(async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');

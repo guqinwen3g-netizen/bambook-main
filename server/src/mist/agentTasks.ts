@@ -118,16 +118,19 @@ export async function taskRecord(db: any, workspaceId: string, taskId: unknown) 
   return { row, value: record(row, workspaceId) };
 }
 
-export async function taskFromCreationReceipt(db: any, actor: TokenPayload, workspaceId: string, requestId: unknown) {
+export async function taskFromCreationReceipt(db: any, actor: TokenPayload, workspaceId: string, requestId: unknown, scope: 'manual' | 'personal') {
   const key = taskCreationReceiptKey(actor.userId, rid(requestId));
   const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: key } } });
   if (receipt?.workspaceId !== workspaceId || receipt.actorId !== actor.userId || !uuid(receipt.result?.id))
     fail('NOT_FOUND', '任务不存在或无权访问', 404);
   const { value: task } = await taskRecord(db, workspaceId, receipt.result.id);
   owner(actor, task);
-  if (task.executor !== 'platform' || task.automationId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
-  const { value: identity } = await identityRecord(db, workspaceId, task.identityId);
-  if (identity.kind !== 'personal' || identity.ownerId !== actor.userId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  if (task.automationId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  if (scope === 'personal') {
+    if (task.executor !== 'platform') fail('NOT_FOUND', '任务不存在或无权访问', 404);
+    const { value: identity } = await identityRecord(db, workspaceId, task.identityId);
+    if (identity.kind !== 'personal' || identity.ownerId !== actor.userId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  }
   return task;
 }
 export async function lockTaskRecord(db: any, workspaceId: string, taskId: unknown) {

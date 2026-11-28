@@ -22,15 +22,48 @@ async function setup(mode:'read'|'operate'='operate',ceiling?:{value:string[]|nu
  const base='/api/mist/workspaces/'+workspace.id,id=randomUUID();
  await human.post(base+'/agent-identities').send({id,name:'订单助理',ownerId:'local-operator',mode}).expect(201);
  const key=(await human.post(base+'/agent-identities/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body.token;
- const task=(await human.post(base+'/agent-tasks').send({requestId:randomUUID(),identityId:id,name:'整理来信',instructions:'读取本人可见的来信，移动邮件先交本人确认。'}).expect(201)).body.item;
+ const taskRequestId=randomUUID();
+ const task=(await human.post(base+'/agent-tasks').send({requestId:taskRequestId,identityId:id,name:'整理来信',instructions:'读取本人可见的来信，移动邮件先交本人确认。'}).expect(201)).body.item;
  const current=async()=> (await human.get(base+'/agent-tasks/'+task.id).expect(200)).body.item;
  const claim=async()=>{const r=await request(app).post(base+'/agent-tasks/'+task.id+'/claim').set(SERVICE_KEY_HEADER,key).send({requestId:randomUUID(),workerId:'protocol-client'}).expect(200);return r.body.token as string;};
  const tool=async(token:string,name:string,args:any={},status=200,operation=randomUUID())=>{
   const r=await request(app).post('/api/mist/mcp').set(TASK_HEADER,token).set('X-Bambook-Task-Operation',operation).send({jsonrpc:'2.0',id:randomUUID(),method:'tools/call',params:{name,arguments:args}}).expect(status);return r.body.result;
  };
  const command=async(type:string,payload:any,status=200)=>{workspace=(await human.get(base).expect(200)).body.workspace;return human.post(base+'/commands').send({requestId:randomUUID(),expectedRevision:workspace.revision,command:{type,payload}}).expect(status);};
- return{local,app,human,base,id,key,task,current,claim,tool,command,get workspace(){return workspace;}};
+ return{local,app,human,base,id,key,task,taskRequestId,current,claim,tool,command,get workspace(){return workspace;}};
 }
+it('reads the original manual task creation receipt with current owner authority and no writes',async()=>{
+ const ceiling:{value:string[]|null}={value:null},f=await setup('operate',ceiling);
+ const receipt=f.base+'/agent-tasks/receipt/';
+ const second=request.agent(f.app);
+ await second.get('/api/mist/session').expect(200);
+ await second.post('/api/mist/session').send({profileId:'demo-buyer'}).expect(200);
+ const workspace=await f.local.database.mistWorkspace.findUnique({where:{id:f.workspace.id}});
+ await f.local.database.mistWorkspace.update({where:{id:f.workspace.id},data:{state:{...workspace.state,memberIds:['demo-buyer']}}});
+ await second.get(f.base).expect(200);
+ const repository=f.app.locals.mistRepository;
+ repository.setPlatformTaskRuntime(()=>true);
+ const platformInput={requestId:randomUUID(),identityId:f.id,name:'手动核对订单',instructions:'只读核对订单。',executor:'platform'};
+ const platform=(await f.human.post(f.base+'/agent-tasks').send(platformInput).expect(201)).body.item;
+ const automationRequest=randomUUID(),actor=await f.local.actorForProfile('local-operator');
+ await repository.createAgentTask(actor,f.workspace.id,{...platformInput,requestId:automationRequest},randomUUID());
+ const before=await f.local.database.mistCommandReceipt.findMany({where:{workspaceId:f.workspace.id}});
+ for(const [requestId,taskId] of [[f.taskRequestId,f.task.id],[platformInput.requestId,platform.id]]){
+  const read=await f.human.get(receipt+requestId).expect('Cache-Control','private, no-store').expect(200);
+  expect(read.body.item).toMatchObject({id:taskId,state:'queued'});
+  await second.get(receipt+requestId).expect(404);
+  await f.human.get(f.base+'/personal-agent/tasks/receipt/'+requestId).expect(404);
+ }
+ await f.human.get(receipt+automationRequest).expect(404);
+ await f.human.get(receipt+randomUUID()).expect(404);
+ await f.human.get('/api/mist/workspaces/'+randomUUID()+'/agent-tasks/receipt/'+f.taskRequestId).expect(404);
+ await f.human.get(receipt+f.taskRequestId+'?extra=1').expect(400);
+ await request(f.app).get(receipt+f.taskRequestId).set(SERVICE_KEY_HEADER,f.key).expect(403);
+ ceiling.value=['ai:chat'];
+ const masked=await f.human.get(receipt+f.taskRequestId).expect(200);
+ expect(masked.body.item).toMatchObject({id:f.task.id,state:'access_changed',contentRestricted:true,instructions:'',result:''});
+ expect(await f.local.database.mistCommandReceipt.findMany({where:{workspaceId:f.workspace.id}})).toEqual(before);
+});
 it('scopes execution grants, counts reads, waits atomically for human approval, resumes with a new grant and cancels pending work',async()=>{
  const f=await setup(),token=await f.claim();expect(token).toMatch(/^bmt1_/);
  await request(f.app).get('/api/mist/session').set(TASK_HEADER,token).expect(403);

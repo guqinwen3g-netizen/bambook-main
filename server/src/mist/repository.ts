@@ -892,10 +892,13 @@ export class MistRepository {
     });
   }
   async getPersonalTaskReceipt(prior: TokenPayload, workspaceId: string, requestId: unknown) {
+    return this.getAgentTaskReceipt(prior, workspaceId, requestId, 'personal');
+  }
+  async getAgentTaskReceipt(prior: TokenPayload, workspaceId: string, requestId: unknown, scope: 'manual' | 'personal' = 'manual') {
     if (isAgentActor(prior)) fail('FORBIDDEN', '提交回执只供本人查看', 403);
     return this.transact(async db => {
       const { actor, row } = await this.own(db, prior, workspaceId);
-      const task = await taskFromCreationReceipt(db, actor, row.id, requestId);
+      const task = await taskFromCreationReceipt(db, actor, row.id, requestId, scope);
       const now = Date.now();
       let readable = await this.taskViewSourcesAllowed(db, row, actor, task);
       try { await assertTaskViewAuthority(db, actor, task, now); }
