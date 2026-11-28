@@ -13,7 +13,7 @@ import { MistPrivateFiles, MIST_FILE_MAX_BYTES } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { MistApiError, fail } from './errors';
 import { assertCurrentAccount } from './authority';
-import {getMistAssistantStatus,runMistAssistant} from './assistant';
+import {checkMistAssistantHistory,getMistAssistantStatus,runMistAssistant} from './assistant';
 import { analyzeEmail } from './mail/intelligence';
 import {runQuoteCostAdvisor} from './quoteCostAdvisor';
 import { hasScope } from '../auth/permissionService';
@@ -246,6 +246,11 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/agent-conversations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listConversations(actor(req),req.params.id));}));
   router.put('/workspaces/:id/agent-conversations/:conversationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveConversation(actor(req),req.params.id,req.params.conversationId,exactBody(req.body,['title','hidden']))});}));
   router.get('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAutomations(actor(req),req.params.id));}));
+  router.get('/workspaces/:id/agent-automations/receipt/:requestId',run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    exactBody(req.query,[]);
+    res.json({item:await repository.getAutomationCreationReceipt(actor(req),req.params.id,req.params.requestId)});
+  }));
   router.post('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.saveAutomation(actor(req),req.params.id,undefined,exactBody(req.body,['requestId','name','trigger','time','instructions','enabled']))});}));
   router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled','expectedVersion']))});}));
   router.patch('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
@@ -471,7 +476,12 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.post('/workspaces/:id/restore',run(async(req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision']);res.json(await repository.changeArchive(actor(req),req.params.id,body as any,'restore'));}));
   router.post('/workspaces/:id/members',run(async(req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','action','account']);res.json(await repository.changeMember(actor(req),req.params.id,body as any));}));
   router.get('/workspaces/:id/assistant/status',run(async(req,res)=>{await repository.getForAssistant(actor(req),req.params.id);res.json(getMistAssistantStatus());}));
-  router.post('/workspaces/:id/assistant',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.json(await runMistAssistant({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
+  router.post('/workspaces/:id/assistant/history-access',run(async(req,res)=>{
+    const context=await repository.getForAssistant(actor(req),req.params.id);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json(checkMistAssistantHistory({...context,body:exactBody(req.body,['tokens'])}));
+  }));
+  router.post('/workspaces/:id/assistant',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.setHeader('Cache-Control','private, no-store');res.json(await runMistAssistant({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.post('/workspaces/:id/quotation-cost-advisor',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.setHeader('Cache-Control','private, no-store');res.json(await runQuoteCostAdvisor({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.get('/workspaces/:id/team-scopes', run(async (req, res) => { res.json(await repository.teamScopes(actor(req), req.params.id)); }));
   router.get('/workspaces/:id/internal-receivers', run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); res.json(await repository.internalReceivers(actor(req), req.params.id)); }));
