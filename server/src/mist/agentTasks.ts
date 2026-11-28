@@ -295,13 +295,14 @@ export async function claimTask(db: any, actor: AgentActor, workspaceId: string,
   }
   if (c.state !== 'queued' && c.state !== 'running' && !(c.state==='waiting_time'&&c.resumeAt!==undefined&&c.resumeAt<=now)) fail('AGENT_TASK_NOT_READY', '任务当前不能领取', 409);
   if (c.expiresAt <= now || usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT) fail('AGENT_TASK_BUDGET', '任务已达到执行限额', 409);
+  if ((c.platform?.providerRetryAt ?? 0) > now) return {item:taskView(c,actor,now)};
   const n = next(c, now, 'claimed', requestId, [workerId]); n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;
   if (pendingProposalIds.length) { n.state = 'waiting_human'; n.waitingProposalIds = pendingProposalIds; await save(db, row, c, n); await event(db, n, actor, 'waiting_human', requestId, now); return { item: taskView(n, actor, now) }; }
   const runId = randomUUID(), nonce = randomUUID(), token = make(workspaceId, c.id, runId, nonce);
   n.state = 'running'; n.lease = { id: runId, nonce, grantHash: hash(token), startedAt: now, heartbeatAt: now, sequence: 0, expiresAt: Math.min(now + TASK_LEASE_MS, n.expiresAt, now + RUNTIME_LIMIT - n.runtimeUsedMs), claimRequestId: requestId, workerId };
   n.lastHeartbeatAt=now;
   n.resumeAt=undefined;
-  if(n.platform)n.platform={...n.platform,nextRunAt:n.lease!.expiresAt,modelFallbackAt:undefined};
+  if(n.platform)n.platform={...n.platform,nextRunAt:n.lease!.expiresAt,modelFallbackAt:undefined,providerRetryAt:undefined};
   await save(db, row, c, n); await event(db, n, actor, 'claimed', requestId, now); return { item: taskView(n, actor, now), token };
 }
 export async function assertTaskLease(db: any, actor: TokenPayload, lease: AgentTaskLease, now: number, lock = false) {
@@ -372,9 +373,11 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
   const defaultRetryAt = now + retryDelay;
   const retryAt = issue && providerRetryAt !== undefined && Number.isSafeInteger(providerRetryAt)
     ? Math.min(c.expiresAt, Math.max(defaultRetryAt,providerRetryAt)) : defaultRetryAt;
+  const providerDeadline = issue && providerRetryAt !== undefined && Number.isSafeInteger(providerRetryAt) && providerRetryAt > now
+    ? Math.min(c.expiresAt, providerRetryAt) : undefined;
   const paused = !!issue && !deferred && failures >= 3;
   const visibleIssue = deferred ? 'model_unavailable' : issue;
-  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,issue:visibleIssue,failures}};
+  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,providerRetryAt:providerDeadline,issue:visibleIssue,failures}};
   if(visibleIssue)n.checkpoint=AGENT_TASK_ISSUE_LABEL[visibleIssue]+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
   if(issue)n.platform.checkpointBeforeIssue=c.platform.checkpointBeforeIssue??c.checkpoint;
   await save(db,row,c,n);await event(db,n,actor,action,requestId,now);
@@ -464,7 +467,14 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
   if(action==='cancel'||n.state==='queued'){n.resumeAt=undefined;n.condition=undefined;}
   if(action==='resume'&&n.state==='waiting_condition')n.condition={...n.condition!,nextCheckAt:Math.min(n.condition!.nextCheckAt,now)};
   n.waitingProposalIds = action === 'cancel' ? [] : pendingProposalIds;
-  if(n.platform){if(n.platform.checkpointBeforeIssue!==undefined)n.checkpoint=n.platform.checkpointBeforeIssue;n.platform={...n.platform,nextRunAt:n.state==='waiting_time'?n.resumeAt!:n.state==='waiting_condition'?Math.min(n.condition!.nextCheckAt,now):0,retryAt:undefined,issue:undefined,checkpointBeforeIssue:undefined};}
+  if(n.platform){
+    if(n.platform.checkpointBeforeIssue!==undefined)n.checkpoint=n.platform.checkpointBeforeIssue;
+    // Owner controls can clear the local retry backoff, but a provider deadline survives pause and restart.
+    const providerRetryAt=action!=='cancel'&&(n.platform.providerRetryAt??0)>now?n.platform.providerRetryAt:undefined;
+    const retryAt=n.state==='queued'?providerRetryAt:undefined;
+    const nextRunAt=n.state==='waiting_time'?n.resumeAt!:n.state==='waiting_condition'?Math.min(n.condition!.nextCheckAt,now):retryAt??0;
+    n.platform={...n.platform,nextRunAt,retryAt,providerRetryAt,issue:retryAt?'model_unavailable':undefined,checkpointBeforeIssue:undefined};
+  }
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
 }
 /** Missing facts suspend the same durable task; an answer is data, never business approval. */

@@ -10,7 +10,7 @@ import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
 import {namedDraftOrderLines,platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
-import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
+import{createLlmCompleter,LlmProviderRetryError,type LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
 import{MistPrivateFiles}from'./files';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
@@ -1144,6 +1144,38 @@ it('queues another task during the same provider cooldown without recording a mo
   for(const task of [first,second])expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已续办原任务。'});
   expect(fetchMock).toHaveBeenCalledTimes(3);
  }finally{vi.unstubAllGlobals();}
+});
+
+it('keeps the provider retry deadline when the owner pauses and resumes through a fresh worker',async()=>{
+ let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ const deadline=clock+60_000;
+ const first=await fixture(async()=>{throw new LlmProviderRetryError('Model busy',deadline);});
+ first.worker.start(3_600_000);
+ const task=await first.create('platform');await first.drain();
+ const waiting=await first.current(task.id);
+ expect(waiting).toMatchObject({state:'queued',executionIssue:{code:'model_unavailable',retryAt:new Date(deadline).toISOString()}});
+ const endpoint=first.base+'/agent-tasks/'+task.id;
+ const {item:paused}=(await first.human.post(endpoint+'/pause').send({requestId:randomUUID(),version:waiting.version}).expect(200)).body;
+ expect(paused.state).toBe('paused');
+ expect(paused.executionIssue).toBeUndefined();
+ await first.worker.stop();
+ const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原订单。'}));
+ const fresh=await fixture(complete);
+ const originalRevision=(await fresh.human.get(fresh.base).expect(200)).body.workspace.revision;
+ clock+=10_000;
+ const {item:resumed}=(await fresh.human.post(endpoint+'/resume').send({requestId:randomUUID(),version:paused.version}).expect(200)).body;
+ fresh.worker.start(3_600_000);await fresh.drain();
+ expect(complete).not.toHaveBeenCalled();
+ expect(resumed).toMatchObject({id:task.id,state:'queued',executionIssue:waiting.executionIssue});
+ const makeCredential=vi.fn(()=> 'unexpected-early-lease');
+ const {value}=await taskRecord(fresh.local.database,fresh.workspace.id,task.id);
+ await expect(fresh.repository.claimPlatformTask({workspaceId:fresh.workspace.id,taskId:task.id,ownerId:value.ownerId,version:value.version-1},'stale-scan',makeCredential)).resolves.toBeNull();
+ expect(makeCredential).not.toHaveBeenCalled();
+ clock=deadline-1;await fresh.drain();expect(complete).not.toHaveBeenCalled();
+ clock=deadline;await fresh.drain();
+ expect(await fresh.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'已核对原订单。'});
+ expect(complete).toHaveBeenCalledOnce();
+ expect((await fresh.human.get(fresh.base).expect(200)).body.workspace.revision).toBe(originalRevision);
 });
 
 it('pauses repeated invalid model output and allows explicit owner recovery on the same task',async()=>{
