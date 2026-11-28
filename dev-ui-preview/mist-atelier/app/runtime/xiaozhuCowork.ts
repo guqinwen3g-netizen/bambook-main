@@ -76,6 +76,7 @@ const HISTORY_READ_TIMEOUT_MS = 10_000;
 const TASK_SEND_TIMEOUT_MS = 45_000;
 const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
 const BACKGROUND_PROGRESS_INTERVAL_MS = 3000;
+const CAPABILITY_RECOVERY_INTERVAL_MS = 30_000;
 const BACKGROUND_PROGRESS_MAX_IN_FLIGHT = 3;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
@@ -293,7 +294,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   },[]);
   const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
   const personalIdentity = React.useRef<string | undefined>(undefined);
-  const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
+  const lastAvailability=React.useRef<{scope:string;available:boolean;retryWhileVisible:boolean}|null>(null);
   const checkReceipts = React.useCallback(async function reconcileReceipts(mode: 'startup'|'manual'|'reconnect', conversation?: string) {
     if (!base || !enabled || live.current!==scope || (mode==='reconnect'&&!navigator.onLine)) return;
     if (receiptRead.current || sendRequest.current) {
@@ -406,7 +407,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (!current()) return;
       if ('error' in result) throw result.error;
       const nextAvailable = result.caps.platformAvailable === true && own?.state !== 'disabled';
-      lastAvailability.current = {scope:bound, available:nextAvailable};
+      lastAvailability.current = {scope:bound, available:nextAvailable,retryWhileVisible:!nextAvailable&&own?.state!=='disabled'};
       setAvailable(nextAvailable);
     } catch (e) {
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
@@ -431,7 +432,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); abortOlderRead(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [abortOlderRead,load,scope]);
   React.useEffect(() => {
     if(!base||!enabled)return;
-    let resumeReceipts=false;
+    let resumeReceipts=false,lastRecheckAt=-Infinity;
     const disconnect=()=>{
       if(live.current!==scope)return;
       const reason=new Error('网络连接已断开');
@@ -446,21 +447,26 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       capability?.abort(reason);
     };
-    const recheck=async()=>{
+    const recheck=async(periodic:boolean)=>{
       if(capabilityRead.current)return;
+      lastRecheckAt=Date.now();
       const controller=new AbortController(),run=version.current;
       capabilityRead.current=controller;
-      setCheckingAvailability(true);
+      if(!periodic)setCheckingAvailability(true);
       const current=()=>live.current===scope&&version.current===run&&capabilityRead.current===controller;
       try{
-        const [caps,mine]=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,'任务服务检查超时',signal=>Promise.all([
-          mistApiRequest(base+'/agent-task-capabilities',{signal}) as Promise<{platformAvailable:boolean}>,
-          mistApiRequest(base+'/agent-identities?scope=mine',{signal}) as Promise<{items:AgentIdentityView[]}>,
-        ]));
+        const [caps,mine]=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,'任务服务检查超时',async signal=>{
+          const capabilities=mistApiRequest(base+'/agent-task-capabilities',{signal}) as Promise<{platformAvailable:boolean}>;
+          const identities=()=>mistApiRequest(base+'/agent-identities?scope=mine',{signal}) as Promise<{items:AgentIdentityView[]}>;
+          if(!periodic)return Promise.all([capabilities,identities()]);
+          const caps=await capabilities;
+          signal.throwIfAborted();
+          return [caps,caps.platformAvailable===true?await identities():undefined] as const;
+        });
         if(!current()||controller.signal.aborted)return;
-        const own=mine.items.find(identity=>identity.kind==='personal');
+        const own=mine?.items.find(identity=>identity.kind==='personal');
         const nextAvailable=caps.platformAvailable===true&&own?.state!=='disabled';
-        lastAvailability.current={scope,available:nextAvailable};
+        lastAvailability.current={scope,available:nextAvailable,retryWhileVisible:!nextAvailable&&own?.state!=='disabled'};
         setAvailable(nextAvailable);
       }catch(error){
         if(current()&&[401,403,404].includes(Number((error as {status?:number})?.status))){
@@ -479,7 +485,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         controller.abort();
       }
     };
-    const wake=(reconnect:boolean)=>{
+    const wake=(reconnect:boolean,periodic=false)=>{
       if(!navigator.onLine||live.current!==scope||historyRecovery.current==='pending')return;
       if(historyRecovery.current==='needed'){
         if(reconnect)void load('reconnect');
@@ -487,11 +493,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       if(!historyRead.current&&lastAvailability.current?.scope===scope&&!lastAvailability.current.available){
         resumeReceipts=reconnect||!!capabilityRead.current&&resumeReceipts;
-        void recheck();
+        void recheck(periodic);
       }else if(reconnect)void checkReceipts('reconnect');
     };
     const reconnect=()=>wake(true);
     const focus=()=>{if(document.visibilityState!=='hidden')wake(false);};
+    const recoveryTimer=window.setInterval(()=>{
+      if(document.visibilityState!=='hidden'&&lastAvailability.current?.retryWhileVisible
+        &&Date.now()-lastRecheckAt>=CAPABILITY_RECOVERY_INTERVAL_MS)wake(false,true);
+    },CAPABILITY_RECOVERY_INTERVAL_MS);
     window.addEventListener('offline',disconnect);
     window.addEventListener('online',reconnect);
     window.addEventListener('focus',focus);
@@ -499,6 +509,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.removeEventListener('offline',disconnect);
       window.removeEventListener('online',reconnect);
       window.removeEventListener('focus',focus);
+      window.clearInterval(recoveryTimer);
     };
   },[base,checkReceipts,clearDeniedHistory,enabled,load,scope]);
   const openReportIds = React.useMemo(() => {

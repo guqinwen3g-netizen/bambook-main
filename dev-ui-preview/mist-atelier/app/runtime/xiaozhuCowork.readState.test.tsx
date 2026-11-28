@@ -39,6 +39,57 @@ it.each(['online','focus'])('refreshes task creation capability on %s without re
  expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
 });
 
+it('rechecks unavailable execution in a visible idle tab and stops once it is restored',async()=>{
+ vi.useFakeTimers();
+ let ready=false,visible:DocumentVisibilityState='visible',reads=0;
+ let finishProbe:(value:unknown)=>void=()=>{};
+ const visibility=vi.spyOn(document,'visibilityState','get').mockImplementation(()=>visible);
+ try{
+  api.mockImplementation(async(url:string)=>{
+   if(url.endsWith('/agent-task-capabilities')){
+    if(++reads===2)return new Promise(resolve=>{finishProbe=resolve;});
+    return {platformAvailable:ready};
+   }
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  const identityReads=()=>api.mock.calls.filter(([url])=>url.includes('/agent-identities')).length;
+  await act(async()=>vi.advanceTimersByTimeAsync(29_999));
+  expect(reads).toBe(1);
+  await act(async()=>vi.advanceTimersByTimeAsync(1));
+  expect(reads).toBe(2);
+  expect(channel.checkingAvailability).toBe(false);
+  expect(identityReads()).toBe(1);
+  await act(async()=>finishProbe({platformAvailable:false}));
+  visible='hidden';
+  await act(async()=>vi.advanceTimersByTimeAsync(30_000));
+  expect(reads).toBe(2);
+  ready=true;visible='visible';
+  await act(async()=>vi.advanceTimersByTimeAsync(30_000));
+  expect(reads).toBe(3);
+  expect(identityReads()).toBe(2);
+  expect(channel.available).toBe(true);
+  await act(async()=>vi.advanceTimersByTimeAsync(60_000));
+  expect(reads).toBe(3);
+  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+  expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+ }finally{visibility.mockRestore();vi.useRealTimers();}
+});
+
+it('does not periodically recheck a deliberately disabled personal identity',async()=>{
+ vi.useFakeTimers();
+ try{
+  api.mockImplementation(async(url:string)=>url.includes('/agent-identities')
+   ?{items:[{id:'identity',kind:'personal',state:'disabled'}]}:loaded(url));
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<View/>));
+  await act(async()=>vi.advanceTimersByTimeAsync(60_000));
+  expect(channel.available).toBe(false);
+  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-task-capabilities'))).toHaveLength(1);
+ }finally{vi.useRealTimers();}
+});
+
 it('replaces an interrupted capability check on reconnect and ignores its late result',async()=>{
  let connected=true,reads=0;
  const online=vi.spyOn(navigator,'onLine','get').mockImplementation(()=>connected);
