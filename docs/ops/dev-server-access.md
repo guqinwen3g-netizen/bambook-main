@@ -115,7 +115,13 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 服务器直连不到 `chatgpt.com` / `api.openai.com`。平台 ChatGPT 套餐（登录、令牌刷新、模型调用）及 OpenAI API 服务经出站代理访问：服务器本机 `sing-box.service` 提供 mixed 入站 `127.0.0.1:7890`，`backend.env` 设 `BAMBOOK_AI_HTTPS_PROXY=http://127.0.0.1:7890`。代码只对 `*.openai.com`、`*.chatgpt.com` 走代理（`server/src/ai/outboundProxy.ts`），国内模型接口仍直连；未设置该变量时行为不变。Node 内置 fetch 不读取 `HTTPS_PROXY`，不要用它代替。
 
-### 平台模型（2026-11-06 用户定）
+### 小竹当前模型（2026-11-28）
+
+腾讯云和本机验收均使用火山方舟 Agent Plan 的 `deepseek-v4.1-flash`。在「平台设置 › 平台 AI 模型」只启用这一项，Kimi 保持停用。核对实际调用链时同时检查平台设置、ChatGPT 套餐连接及环境变量兜底，避免停用的模型经另一入口重新参与调用。豆包配置见「豆包实时语音」。
+
+显式配置 `BAMBOOK_AI_SUBSCRIPTION_DIR` 的平台任务执行器会在该私有目录下保存模型冷却期限。使用同一目录和模型凭据的进程共用期限。该目录应由服务账号读写并跨发布保留，读取失败时任务稍后重新检查。未显式配置目录时使用进程内冷却。
+
+### 历史配置：平台 ChatGPT 套餐（2026-11-06）
 
 magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账、Agent 任务）改用平台 ChatGPT 订阅里的 GPT-6.1 Terra：`backend.env` 设 `BAMBOOK_CODEX_MODEL=gpt-6.1-terra`（改前副本在 `shared/private-backups/ops-scripts-20261106/`，属主与权限不变），重启两套服务后进程已载入。实测订阅直连 Terra 返回正常，小竹在模拟公司「诚川纺织」实答一次（200，约 3.7 秒）。推理档位仍按功能分配（报价审阅 max、对账与 Agent 任务 high、问答与汇总 medium）。订阅令牌按期自动续期；令牌失效时由平台管理员在「平台设置 › 平台 AI 模型」重新连接。
 

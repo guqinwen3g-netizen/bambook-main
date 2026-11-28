@@ -2,8 +2,8 @@ import type { MistStoredFile } from './files';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import { normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
-import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
+import { AGENT_TASK_ISSUE_LABEL, activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef, type AttachmentScopeCorrection } from '../shared/mistAgentTasks';
+import { WORKBOOK_SELECTION_QUESTION, isWorksheetNameQuestion, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
 import { validConversationId } from './agentConversations';
@@ -11,7 +11,7 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
-import {compactPlatformTaskSteps,newPlatformTaskStep,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
+import {attachmentScopeCorrectionRanges,compactPlatformTaskSteps,matchesAttachmentScopeCorrection,newPlatformTaskStep,requestedTaskAttachmentScope,requestsProvidedMaterialsOnly,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress,type TaskAttachmentReadScope} from './platformTaskPlan';
 import{responseLocale,type ResponseLocale}from'./responseLanguage';
 import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskConditionTarget} from './agentTaskConditions';
 
@@ -82,11 +82,12 @@ export type TaskRecord = {
   scopeHash: string; sources: TaskSourceRef[]; intentRefs?:AgentTaskIntentRef[];
   attachments?: MistStoredFile[];
   attachmentOrigins?: TaskAttachmentRef[];
+  attachmentReadScopes?: TaskAttachmentReadScope[];
   mode: 'read'|'operate';
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
   stepsUsed: number; runtimeUsedMs: number; checkpoint: string; result: string; waitingProposalIds: string[];
-  lastProposalDecision?:{proposalId:string;outcome:'confirmed'|'rejected';readBack?:boolean};
+  lastProposalDecision?:{proposalId:string;outcome:'confirmed'|'rejected';readBack?:boolean;stepOffset?:number};
   stopReason?:'owner_declined';
   questions?:AgentTaskQuestion[];
   /** 由自动规则触发：遇到待确认提议时本次运行结束，提议留给本人。 */
@@ -103,7 +104,7 @@ export type TaskRecord = {
   condition?:TaskCondition;
   wakeReason?:'changed'|'deadline';
   requiredRead?:TaskConditionTarget;
-  lease?: { id: string; nonce: string; grantHash: string; startedAt: number; expiresAt: number; heartbeatAt: number; sequence: number; claimRequestId: string; workerId: string };
+  lease?: { id: string; nonce: string; grantHash: string; startedAt: number; expiresAt: number; heartbeatAt: number; sequence: number; claimRequestId: string; workerId: string; modelTurnAt?: number };
   operations: Array<{ requestId: string; inputHash: string }>;
   lastRequestId: string; lastAction: string; lastInputHash: string;
 };
@@ -136,6 +137,9 @@ function owner(actor: TokenPayload, c: TaskRecord) { if (actor.userId !== c.owne
 const usedRuntime = (c: TaskRecord, now: number) => c.runtimeUsedMs + (c.lease ? Math.max(0, Math.min(now, c.lease.expiresAt) - c.lease.startedAt) : 0);
 const canReadContents = (c: TaskRecord, actor: TokenPayload) => c.ceiling.every(scope => hasScope(actor, scope as any));
 const hasUnansweredQuestion=(c:TaskRecord)=>(c.questions??[]).some(q=>!q.answeredAt);
+export function isPersonalPlatformTask(c:TaskRecord):boolean{
+  return c.executor==='platform'&&!c.automationId&&c.identityId===personalIdentityId(c.workspaceId,c.ownerId);
+}
 export function taskView(c: TaskRecord, actor: TokenPayload, now: number, authorityValid = true): AgentTaskView {
   owner(actor, c); const readable = authorityValid && canReadContents(c, actor) && c.credentialVersion === actor.credentialVersion, ended = ['succeeded', 'failed', 'cancelled'].includes(c.state);
   const state = ended ? c.state : !readable ? 'access_changed' : now >= c.expiresAt ? 'expired' : (usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT && (!c.lease||c.lease.expiresAt<=now)) ? 'budget_exhausted' : c.state === 'running' && (!c.lease || c.lease.expiresAt <= now) ? 'queued' : c.state;
@@ -147,6 +151,7 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   const executionStage=state==='running'&&c.executor==='platform'&&c.platform
     ? lastStep&&lastStep.result===undefined?'tool' as const:'model' as const
     : undefined;
+  const waitingForModelQuota=readable&&state==='queued'&&c.state==='queued'&&c.platform?.waitingForModelQuota===true;
   const leaseSince=c.lease?.startedAt??0;
   // Heartbeats update the task but never restart the timer for the current phase.
   const stageSince=executionStage==='tool'&&lastStep ? Math.max(leaseSince,Date.parse(lastStep.at))
@@ -157,22 +162,45 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
       : undefined;
   const executionStageSince=readable&&c.executor==='platform'&&stageSince&&Number.isFinite(stageSince)
     ? new Date(stageSince).toISOString() : undefined;
+  const fallbackAt=c.platform?.modelFallbackAt;
+  const modelFallbackSince=readable&&executionStage==='model'&&!runnerStatus
+    &&typeof fallbackAt==='number'&&Number.isFinite(fallbackAt)&&fallbackAt>=leaseSince
+    ? new Date(fallbackAt).toISOString() : undefined;
   // Legacy personal requests may contain a caller-composed context header without source provenance.
   const instructions = c.executor==='platform' && !c.automationId && !c.conversationHistory
     && c.identityId===personalIdentityId(c.workspaceId,c.ownerId) ? splitTaskRequest(c.instructions) : c.instructions;
+  let visibleSteps = readable ? c.platform?.steps : undefined;
+  let questions=readable?c.questions??[]:[];
+  if(visibleSteps?.length||questions.some(q=>!q.answeredAt)){
+    const {pdfRanges,worksheet,allowedFiles,excludedFileIds,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions,c.attachmentReadScopes);
+    if(visibleSteps&&(pdfRanges.size||worksheet||allowedFiles||excludedFileIds||pdfChoice||pdfScopeConflict||pdfVisualChoice)){
+      const permitted=pdfChoice||pdfScopeConflict||pdfVisualChoice||worksheet?.rowScopeConflict?new Set<string>():allowedFiles;
+      visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdfRanges,worksheet,permitted,excludedFileIds);
+    }
+    if(pdfChoice)questions=questions.map(q=>q.question===pdfChoice.question&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoice.ids}:q);
+    if(pdfVisualChoice&&pdfVisualCandidates)questions=questions.map(q=>q.question===pdfVisualChoice&&!q.answeredAt?{...q,pdfVisualCandidates}:q);
+    if(worksheet?.needsWorksheetChoice&&worksheet.fileId)questions=questions.map(q=>{
+      if(q.answeredAt||!isWorksheetNameQuestion(q.question))return q;
+      const worksheetChoiceNames=q.question.split('\n').slice(1,21).filter(name=>name.trim()&&name.length<=31);
+      return worksheetChoiceNames.length?{...q,worksheetChoiceNames}:q;
+    });
+  }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
-    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
+    ...(waitingForModelQuota?{waitingForModelQuota:true}:{}),
+    ...(readable&&!isAgentActor(actor)&&isPersonalPlatformTask(c)&&['waiting_human','paused'].includes(state)
+      &&questions.some(question=>!question.answeredAt&&!question.attachmentScopeCorrection)?{canSupplementAttachments:true}:{}),
+    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(!waitingForModelQuota&&c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions,resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
   if (changed.count !== 1) fail('AGENT_TASK_CHANGED', '任务已更新，请核对状态', 409);
 }
-async function event(db: any, c: TaskRecord, actor: TokenPayload, action: string, requestId: string, now: number) {
+async function event(db: any, c: TaskRecord, actor: TokenPayload, action: string, requestId: string, now: number, attachmentIds?: string[]) {
   const request = EVENT_PREFIX + c.id + ':' + hash(requestId).slice(0, 32);
   if (await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: c.workspaceId, requestId: request } } })) fail('CONFLICT', '操作编号已使用，请核对原结果', 409);
   const value: AgentTaskEvent = { action, at: new Date(now).toISOString(), actorId: actor.userId,actorName:['claimed','checkpoint','waiting_human','question','waiting_time','waiting_condition','condition_changed','condition_deadline','model_retry','model_paused','recovering','finished'].includes(action)?c.identityName:actor.displayName||'本人', version: c.version, state: c.state };
-  await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: c.workspaceId, requestId: request, actorId: actor.userId, inputHash: EVENT_HASH, expectedRevision: 0, result: { revision: 0, taskId: c.id, event: value, operation: { action, inputHash: c.lastInputHash,...(action==='connected'?{controlGeneration:c.control?.generation}:{}) } }, createdAt: new Date(now) } });
+  await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: c.workspaceId, requestId: request, actorId: actor.userId, inputHash: EVENT_HASH, expectedRevision: 0, result: { revision: 0, taskId: c.id, event: value, operation: { action, inputHash: c.lastInputHash,...(action==='connected'?{controlGeneration:c.control?.generation}:{}),...(attachmentIds?.length?{attachmentIds}:{}) } }, createdAt: new Date(now) } });
 }
 function next(c: TaskRecord, now: number, action: string, requestId: string, input: unknown): TaskRecord {
   return { ...c, version: c.version + 1, updatedAt: new Date(now).toISOString(), lastAction: action, lastRequestId: requestId, lastInputHash: hash(JSON.stringify(input)) };
@@ -182,7 +210,7 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   if (c.lastAction !== action || c.lastInputHash !== hash(JSON.stringify(input))) fail('CONFLICT', '操作编号已用于其他内容', 409);
   return true;
 }
-export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }, trustedSources:TaskSourceRef[] = [], personalHistory?:PersonalHistory) {
+export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[]; readScopes?: TaskAttachmentReadScope[] }> }, trustedSources:TaskSourceRef[] = [], personalHistory?:PersonalHistory) {
   if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||!validConversationId(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
   const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), wireInstructions = plain(input.instructions, 4000, '任务内容');
   const instructions = personalHistory && personalHistory.requestedIds === undefined ? splitTaskRequest(wireInstructions) : wireInstructions;
@@ -203,9 +231,10 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   // concurrent transaction retries against the committed receipt.
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: request, actorId: actor.userId, inputHash, expectedRevision: 0, result: { revision: 0, id: taskId }, createdAt: new Date(now) } });
   if(attachments){
-    const {files,origins}=await attachments.save();
+    const {files,origins,readScopes}=await attachments.save();
     c.attachments=files;
     if(origins?.length)c.attachmentOrigins=origins;
+    if(readScopes?.length)c.attachmentReadScopes=readScopes;
   }
   if(intentRefs.length)c.intentRefs=intentRefs.map(ref=>({...ref}));
   if(personalHistory)c.conversationHistory=await personalHistory.prepare(instructions);
@@ -268,13 +297,14 @@ export async function claimTask(db: any, actor: AgentActor, workspaceId: string,
   }
   if (c.state !== 'queued' && c.state !== 'running' && !(c.state==='waiting_time'&&c.resumeAt!==undefined&&c.resumeAt<=now)) fail('AGENT_TASK_NOT_READY', '任务当前不能领取', 409);
   if (c.expiresAt <= now || usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT) fail('AGENT_TASK_BUDGET', '任务已达到执行限额', 409);
+  if ((c.platform?.providerRetryAt ?? 0) > now) return {item:taskView(c,actor,now)};
   const n = next(c, now, 'claimed', requestId, [workerId]); n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;
-  if (pendingProposalIds.length) { n.state = 'waiting_human'; n.waitingProposalIds = pendingProposalIds; await save(db, row, c, n); await event(db, n, actor, 'waiting_human', requestId, now); return { item: taskView(n, actor, now) }; }
+  if (pendingProposalIds.length) { n.state = 'waiting_human'; n.waitingProposalIds = pendingProposalIds; if(n.platform)n.platform={...n.platform,waitingForModelQuota:undefined}; await save(db, row, c, n); await event(db, n, actor, 'waiting_human', requestId, now); return { item: taskView(n, actor, now) }; }
   const runId = randomUUID(), nonce = randomUUID(), token = make(workspaceId, c.id, runId, nonce);
   n.state = 'running'; n.lease = { id: runId, nonce, grantHash: hash(token), startedAt: now, heartbeatAt: now, sequence: 0, expiresAt: Math.min(now + TASK_LEASE_MS, n.expiresAt, now + RUNTIME_LIMIT - n.runtimeUsedMs), claimRequestId: requestId, workerId };
   n.lastHeartbeatAt=now;
   n.resumeAt=undefined;
-  if(n.platform)n.platform={...n.platform,nextRunAt:n.lease!.expiresAt};
+  if(n.platform)n.platform={...n.platform,nextRunAt:n.lease!.expiresAt,modelFallbackAt:undefined,providerRetryAt:undefined};
   await save(db, row, c, n); await event(db, n, actor, 'claimed', requestId, now); return { item: taskView(n, actor, now), token };
 }
 export async function assertTaskLease(db: any, actor: TokenPayload, lease: AgentTaskLease, now: number, lock = false) {
@@ -297,12 +327,26 @@ export async function duePlatformTasks(db:any,now:number,take=2,scan?:{condition
   // later runnable task forever. They must be parked before the next bounded scan.
   return rows.flatMap((row:any)=>{let c:TaskRecord;try{c=record(row,row.workspaceId);}catch{return[];}if(c.executor!=='platform'||!c.platform||!Array.isArray(c.platform.steps))return[];return[{workspaceId:c.workspaceId,taskId:c.id,ownerId:c.ownerId,version:c.version,...(c.state==='waiting_condition'?{waitingCondition:true,scanCursor:{createdAt:new Date(row.createdAt).toISOString(),id:row.id}}:{}),...(usedRuntime(c,now)>=RUNTIME_LIMIT?{exhausted:true}:{})}];});
 }
-export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLease,plan:PlatformTaskPlan,now:number){
+/** Update visible execution metadata only after the current worker rechecks authority. */
+export async function markPlatformModelFallback(db:any,actor:AgentActor,lease:AgentTaskLease,now:number){
+  const {row,value:c}=await assertTaskLease(db,actor,lease,now,true);
+  if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
+  const pending=c.platform.steps.at(-1);
+  if(pending&&pending.result===undefined)fail('AGENT_TASK_CHANGED','执行步骤已变化',409);
+  if(c.platform.modelFallbackAt!==undefined)return;
+  await save(db,row,c,{...c,version:c.version+1,updatedAt:new Date(now).toISOString(),
+    platform:{...c.platform,modelFallbackAt:now}});
+}
+export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLease,plan:PlatformTaskPlan,now:number,prefetched=false){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
   const pending=c.platform.steps.at(-1);if(pending?.result===undefined&&pending)return pending;
   if(c.platform.steps.length>=PLATFORM_TASK_TURN_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到模型轮次上限',409);
-  const step=newPlatformTaskStep(plan,now),n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined}};
+  const step=newPlatformTaskStep(plan,now);
+  if(prefetched)step.prefetched=true;
+  else if(c.lease?.modelTurnAt!==undefined)step.modelTurnAt=c.lease.modelTurnAt;
+  const n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],modelFallbackAt:undefined,issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined,waitingForModelQuota:prefetched?c.platform.waitingForModelQuota:undefined}};
+  if(step.modelTurnAt!==undefined)n.lease={...c.lease!,modelTurnAt:undefined};
   if(c.platform.checkpointBeforeIssue!==undefined)n.checkpoint=c.platform.checkpointBeforeIssue;
   await save(db,row,c,n);return step;
 }
@@ -318,23 +362,36 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
   await save(db,row,c,n);
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */
-export type PlatformTaskReleaseIssue = 'model_unavailable' | 'model_timeout' | 'model_response_invalid' | 'daily_limit';
-export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:PlatformTaskReleaseIssue|undefined,now:number){
+export type PlatformTaskReleaseIssue = 'model_unavailable' | 'model_timeout' | 'model_response_invalid' | 'model_cooldown' | 'daily_limit' | 'quota_pending';
+export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:PlatformTaskReleaseIssue|undefined,now:number,providerRetryAt?:number){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
+  if(issue==='quota_pending'){
+    await save(db,row,c,{...c,version:c.version+1,state:'queued',runtimeUsedMs:usedRuntime(c,now),lease:undefined,
+      checkpoint:c.platform.checkpointBeforeIssue??c.checkpoint,
+      platform:{...c.platform,nextRunAt:now+1000,waitingForModelQuota:true,issue:undefined,retryAt:undefined,
+        providerRetryAt:undefined,modelFallbackAt:undefined,checkpointBeforeIssue:undefined}});
+    return;
+  }
   if(issue==='daily_limit'){
     // 用量上限不是模型故障：立即暂停、不计失败次数；本人次日恢复后从原步骤继续。
-    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
+    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,modelFallbackAt:undefined,retryAt:undefined,waitingForModelQuota:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
     await save(db,row,c,n);await event(db,n,actor,'model_paused',requestId,now);return;
   }
-  const failures = issue ? (c.platform.failures ?? 0) + 1 : c.platform.failures ?? 0;
+  const deferred = issue === 'model_cooldown';
+  const failures = (c.platform.failures ?? 0) + (issue && !deferred ? 1 : 0);
   // The first full deadline already spaced out requests. Fast errors and repeated failures retain the existing backoff.
-  const retryDelay = issue === 'model_timeout' && failures === 1 ? 5000
+  const retryDelay = deferred ? 1000 : issue === 'model_timeout' && failures === 1 ? 5000
     : issue ? Math.min(300_000, 10_000 * 2 ** Math.min(failures, 5)) : 1000;
-  const retryAt = now + retryDelay, paused = !!issue && failures >= 3;
-  const visibleIssue = issue === 'model_timeout' ? 'model_unavailable' : issue;
-  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,retryAt:issue&&!paused?retryAt:undefined,issue:visibleIssue,failures}};
-  if(issue)n.checkpoint=(issue==='model_response_invalid'?'模型响应无效':'模型暂不可用')+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
+  const defaultRetryAt = now + retryDelay;
+  const retryAt = issue && providerRetryAt !== undefined && Number.isSafeInteger(providerRetryAt)
+    ? Math.min(c.expiresAt, Math.max(defaultRetryAt,providerRetryAt)) : defaultRetryAt;
+  const providerDeadline = issue && providerRetryAt !== undefined && Number.isSafeInteger(providerRetryAt) && providerRetryAt > now
+    ? Math.min(c.expiresAt, providerRetryAt) : undefined;
+  const paused = !!issue && !deferred && failures >= 3;
+  const visibleIssue = deferred ? 'model_unavailable' : issue;
+  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,providerRetryAt:providerDeadline,waitingForModelQuota:undefined,issue:visibleIssue,failures}};
+  if(visibleIssue)n.checkpoint=AGENT_TASK_ISSUE_LABEL[visibleIssue]+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
   if(issue)n.platform.checkpointBeforeIssue=c.platform.checkpointBeforeIssue??c.checkpoint;
   await save(db,row,c,n);await event(db,n,actor,action,requestId,now);
 }
@@ -423,41 +480,101 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
   if(action==='cancel'||n.state==='queued'){n.resumeAt=undefined;n.condition=undefined;}
   if(action==='resume'&&n.state==='waiting_condition')n.condition={...n.condition!,nextCheckAt:Math.min(n.condition!.nextCheckAt,now)};
   n.waitingProposalIds = action === 'cancel' ? [] : pendingProposalIds;
-  if(n.platform){if(n.platform.checkpointBeforeIssue!==undefined)n.checkpoint=n.platform.checkpointBeforeIssue;n.platform={...n.platform,nextRunAt:n.state==='waiting_time'?n.resumeAt!:n.state==='waiting_condition'?Math.min(n.condition!.nextCheckAt,now):0,retryAt:undefined,issue:undefined,checkpointBeforeIssue:undefined};}
+  if(n.platform){
+    if(n.platform.checkpointBeforeIssue!==undefined)n.checkpoint=n.platform.checkpointBeforeIssue;
+    // Owner controls can clear the local retry backoff, but a provider deadline survives pause and restart.
+    const providerRetryAt=action!=='cancel'&&(n.platform.providerRetryAt??0)>now?n.platform.providerRetryAt:undefined;
+    const retryAt=n.state==='queued'?providerRetryAt:undefined;
+    const nextRunAt=n.state==='waiting_time'?n.resumeAt!:n.state==='waiting_condition'?Math.min(n.condition!.nextCheckAt,now):retryAt??0;
+    n.platform={...n.platform,nextRunAt,retryAt,providerRetryAt,issue:retryAt?'model_unavailable':undefined,checkpointBeforeIssue:undefined,waitingForModelQuota:undefined};
+  }
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
 }
 /** Missing facts suspend the same durable task; an answer is data, never business approval. */
-export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskLease,input:Record<string,unknown>,now:number){
+export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskLease,input:Record<string,unknown>,now:number,
+  correction?:AttachmentScopeCorrection){
   if(Object.keys(input).some(k=>!['requestId','question'].includes(k)))fail('INVALID_INPUT','提问字段无效',400);
   const requestId=rid(input.requestId),question=plain(input.question,2000,'需要补充的资料');
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);
   const {row,value:c}=await assertTaskLease(db,actor,lease,now);
-  if((c.questions??[]).length>=10)fail('AGENT_TASK_LIMIT','任务提问已达上限，请结束后重新安排',422);
+  if((c.questions??[]).length>=10){
+    if(c.executor!=='platform')fail('AGENT_TASK_LIMIT','任务提问已达上限，请结束后重新安排',422);
+    // A queued retry cannot free a question slot. Finish under the current lease and acknowledge the same plan.
+    const result=c.locale==='en-US'
+      ? 'This task has reached its question limit. Review your answers and files here, then start a new task with any missing details.'
+      : '本任务提问已达上限。已提交的答复和附件可在本任务查看。补齐缺项后可重新交办。';
+    return finishTask(db,actor,lease,{requestId,outcome:'failed',result},now);
+  }
   const n=next(c,now,'question',requestId,[question]);n.controlVersion++;n.state='waiting_human';n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;
-  n.questions=[...(c.questions??[]),{id:randomUUID(),question,askedAt:new Date(now).toISOString()}];n.checkpoint='等待本人补充资料。';
+  n.questions=[...(c.questions??[]),{id:randomUUID(),question,askedAt:new Date(now).toISOString(),
+    ...(correction?{attachmentScopeCorrection:correction}:{})}];n.checkpoint='等待本人补充资料。';
   platformEffect(n,requestId,{status:'waiting_human',questionId:n.questions.at(-1)!.id});
   await save(db,row,c,n);await event(db,n,actor,'question',requestId,now);return taskView(n,actor,now);
 }
-export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,now:number){
+export async function answerAttachmentReceipt(db:any,actor:TokenPayload,c:TaskRecord,requestId:unknown):Promise<string[]>{
+  owner(actor,c);
+  const row=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{
+    workspaceId:c.workspaceId,requestId:EVENT_PREFIX+c.id+':'+hash(rid(requestId)).slice(0,32),
+  }}});
+  const receipt=row?.result,ids:unknown=receipt?.operation?.attachmentIds;
+  if(row?.inputHash!==EVENT_HASH||row.actorId!==actor.userId||receipt?.taskId!==c.id
+    ||receipt.operation?.action!=='answered'||!Array.isArray(ids)||!ids.length
+    ||!c.questions?.some(q=>q.answeredAt&&q.attachmentIds?.length===ids.length&&ids.every((fileId,i)=>q.attachmentIds![i]===fileId)))
+    fail('RECEIPT_NOT_FOUND','未找到补充附件的回执',404);
+  return ids;
+}
+
+type AnswerAttachments={fingerprint:unknown;save:(task:TaskRecord)=>Promise<MistStoredFile[]>};
+export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,now:number,attachments?:AnswerAttachments){
   if(isAgentActor(actor))fail('FORBIDDEN','资料须由本人补充',403);
   if(Object.keys(input).some(k=>!['requestId','version','questionId','answer'].includes(k))||!Number.isSafeInteger(input.version))fail('INVALID_INPUT','补充资料请求无效',400);
-  const requestId=rid(input.requestId),questionId=id(input.questionId),answer=plain(input.answer,4000,'补充资料');
+  const requestId=rid(input.requestId),questionId=id(input.questionId),answer=plain(input.answer,4000,'补充资料',!!attachments);
   await lockTaskRecord(db,workspaceId,taskId);const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);await assertTaskAuthority(db,actor,c,now);
-  const values=[input.version,questionId,answer];if(await pastOperation(db,c,requestId,'answered',values))return taskView(c,actor,now);
+  if(attachments&&!isPersonalPlatformTask(c))
+    fail('FILE_NOT_FOUND','任务不存在或无权访问',404);
+  const values=attachments?[input.version,questionId,answer,attachments.fingerprint]:[input.version,questionId,answer];
+  if(await pastOperation(db,c,requestId,'answered',values))return taskView(c,actor,now);
   if(c.controlVersion!==input.version)fail('AGENT_TASK_CHANGED','任务设置已更新，请核对状态',409);
   if(!['waiting_human','paused'].includes(c.state))fail('AGENT_TASK_NOT_READY','任务当前不等待补充资料',409);
   if(c.expiresAt<=now||c.stepsUsed>=STEP_LIMIT||usedRuntime(c,now)>=RUNTIME_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到执行限额',409);
   const question=c.questions?.find(q=>q.id===questionId&&!q.answeredAt);if(!question)fail('AGENT_TASK_CHANGED','问题已处理，请刷新核对',409);
-  const n=next(c,now,'answered',requestId,values);n.controlVersion++;n.lease=undefined;n.questions=c.questions!.map(q=>q.id===questionId?{...q,answer,answeredAt:new Date(now).toISOString()}:q);
+  const attachmentScope=question.attachmentScopeCorrection||c.platform
+    ? requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions,c.attachmentReadScopes):undefined;
+  if(question.attachmentScopeCorrection){
+    const correction=attachmentScope?.scopeCorrection;
+    if(attachments||!correction||!matchesAttachmentScopeCorrection(question.attachmentScopeCorrection,correction)
+      ||!attachmentScopeCorrectionRanges(answer,correction))
+      fail('INVALID_INPUT',c.locale==='en-US'
+        ? 'Enter a page or row range within the original bounds.'
+        : '请填写原范围内的页码或行号。',422);
+  }
+  const files=await attachments?.save(c);
+  const attachmentIds=files?.map(file=>file.id);
+  const submittedAnswer=answer||(c.locale==='en-US'?'Files supplied.':'已补交附件。');
+  const n=next(c,now,'answered',requestId,values);n.controlVersion++;n.lease=undefined;
+  if(files?.length)n.attachments=[...(c.attachments??[]),...files];
+  n.questions=c.questions!.map(q=>q.id===questionId?{...q,answer:submittedAnswer,answeredAt:new Date(now).toISOString(),...(attachmentIds?.length?{attachmentIds}:{})}:q);
   n.state=c.state==='paused'?'paused':n.waitingProposalIds.length||hasUnansweredQuestion(n)?'waiting_human':'queued';n.checkpoint='本人已补充资料；续办前核对原问题与答案。';
   if(n.platform){
     // An answer can complete a standalone reply. A business write still needs
     // a fresh read, and existing source or approval obligations stay in force.
+    // A deterministic PDF choice binds the prefetch in the next lease. It does not
+    // require an unrelated whole-file or business read before a read-only report.
+    const worksheetScope=attachmentScope?.worksheet;
+    const worksheetChoice=worksheetScope?.rows&&!worksheetScope.fileId
+      ? WORKBOOK_SELECTION_QUESTION:worksheetScope?.worksheetQuestion;
+    const choosingAttachmentScope=!!question.attachmentScopeCorrection||(attachmentScope?.pdfChoice?.question??attachmentScope?.pdfVisualChoice
+      ??worksheetChoice)===question.question
+      ||!!worksheetScope?.needsWorksheetChoice&&isWorksheetNameQuestion(question.question);
+    // Provided-only tasks verify their original attachments in the next worker
+    // turn without opening the business-read gate.
+    const requiresBusinessOrUnrestrictedAttachmentRead=!choosingAttachmentScope&&c.attachments?.length
+      &&!requestsProvidedMaterialsOnly(c.instructions);
     const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
-      ||c.sources.length||c.intentRefs?.length||c.attachments?.length||c.waitingProposalIds.length);
+      ||c.sources.length||c.intentRefs?.length||requiresBusinessOrUnrestrictedAttachmentRead||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};
   }
-  await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now);return taskView(n,actor,now);
+  await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now,attachmentIds);return taskView(n,actor,now);
 }
 /** In the SAME transaction as proposal creation: a model cannot continue after requesting approval. */
 export async function waitTaskForProposal(db: any, actor: TokenPayload, lease: AgentTaskLease, proposalId: string, requestId: string, now: number) {
@@ -477,7 +594,7 @@ export async function settleTaskProposal(db: any, actor: TokenPayload, workspace
   if (outcome === 'confirmed') await assertTaskAuthority(db, actor, c, now);
   if ((outcome === 'confirmed' && c.expiresAt <= now) || !c.waitingProposalIds.includes(proposalId)) fail('AGENT_TASK_NOT_READY', '所属任务或提议已失效', 409);
   const n = next(c, now, outcome, requestId, [proposalId]); n.waitingProposalIds = c.waitingProposalIds.filter(p => p !== proposalId); n.lease = undefined;
-  n.lastProposalDecision={proposalId,outcome};
+  n.lastProposalDecision={proposalId,outcome,...(c.platform?{stepOffset:c.platform.steps.length}:{})};
   if (c.state !== 'paused') n.state = n.waitingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : 'queued';
   n.checkpoint = outcome === 'confirmed' ? '本人已确认上一步提议；续办前核对业务结果。' : '本人已拒绝上一步提议；续办前查看拒绝原因。';
   if(n.platform)n.platform={...n.platform,nextRunAt:0,requiresRead:true};
@@ -536,22 +653,60 @@ export async function resolveTaskCredential(db: any, token: unknown, now: number
  * 费用按 2026-11-04 定案记到公司；收费与结算本期不做，这里只提供计量。
  */
 export type AgentDailyUsage = { date: string; tasks: number; turns: number; companyTurns: number; limits: ReturnType<typeof agentDailyLimits> };
+async function platformModelQuotaStatus(db:any,workspaceId:string,ownerId:string,now:number):Promise<'available'|'pending'|'limit'>{
+  const {usage,pending,companyPending}=await readAgentDailyUsage(db,workspaceId,ownerId,now,process.env);
+  if(usage.turns>=usage.limits.turnsPerUser||usage.companyTurns>=usage.limits.turnsPerCompany)return 'limit';
+  if(usage.turns+pending>=usage.limits.turnsPerUser||usage.companyTurns+companyPending>=usage.limits.turnsPerCompany)return 'pending';
+  return 'available';
+}
+
+/** Recheck temporary quota pressure without taking another lease or writing a claim event. */
+export async function deferPlatformQuotaClaim(db:any,actor:AgentActor,task:TaskRecord,now:number):Promise<boolean>{
+  if(task.state!=='queued'||!task.platform?.waitingForModelQuota)return false;
+  await lockTaskRecord(db,task.workspaceId,task.id);
+  const {row,value:c}=await taskRecord(db,task.workspaceId,task.id);
+  if(c.state!=='queued'||!c.platform?.waitingForModelQuota)return false;
+  await assertTaskAuthority(db,actor,c,now);
+  if(c.platform.nextRunAt>now)return true;
+  // A confirmed daily cap must reach the regular pause flow. A released hold can be reserved normally.
+  if(await platformModelQuotaStatus(db,c.workspaceId,c.ownerId,now)!=='pending')return false;
+  await save(db,row,c,{...c,version:c.version+1,platform:{...c.platform,nextRunAt:now+1000}});
+  return true;
+}
+
+export async function reservePlatformModelTurn(db:any,actor:AgentActor,lease:AgentTaskLease,now:number):Promise<'reserved'|'pending'|'limit'>{
+  const {row,value:c}=await assertTaskLease(db,actor,lease,now,true);
+  if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.lease||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
+  if(c.lease.modelTurnAt!==undefined)return 'pending';
+  // The same serializable transaction reads company usage and writes the reservation.
+  const status=await platformModelQuotaStatus(db,lease.workspaceId,actor.userId,now);
+  if(status!=='available')return status;
+  await save(db,row,c,{...c,version:c.version+1,lease:{...c.lease,modelTurnAt:now},
+    platform:{...c.platform,waitingForModelQuota:undefined}});
+  return 'reserved';
+}
 /**
  * 今日（上海营业日）平台任务用量：本人新建任务数、本人与全公司模型调用次数。
  * 任务最长有效 24 小时，今日的调用只可能来自 48 小时内创建的任务，按创建时间限定扫描范围。
  */
 export async function agentDailyUsage(db: any, workspaceId: string, ownerId: string, now: number, env: NodeJS.ProcessEnv = process.env): Promise<AgentDailyUsage> {
+  return (await readAgentDailyUsage(db,workspaceId,ownerId,now,env)).usage;
+}
+async function readAgentDailyUsage(db:any,workspaceId:string,ownerId:string,now:number,env:NodeJS.ProcessEnv){
   const date = mistBusinessDate(new Date(now)), limits = agentDailyLimits(env);
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: TASK_HASH, requestId: { startsWith: TASK_PREFIX }, createdAt: { gte: new Date(now - 2 * 86400_000 - TASK_TTL) } } });
-  let tasks = 0, turns = 0, companyTurns = 0;
+  let tasks = 0, turns = 0, companyTurns = 0, pending = 0, companyPending = 0;
   for (const row of rows) {
     let c: TaskRecord; try { c = record(row, workspaceId); } catch { continue; }
     if (c.executor !== 'platform') continue;
-    const today = (c.platform?.steps ?? []).filter(s => typeof s.at === 'string' && mistBusinessDate(s.at) === date).length;
+    const today = (c.platform?.steps ?? []).filter(s => s.prefetched !== true && typeof s.at === 'string' && mistBusinessDate(s.modelTurnAt===undefined?s.at:new Date(s.modelTurnAt)) === date).length;
+    const held = c.state==='running' && c.lease && c.lease.expiresAt>now && c.lease.modelTurnAt!==undefined
+      && mistBusinessDate(new Date(c.lease.modelTurnAt))===date ? 1 : 0;
     companyTurns += today;
-    if (c.ownerId === ownerId) { turns += today; if (mistBusinessDate(c.createdAt) === date) tasks++; }
+    companyPending += held;
+    if (c.ownerId === ownerId) { turns += today; pending += held; if (mistBusinessDate(c.createdAt) === date) tasks++; }
   }
-  return { date, tasks, turns, companyTurns, limits };
+  return {usage:{date,tasks,turns,companyTurns,limits},pending,companyPending};
 }
 /** 达到每日上限时拒绝：新建任务同时检查任务数，继续执行只检查模型调用次数。 */
 export function assertDailyRoom(u: AgentDailyUsage, creating: boolean) {
@@ -565,7 +720,7 @@ export async function platformTaskUsage(db: any, workspaceId: string, month: str
     let c: TaskRecord;
     try { c = record(row, workspaceId); if(c.executor!=='platform'||mistBusinessDate(c.createdAt).slice(0,7)!==month)continue; } catch { continue; }
     const u = out.get(c.ownerId) ?? { ownerId: c.ownerId, ownerName: c.ownerName, tasks: 0, modelTurns: 0, runtimeMs: 0 };
-    u.tasks++; u.modelTurns += c.platform?.steps?.length ?? 0; u.runtimeMs += c.runtimeUsedMs || 0; out.set(c.ownerId, u);
+    u.tasks++; u.modelTurns += c.platform?.steps?.filter(step => step.prefetched !== true).length ?? 0; u.runtimeMs += c.runtimeUsedMs || 0; out.set(c.ownerId, u);
   }
   return [...out.values()].sort((a, b) => b.modelTurns - a.modelTurns || a.ownerName.localeCompare(b.ownerName));
 }
@@ -611,23 +766,21 @@ export async function personalTaskActivityCandidates(db: any, workspaceId: strin
   return rows.map((row: unknown) => record(row, workspaceId));
 }
 
-function activityText(value: string | undefined) {
-  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft1)[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
-  return value.replace(/[\u0000-\u001f\u007f\s]+/gu, ' ').trim() || undefined;
-}
-
 export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | undefined {
   if ((view.state !== 'running' && view.state !== 'queued') || view.waitingProposalIds.length
     || view.questions?.some(question => !question.answeredAt)) return;
-  const last = view.trail?.at(-1);
-  const currentStep = view.executionStage === 'tool' && last && !last.completed ? activityText(last.label) : undefined;
+  const currentStep = activeAgentTaskStep(view);
   return {
     id: view.id,
-    name: activityText(view.name) ?? '小竹任务',
+    name: agentTaskActivityText(view.name) ?? '小竹任务',
     state: view.state,
     ...(view.executionStage && { executionStage: view.executionStage }),
+    ...(view.state === 'running' && view.executionStage === 'model' && !view.runnerStatus && view.executionStageSince
+      && { executionStageSince: view.executionStageSince }),
+    ...(view.modelFallbackSince && { modelFallbackSince: view.modelFallbackSince }),
     ...(view.runnerStatus && { runnerStatus: view.runnerStatus }),
-    ...(view.state === 'queued' && view.executionIssue?.retryAt && { retrying: true }),
+    ...(view.state === 'queued' && view.waitingForModelQuota && { waitingForModelQuota: true }),
+    ...(view.state === 'queued' && !view.waitingForModelQuota && view.executionIssue?.retryAt && { retrying: true }),
     ...(currentStep && { currentStep }),
   };
 }
@@ -639,9 +792,32 @@ export async function saveTaskSources(db: any, actor: TokenPayload, lease: Agent
   if(JSON.stringify(c.sources)===JSON.stringify(sources)&&!satisfied&&!refusalRead)return;
   await save(db,row,c,{...c,version:c.version+1,sources,...(satisfied?{requiredRead:undefined}:{}),...(refusalRead?{lastProposalDecision:{...c.lastProposalDecision!,readBack:true}}:{})});
 }
-export async function advanceTaskSources(db:any,actor:TokenPayload,workspaceId:string,taskId:string,keys:string[][]|null,revision:number){
-  if(!keys)return;const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);let changed=false;
-  const sources=c.sources.map(ref=>{if(ref.observedRevision===undefined)return ref;const prefix=ref.path.split('.').map(k=>'k:'+k);const touched=keys.filter(key=>prefix.every((p,i)=>key[i]===p)&&(key.length<=prefix.length||key[prefix.length]==='i:'+ref.id));if(!touched.length)return ref;changed=true;if(ref.path==='email.messages'){const fields={...ref.fieldRevisions};for(const key of touched){const field=key[prefix.length+1];if(field?.startsWith('k:'))fields[field.slice(2)]=revision;}return{...ref,fieldRevisions:fields};}return{...ref,observedRevision:revision};});
+export async function advanceTaskSources(db:any,actor:TokenPayload,workspaceId:string,taskId:string,keys:string[][]|null,revision:number,
+  removal?:{orderId:string;lineIds:ReadonlySet<string>},
+){
+  if(!keys&&!removal?.lineIds.size)return;
+  const{row,value:c}=await taskRecord(db,workspaceId,taskId);
+  owner(actor,c);
+  let changed=false;
+  const sources=c.sources.map(ref=>{
+    if(ref.path==='orderLines'&&removal?.lineIds.has(ref.id)){
+      // Preserve the historical receipt without treating it as a live full read.
+      const {fullReadHash:_full,fieldRevisions:_fields,observedRevision:_revision,...historical}=ref;
+      changed=true;
+      return {...historical,removedFromOrderId:removal.orderId};
+    }
+    if(!keys||ref.observedRevision===undefined)return ref;
+    const prefix=ref.path.split('.').map(k=>'k:'+k);
+    const touched=keys.filter(key=>prefix.every((p,i)=>key[i]===p)&&(key.length<=prefix.length||key[prefix.length]==='i:'+ref.id));
+    if(!touched.length)return ref;
+    changed=true;
+    if(ref.path==='email.messages'){
+      const fields={...ref.fieldRevisions};
+      for(const key of touched){const field=key[prefix.length+1];if(field?.startsWith('k:'))fields[field.slice(2)]=revision;}
+      return {...ref,fieldRevisions:fields};
+    }
+    return {...ref,observedRevision:revision};
+  });
   if(changed)await save(db,row,c,{...c,version:c.version+1,sources});
 }
 export function readTaskRecord(row:any,workspaceId:string){return record(row,workspaceId);}
