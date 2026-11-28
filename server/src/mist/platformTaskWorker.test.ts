@@ -785,7 +785,7 @@ it('retries the first full model timeout promptly and resumes the same task from
  let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
  await f.drain();
  const queued=await f.current(task.id);
- expect(queued).toMatchObject({state:'queued',executionIssue:{code:'model_unavailable'}});
+ expect(queued).toMatchObject({state:'queued',executionIssue:{code:'model_timeout'},checkpoint:expect.stringContaining('模型响应超时')});
  expect(Date.parse(queued.executionIssue.retryAt)-clock).toBe(5000);
  expect(queued.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(1);
  clock+=4999;await f.drain();expect(complete).toHaveBeenCalledTimes(2);

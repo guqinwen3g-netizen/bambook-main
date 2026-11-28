@@ -6,7 +6,7 @@ import { activeAgentTaskStep, agentTaskActivityText, type AgentTaskTrailItem, ty
 import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
-import { activeModelFallbackSince } from '../../runtime/xiaozhuActivity';
+import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../../runtime/xiaozhuActivity';
 import { COWORK_ACTIVE, splitRequest, type TaskControlState } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
@@ -19,8 +19,8 @@ export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
   if (task.contentRestricted) return '权限已变化';
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
-  if (task.state === 'queued' && task.executionIssue?.retryAt) return '等待模型重试';
-  if (task.state === 'running' && task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
+  const modelWait = xiaozhuModelWaitLabel(task);
+  if (modelWait) return modelWait;
   if (task.state === 'waiting_human' && task.questions?.some(question => !question.answeredAt)) return '等待补充资料';
   return activeAgentTaskStep(task) ?? STATE[task.state][0];
 }

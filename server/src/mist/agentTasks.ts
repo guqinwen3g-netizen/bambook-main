@@ -2,7 +2,7 @@ import type { MistStoredFile } from './files';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import { activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import { AGENT_TASK_ISSUE_LABEL, activeAgentTaskStep, agentTaskActivityText, normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
@@ -360,9 +360,9 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
   const retryAt = issue && providerRetryAt !== undefined && Number.isSafeInteger(providerRetryAt)
     ? Math.min(c.expiresAt, Math.max(defaultRetryAt,providerRetryAt)) : defaultRetryAt;
   const paused = !!issue && !deferred && failures >= 3;
-  const visibleIssue = issue === 'model_timeout' || deferred ? 'model_unavailable' : issue;
+  const visibleIssue = deferred ? 'model_unavailable' : issue;
   const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,issue:visibleIssue,failures}};
-  if(issue)n.checkpoint=(issue==='model_response_invalid'?'模型响应无效':'模型暂不可用')+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
+  if(visibleIssue)n.checkpoint=AGENT_TASK_ISSUE_LABEL[visibleIssue]+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
   if(issue)n.platform.checkpointBeforeIssue=c.platform.checkpointBeforeIssue??c.checkpoint;
   await save(db,row,c,n);await event(db,n,actor,action,requestId,now);
 }

@@ -5,6 +5,9 @@ import { mailReceivingEnglish } from './en-US-mail-receiving';
 import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
+  '模型响应超时': 'Model response timed out',
+  '模型响应超时，等待重试': 'Model response timed out. Waiting to retry.',
+  '正在重试模型': 'Retrying the model',
   '第 {0} 页，共 {1} 页': 'Page {0} of {1}',
   '跳转页码': 'Jump to page',
   'PDF 页码': 'PDF page number',

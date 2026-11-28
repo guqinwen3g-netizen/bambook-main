@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type {AgentTaskIntentRef,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
+import type {AgentTaskIntentRef,AgentTaskIssueCode,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
@@ -9,7 +9,7 @@ import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
 export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
-export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
+export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:AgentTaskIssueCode};
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const ATTACHMENT_PREFETCH_CHARS=3500;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;

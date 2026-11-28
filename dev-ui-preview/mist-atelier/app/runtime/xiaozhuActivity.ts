@@ -88,3 +88,13 @@ export function xiaozhuActivityLabel(task: AgentTaskActivity) {
   if (task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
   return task.currentStep || '办理中';
 }
+
+
+export function xiaozhuModelWaitLabel(task: AgentTaskView): string | undefined {
+  if (task.state === 'queued' && task.executionIssue?.retryAt) {
+    return task.executionIssue.code === 'model_timeout' ? '模型响应超时，等待重试' : '等待模型重试';
+  }
+  if (task.state !== 'running' || task.executionStage !== 'model') return;
+  if (activeModelFallbackSince(task)) return '正在等待备用模型';
+  return task.executionIssue?.code === 'model_timeout' ? '正在重试模型' : '正在等待模型';
+}

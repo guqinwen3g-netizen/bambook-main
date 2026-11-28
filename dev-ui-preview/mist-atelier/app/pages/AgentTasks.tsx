@@ -5,7 +5,7 @@ import {XiaozhuAttachmentChoices} from './modules/XiaozhuAttachmentChoices';
 import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
-import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
+import { AGENT_TASK_ISSUE_LABEL, type AgentTaskEvent, type AgentTaskPage, type AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import { taskAttachmentChoicesForQuestion, taskAttachmentLabels, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
@@ -16,7 +16,7 @@ import { taskReportRecordIndex } from '../runtime/xiaozhuRecords';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
-import { activeModelFallbackSince } from '../runtime/xiaozhuActivity';
+import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../runtime/xiaozhuActivity';
 
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
@@ -26,10 +26,11 @@ const statusLabel=(row:AgentTaskView,progressUnavailable=false)=>{
  if(row.runnerStatus==='heartbeat_stale'||(progressUnavailable&&livePlatformTask(row)))return '执行进度暂未更新';
  if(row.runnerStatus==='awaiting_reclaim')return '待重新领取';
  if(row.state==='waiting_human'&&row.questions?.some(q=>!q.answeredAt))return '待补充资料';
- if(row.state==='queued'&&row.executionIssue)return row.executionIssue.retryAt?'等待模型重试':'等待重试';
+ const modelWait=xiaozhuModelWaitLabel(row);
+ if(modelWait)return modelWait;
+ if(row.state==='queued'&&row.executionIssue)return '等待重试';
  if(row.state==='queued'&&row.executor==='platform')return '待执行';
  if(row.state==='queued'&&row.lastHeartbeatAt)return '待重新领取';
- if(row.state==='running'&&row.executionStage==='model')return activeModelFallbackSince(row)?'正在等待备用模型':'正在等待模型';
  return LABEL[row.state];
 };
 const contentRestricted=(row:AgentTaskView)=>'contentRestricted' in row&&row.contentRestricted===true;
@@ -339,7 +340,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     {(detail.waitingFor||detail.resumeAt||detail.wakeReason)&&<KeyValue items={[...(detail.waitingFor?[{label:uiText('等待资料'),value:detail.waitingFor.label}]:[]),...(detail.resumeAt?[{label:uiText(detail.waitingFor?'等待截止':'计划继续'),value:time(detail.resumeAt)}]:[]),...(detail.wakeReason?[{label:uiText('继续原因'),value:uiText(detail.wakeReason==='changed'?'资料已变化':'到达最晚时间')}]:[])]}/>}
     {detail.waitingFor?.link&&<Button onClick={openOriginal}>{uiText('查看原资料')}</Button>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
-    {detail.executionIssue&&<Banner tone="bad" title={uiText(detail.executionIssue.code==='model_response_invalid'?'模型响应无效':'模型暂不可用')}>{detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
+    {detail.executionIssue&&<Banner tone="bad" title={uiText(AGENT_TASK_ISSUE_LABEL[detail.executionIssue.code])}>{detail.state==='queued'&&detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
     {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub">{q.question}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}
     {detail.state==='waiting_human'&&detail.waitingProposalIds.length>0&&<Button onClick={()=>nav.go('cockpit')}>{uiText('查看待确认事项')}</Button>}
     <Button variant="quiet" icon={Copy} onClick={()=>void copy(detail.id)}>{uiText('复制任务编号')}</Button>

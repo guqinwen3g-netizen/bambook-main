@@ -48,6 +48,16 @@ it('keeps an unreceived confirmation in its original task and offers a read-only
  expect(host.textContent).toContain('已停止');
 });
 
+it('shows a timed-out attempt and the resumed retry as distinct stages',async()=>{
+ const issue={code:'model_timeout',retryAt:new Date(Date.now()+5000).toISOString()};
+ await paint([task({state:'queued',executionIssue:issue})]);
+ expect(getByRole(host,'status').textContent).toBe('模型响应超时，等待重试');
+ await paint([task({state:'running',executionStage:'model',executionIssue:issue})]);
+ expect(getByRole(host,'status').textContent).toBe('正在重试模型');
+ await paint([task({state:'running',executionStage:'model'})]);
+ expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+});
+
 it('exposes a focused recheck while task progress is stale',async()=>{
  const waiting=task({state:'running',executionStage:'model'});
  const onRecheckProgress=vi.fn(async()=>{});

@@ -386,6 +386,20 @@ it('rechecks an open report on focus and visibility, withholds it after confirme
  expect(detailRequests).toBe(4);
  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(report.result);
 });
+it.each(['queued','running'] as const)('shows the model timeout in task details during %s',async state=>{
+ const detail={...row(),state,executor:'platform',executionStage:state==='running'?'model':undefined,
+  executionIssue:{code:'model_timeout',retryAt:new Date(Date.now()+5000).toISOString()}};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:detail}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[detail],nextCursor:null}));
+ act(paint);
+ await flush();
+ await click(getByText(host,detail.name));
+ const dialog=getByRole(document.body,'dialog',{name:detail.name});
+ expect(dialog.textContent).toContain('模型响应超时');
+ expect(dialog.textContent).toContain(state==='queued'?'模型响应超时，等待重试':'正在重试模型');
+ expect(dialog.textContent?.includes('下次重试')).toBe(state==='queued');
+});
+
 it('opens a report attachment from the task drawer and removes its preview on restriction', async () => {
  const pdf={id:'pdf-a',name:'发票.pdf',mimeType:'application/pdf',size:30};
  const sibling={...pdf,id:'pdf-b'};
