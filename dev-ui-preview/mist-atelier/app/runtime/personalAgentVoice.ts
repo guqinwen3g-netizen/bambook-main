@@ -3,10 +3,15 @@ import type { AgentTaskView } from '../../../../server/src/shared/mistAgentTasks
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest } from './workspace';
 import { RealtimePcmPlayer } from './voiceAudio';
+import { withRequestDeadline } from './requestDeadline';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
-type Resources = { socket?: WebSocket; stream?: MediaStream; player?: RealtimePcmPlayer; capture?: AudioWorkletNode; source?: MediaStreamAudioSourceNode; gain?: GainNode; timer?: ReturnType<typeof setInterval> };
+type Resources = { socket?: WebSocket; stream?: MediaStream; player?: RealtimePcmPlayer; capture?: AudioWorkletNode; source?: MediaStreamAudioSourceNode; gain?: GainNode; timer?: ReturnType<typeof setInterval>; setup?: AbortController; readyTimer?: number };
 type VoiceTaskBinding = { taskId: string; questionId?: string };
+const VOICE_SETUP_TIMEOUT_MS = 10_000;
+// Allow the server's 15-second handshake deadline to report its own result.
+const VOICE_READY_TIMEOUT_MS = 18_000;
+const VOICE_TIMEOUT = '语音连接超时，请重试';
 /** A call stays with its original account, company and conversation. */
 export function usePersonalAgentVoice(scope: string, workspaceId: string | undefined, onTask: (task: AgentTaskView) => void, conversationId?: string) {
   const callScope = JSON.stringify([scope, conversationId]);
@@ -20,6 +25,8 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
   const dispose = React.useCallback(() => {
     generation.current++;
     const r = resources.current; resources.current = {};
+    r.setup?.abort();
+    window.clearTimeout(r.readyTimer);
     if (r.timer) clearInterval(r.timer);
     r.stream?.getTracks().forEach(track => track.stop());
     r.capture?.disconnect(); r.source?.disconnect(); r.gain?.disconnect();
@@ -30,7 +37,9 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
   React.useEffect(() => { setState('idle'); setError(''); setTranscript(''); setReply(''); selection.current = undefined; return dispose; }, [callScope, dispose]);
   const start = React.useCallback(async (taskId?: string, questionId?: string) => {
     if (!workspaceId || liveScope.current !== callScope) return;
-    dispose(); const epoch = generation.current, r: Resources = {}; resources.current = r;
+    dispose();
+    const epoch = generation.current, setup = new AbortController(), r: Resources = { setup };
+    resources.current = r;
     const current = () => generation.current === epoch && liveScope.current === callScope;
     const fail = (message: string, code?: string) => {
       if (!current()) return;
@@ -43,44 +52,60 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext || !window.AudioWorkletNode) throw new Error('当前设备不支持实时语音');
       // Unlock playback within the original click, before any network or permission wait.
-      r.player = RealtimePcmPlayer.create(24000);
-      const status = await mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(workspaceId)}/voice/status`);
+      const player = RealtimePcmPlayer.create(24000);
+      r.player = player;
+      const voicePath = `/api/mist/workspaces/${encodeURIComponent(workspaceId)}/voice`;
+      const status = await withRequestDeadline(setup, VOICE_SETUP_TIMEOUT_MS, VOICE_TIMEOUT, signal =>
+        mistApiRequest(voicePath + '/status', { signal }));
       if (!current()) return;
       if (!status.configured) throw new Error('平台尚未配置实时语音');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       if (!current()) { stream.getTracks().forEach(track => track.stop()); return; }
       r.stream = stream;
       for (const track of stream.getAudioTracks()) track.addEventListener('ended', () => fail('麦克风已断开，已交办事项继续执行'), { once: true });
-      const context = r.player.getAudioContext();
-      await context.audioWorklet.addModule(new URL('./voiceCapture.worklet.js', import.meta.url));
-      if (!current()) return;
-      ticketBinding = selection.current;
-      const bound = ticketBinding?.taskId;
-      const session = await mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(workspaceId)}/voice/sessions`, {
-        method: 'POST',
-        body: JSON.stringify({ locale: interfaceLocale(), taskId: bound, conversationId: storedConversationId, questionId: ticketBinding?.questionId }),
+      const context = player.getAudioContext();
+      const session = await withRequestDeadline(setup, VOICE_SETUP_TIMEOUT_MS, VOICE_TIMEOUT, async signal => {
+        await context.audioWorklet.addModule(new URL('./voiceCapture.worklet.js', import.meta.url));
+        signal.throwIfAborted();
+        if (!current()) return undefined;
+        ticketBinding = selection.current;
+        return mistApiRequest(voicePath + '/sessions', {
+          method: 'POST', signal,
+          body: JSON.stringify({ locale: interfaceLocale(), taskId: ticketBinding?.taskId, conversationId: storedConversationId, questionId: ticketBinding?.questionId }),
+        });
       });
       if (!current()) return;
+      if (typeof session?.id !== 'string' || typeof session.ticket !== 'string') throw new Error('语音响应无效，请重试');
+      const bound = ticketBinding?.taskId;
       const url = new URL('/api/mist/voice/stream', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       url.searchParams.set('id', session.id);
       const socket = new WebSocket(url, ['bambook-voice-v1', 'bambook-ticket.' + session.ticket]); r.socket = socket; socket.binaryType = 'arraybuffer';
+      r.readyTimer = window.setTimeout(() => fail(VOICE_TIMEOUT), VOICE_READY_TIMEOUT_MS);
       socket.onmessage = event => {
         if (!current()) return;
         let message: any; try { message = JSON.parse(event.data); } catch { fail('语音响应无效，请重试'); return; }
         if (message.type === 'ready') {
-          const selectedTaskId = selection.current?.taskId;
-          if (selectedTaskId && selectedTaskId !== bound) socket.send(JSON.stringify({ type: 'bind_task', taskId: selectedTaskId }));
-          r.source = context.createMediaStreamSource(stream);
-          r.capture = new AudioWorkletNode(context, 'bambook-voice-capture');
+          if (r.capture) return;
+          try {
+            const selectedTaskId = selection.current?.taskId;
+            if (selectedTaskId && selectedTaskId !== bound) socket.send(JSON.stringify({ type: 'bind_task', taskId: selectedTaskId }));
+            r.source = context.createMediaStreamSource(stream);
+            r.capture = new AudioWorkletNode(context, 'bambook-voice-capture');
+            r.gain = context.createGain(); r.gain.gain.value = 0;
+            r.source.connect(r.capture); r.capture.connect(r.gain); r.gain.connect(context.destination);
+          } catch {
+            fail('麦克风采集中断，已交办事项继续执行');
+            return;
+          }
+          window.clearTimeout(r.readyTimer);
+          r.readyTimer = undefined;
           // Microphone or capture loss ends the call; delegated tasks keep running server-side.
           r.capture.onprocessorerror = () => fail('麦克风采集中断，已交办事项继续执行');
-          r.gain = context.createGain(); r.gain.gain.value = 0;
           r.capture.port.onmessage = ({ data }: MessageEvent<ArrayBuffer>) => {
             if (!current() || socket.readyState !== WebSocket.OPEN || !stream.getAudioTracks().some(track => track.enabled)) return;
             if (socket.bufferedAmount > 64_000) { fail('语音网络拥堵，请重新连接'); return; }
             socket.send(data);
           };
-          r.source.connect(r.capture); r.capture.connect(r.gain); r.gain.connect(context.destination);
           setState('listening');
           r.timer = setInterval(() => {
             if (!current()) return;

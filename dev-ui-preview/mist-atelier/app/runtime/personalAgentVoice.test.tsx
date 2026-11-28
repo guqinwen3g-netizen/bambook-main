@@ -172,6 +172,75 @@ it('does not request the microphone when the platform has no voice connection', 
   expect(seam.media).not.toHaveBeenCalled(); expect(seam.close).toHaveBeenCalledOnce(); expect(host.textContent).toContain('平台尚未配置实时语音');
 });
 
+it.each(['status', 'worklet', 'ticket', 'socket'] as const)('ends a call if the %s stage stalls and ignores its late result', async stage => {
+  vi.useFakeTimers();
+  let signal: AbortSignal | undefined, resolveLate: ((value: any) => void) | undefined;
+  const pending = () => new Promise<any>(resolve => { resolveLate = resolve; });
+  const loadWorklet = stage === 'worklet' ? context.audioWorklet.addModule.mockImplementationOnce(pending) : undefined;
+  seam.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (stage === 'status' && url.endsWith('/status') || stage === 'ticket' && init?.method === 'POST') {
+      signal = init?.signal ?? undefined;
+      return pending();
+    }
+    return init?.method === 'POST' ? { id: 'call', ticket: 'fake-ticket' } : { configured: true };
+  });
+  try {
+    await click('start');
+    await flush();
+    expect(latestVoice.state).toBe('connecting');
+    await act(async () => vi.advanceTimersByTimeAsync(stage === 'socket' ? 18_001 : 10_001));
+    expect(latestVoice.state).toBe('error');
+    expect(latestVoice.error).toBe('语音连接超时，请重试');
+    expect(tracks[0].stop).toHaveBeenCalledTimes(stage === 'status' ? 0 : 1);
+    expect(seam.close).toHaveBeenCalledOnce();
+    if (stage === 'status' || stage === 'ticket') expect(signal?.aborted).toBe(true);
+    if (stage === 'socket') {
+      expect(Socket.instances[0].close).toHaveBeenCalledOnce();
+      act(() => Socket.instances[0].event({ type: 'ready' }));
+    } else {
+      await act(async () => resolveLate?.(stage === 'status' ? { configured: true } : stage === 'ticket' ? { id: 'late', ticket: 'late' } : undefined));
+      expect(Socket.instances).toHaveLength(0);
+    }
+    expect(workletNodes).toHaveLength(0);
+    expect(seam.api.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(stage === 'status' || stage === 'worklet' ? 0 : 1);
+  } finally {
+    loadWorklet?.mockReset();
+    if (loadWorklet) loadWorklet.mockResolvedValue(undefined);
+    vi.useRealTimers();
+  }
+});
+
+it('cancels the deadline once the voice connection is ready', async () => {
+  vi.useFakeTimers();
+  try {
+    await click('start');
+    await flush();
+    const socket = Socket.instances[0];
+    act(() => socket.event({ type: 'ready' }));
+    await act(async () => vi.advanceTimersByTimeAsync(20_000));
+    expect(latestVoice.state).toBe('listening');
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(tracks[0].stop).not.toHaveBeenCalled();
+    await click('end');
+  } finally { vi.useRealTimers(); }
+});
+
+it('leaves the native microphone permission prompt pending until the user decides', async () => {
+  vi.useFakeTimers();
+  let grant: ((value: unknown) => void) | undefined;
+  seam.media.mockImplementationOnce(() => new Promise(resolve => { grant = resolve; }));
+  try {
+    await click('start');
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(latestVoice.state).toBe('connecting');
+    expect(seam.api.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    await click('end');
+    await act(async () => grant?.({ getTracks: () => tracks, getAudioTracks: () => tracks }));
+    expect(tracks[0].stop).toHaveBeenCalledOnce();
+    expect(Socket.instances).toHaveLength(0);
+  } finally { vi.useRealTimers(); }
+});
+
 it('ends the call and releases the microphone when the device disconnects mid-call', async () => {
   await click('start'); const socket = Socket.instances[0];
   act(() => socket.event({ type: 'ready' })); await flush();
