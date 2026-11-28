@@ -201,7 +201,12 @@ export class MistVoiceService {
       if (closed) return;
       let payload: Record<string, any>;
       try { payload = JSON.parse(data.toString()); } catch { error('VOICE_PROTOCOL_ERROR', '语音响应无效，请重试'); return; }
-      if (payload.type === 'session.created') { ready = true; clearTimeout(handshake); send({ type: 'ready', id: ticket.id, inputSampleRate: VOICE_INPUT_RATE, outputSampleRate: VOICE_OUTPUT_RATE }); return; }
+      if (payload.type === 'session.created') {
+        ready = true;
+        clearTimeout(handshake);
+        send({ type: 'ready', id: ticket.id, inputSampleRate: VOICE_INPUT_RATE, outputSampleRate: VOICE_OUTPUT_RATE, heartbeat: true });
+        return;
+      }
       if (payload.type === 'error') { error('VOICE_PROVIDER_FAILED', '语音服务暂不可用，请稍后重试'); return; }
       if (payload.type === 'session.closed') { close(); return; }
       if (payload.type === 'conversation.item.input_audio_transcription.started') { transcript = ''; transcriptKey = ''; utterance++; interrupt(); send({ type: 'speech_started' }); return; }
@@ -260,7 +265,8 @@ export class MistVoiceService {
         upstream({ type: 'input_audio_buffer.append', event_id: randomUUID(), audio: data.toString('base64') }); return;
       }
       let message: any; try { message = JSON.parse(data.toString()); } catch { error('VOICE_INPUT_INVALID', '语音请求无效'); return; }
-      if (message.type === 'interrupt') interrupt();
+      if (message.type === 'ping' && Object.keys(message).length === 1) send({ type: 'pong' });
+      else if (message.type === 'interrupt') interrupt();
       else if (message.type === 'mute' && typeof message.muted === 'boolean') upstream({ type: message.muted ? 'input_audio_mute.commit' : 'input_audio_unmute.commit', event_id: randomUUID() });
       else if (message.type === 'bind_task' && typeof message.taskId === 'string' && message.taskId.length <= 100 && !Object.keys(message).some(key => !['type', 'taskId'].includes(key))) {
         bindingChange = bindingChange.then(async () => {

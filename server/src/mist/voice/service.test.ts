@@ -48,6 +48,18 @@ it('uses one-use origin-bound tickets and never returns the provider key', async
   await expect(service.issue(b, 'http://127.0.0.1')).rejects.toMatchObject({ code: 'VOICE_ALREADY_ACTIVE' });
 });
 
+it('answers an application heartbeat without involving the voice provider or task workflow', async () => {
+  const b = binding();
+  const { socket, messages } = await connect(await service.issue(b, 'http://127.0.0.1'));
+  expect(messages.find(message => message.type === 'ready')).toMatchObject({ heartbeat: true });
+  const upstreamCount = received.length;
+  socket.send(JSON.stringify({ type: 'ping' }));
+  await wait(() => messages.some(message => message.type === 'pong'));
+  expect(received).toHaveLength(upstreamCount);
+  expect(b.submit).not.toHaveBeenCalled();
+  expect(b.control).not.toHaveBeenCalled();
+});
+
 it('lets the same owner replace an unused ticket and keeps an active call exclusive', async () => {
   const b = binding();
   const old = await service.issue(b, 'http://127.0.0.1');
