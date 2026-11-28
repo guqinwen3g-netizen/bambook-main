@@ -241,6 +241,45 @@ it('leaves the native microphone permission prompt pending until the user decide
   } finally { vi.useRealTimers(); }
 });
 
+it('ends live voice as soon as the browser goes offline and retries only when asked', async () => {
+  const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  const posts = () => seam.api.mock.calls.filter(([, init]) => init?.method === 'POST');
+  try {
+    await click('start');
+    const socket = Socket.instances[0];
+    act(() => {
+      socket.event({ type: 'ready' });
+      socket.event({ type: 'task', item: { id: 'existing-task' } });
+    });
+    online.mockReturnValue(false);
+    act(() => window.dispatchEvent(new Event('offline')));
+    expect(latestVoice.state).toBe('error');
+    expect(latestVoice.error).toBe('语音已断开，已交办事项继续执行');
+    expect(tracks[0].stop).toHaveBeenCalledOnce();
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(seam.close).toHaveBeenCalledOnce();
+    act(() => socket.event({ type: 'task', item: { id: 'late-task' } }));
+    expect(seam.onTask).toHaveBeenCalledExactlyOnceWith({ id: 'existing-task' });
+    online.mockReturnValue(true);
+    act(() => window.dispatchEvent(new Event('online')));
+    expect(posts()).toHaveLength(1);
+    await click('start');
+    expect(JSON.parse(posts()[1][1].body)).toMatchObject({ taskId: 'existing-task' });
+  } finally { online.mockRestore(); }
+});
+
+it('does not open voice resources if the browser is already offline', async () => {
+  const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  try {
+    await click('start');
+    expect(latestVoice.state).toBe('error');
+    expect(latestVoice.error).toBe('请联网后重试语音');
+    expect(seam.api).not.toHaveBeenCalled();
+    expect(seam.media).not.toHaveBeenCalled();
+    expect(Socket.instances).toHaveLength(0);
+  } finally { online.mockRestore(); }
+});
+
 it('ends the call and releases the microphone when the device disconnects mid-call', async () => {
   await click('start'); const socket = Socket.instances[0];
   act(() => socket.event({ type: 'ready' })); await flush();

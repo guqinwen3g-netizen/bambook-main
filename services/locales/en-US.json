@@ -6582,6 +6582,7 @@
   "请允许使用麦克风后重试": "Allow microphone access and try again",
   "语音连接失败，请重试": "Voice connection failed. Try again.",
   "语音连接超时，请重试": "Voice connection timed out. Try again.",
+  "请联网后重试语音": "Reconnect to the internet to retry voice.",
   "语音网络拥堵，请重新连接": "Voice network is congested. Reconnect.",
   "语音播放失败，请重试": "Voice playback failed. Try again.",
   "语音响应无效，请重试": "Invalid voice response. Try again.",
