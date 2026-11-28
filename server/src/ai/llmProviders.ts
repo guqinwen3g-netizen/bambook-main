@@ -18,6 +18,59 @@
  *      env 提供方始终排在最后兜底（见 platformProviders.ts）。
  */
 
+/** The earliest safe time for the next automatic attempt on a busy provider. */
+export class LlmProviderRetryError extends Error {
+  constructor(message: string, readonly retryNotBefore: number) {
+    super(message);
+  }
+}
+
+/** Every eligible provider is already waiting, so this attempt sent no request. */
+export class LlmProviderCooldownError extends LlmProviderRetryError {}
+
+const MAX_PROVIDER_COOLDOWNS = 32;
+const TASK_BUSY_RETRY_MS = 20_000;
+const HTTP_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HTTP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const HTTP_DATE = /^(?<weekday>[A-Za-z]{3}), (?<day>\d{2}) (?<month>[A-Za-z]{3}) (?<year>\d{4}) (?<time>\d{2}:\d{2}:\d{2}) GMT$/;
+const RFC850_DATE = /^(?<weekday>Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), (?<day>\d{2})-(?<month>[A-Za-z]{3})-(?<year>\d{2}) (?<time>\d{2}:\d{2}:\d{2}) GMT$/;
+const ASCTIME_DATE = /^(?<weekday>[A-Za-z]{3}) (?<month>[A-Za-z]{3}) (?<day>\d{2}| \d) (?<time>\d{2}:\d{2}:\d{2}) (?<year>\d{4})$/;
+
+function parseHttpDate(value: string, now: number): number {
+  const parts = HTTP_DATE.exec(value)?.groups ?? RFC850_DATE.exec(value)?.groups ?? ASCTIME_DATE.exec(value)?.groups;
+  if (!parts) return NaN;
+  const month = HTTP_MONTHS.indexOf(parts.month), day = Number(parts.day);
+  const [hour, minute, second] = parts.time.split(':').map(Number);
+  if (month < 0 || day < 1 || hour > 23 || minute > 59 || second > 60) return NaN;
+
+  let year = Number(parts.year);
+  if (parts.year.length === 2) {
+    // RFC 9110 §5.6.7 uses a rolling 50-year limit for obsolete two-digit years.
+    const limit = new Date(now);
+    limit.setUTCFullYear(limit.getUTCFullYear() + 50);
+    year += Math.floor(limit.getUTCFullYear() / 100) * 100;
+    if (Date.UTC(year, month, day, hour, minute, second) > limit.getTime()) year -= 100;
+  }
+  if (year < 1900) return NaN;
+  const date = new Date(Date.UTC(year, month, day, hour, minute, Math.min(second, 59)));
+  if (date.getUTCDate() !== day || HTTP_WEEKDAYS[date.getUTCDay()] !== parts.weekday.slice(0, 3)) return NaN;
+  return date.getTime() + (second === 60 ? 1000 : 0);
+}
+
+function honorRetryAfter(response: Response, missingRetryAfterMs?: number): void {
+  if (response.status !== 429 && response.status !== 503) return;
+  const now = Date.now();
+  const value = response.headers?.get('retry-after')?.trim() ?? '';
+  const at = /^\d+$/.test(value) ? Math.min(Number.MAX_SAFE_INTEGER, now + Number(value) * 1000)
+    : parseHttpDate(value, now);
+  const retryNotBefore = Number.isSafeInteger(at) && at > now ? at
+    : missingRetryAfterMs === undefined ? undefined : now + missingRetryAfterMs;
+  if (retryNotBefore === undefined) return;
+  // A busy response already establishes a retry time without waiting for its error body.
+  void response.body?.cancel().catch(() => {});
+  throw new LlmProviderRetryError(`Model API failed with ${response.status}`, retryNotBefore);
+}
+
 export type LlmProviderConfig = {
   id: string;
   baseUrl: string;
@@ -34,6 +87,8 @@ export type LlmCompletionInput = {
   signal: AbortSignal;
   jsonMode?: boolean;
   onDelta?: (chunk: string) => void;
+  /** Recheck caller authority before the first provider after an asynchronous cooldown lookup. */
+  beforeFirstProvider?: () => Promise<void>;
   /** Recheck caller authority before sending the same input to another provider. */
   beforeFallback?: () => Promise<void>;
 };
@@ -41,7 +96,9 @@ export type LlmCompletionInput = {
 import { codexSubscriptions, PLATFORM_SUBJECT, type CodexSubscriptionService } from './codexSubscription';
 import { platformReasoning, type PlatformAiProfile } from './platformModel';
 import { platformProviders, type PlatformApiProvider, type PlatformProviderStore } from './platformProviders';
+import { createHash } from 'node:crypto';
 import { aiFetch } from './outboundProxy';
+import type { LlmProviderCooldownStore } from './providerCooldownStore';
 
 const DEFAULT_LLM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const DEFAULT_LLM_MODEL = 'ark-code-latest';
@@ -109,6 +166,7 @@ export function resolveEnvProviderChain(): LlmProviderConfig[] {
  * LLM_ALL_PROVIDERS_FAILED。同一 provider 内保持"流式优先、流式失败降级非流式"。
  */
 export type LlmCompleterOptions = {
+  cooldownStore?: LlmProviderCooldownStore;
   /** 平台 AI 功能档位；平台 ChatGPT 订阅已连接时按档位推理强度优先使用。 */
   platformProfile?: PlatformAiProfile;
   subscriptions?: Pick<CodexSubscriptionService, 'isConnected' | 'complete'>;
@@ -124,6 +182,21 @@ const ARK_KIMI = 'kimi-k3.1-pro';
 const ARK_DEEPSEEK_FLASH = 'deepseek-v4.1-flash';
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
+  const cooldowns = new Map<string, number>();
+  const store = options.platformProfile === 'agent-task' ? options.cooldownStore : undefined;
+  let reportedStoreError = false;
+  const reportStoreError = () => {
+    if (reportedStoreError) return;
+    reportedStoreError = true;
+    console.warn('[platform-agent] PROVIDER_COOLDOWN_STORE_UNAVAILABLE');
+  };
+  const rememberLocal = (key: string, until: number) => {
+    const newest = Math.max(cooldowns.get(key) ?? 0, until);
+    cooldowns.delete(key);
+    cooldowns.set(key, newest);
+    const oldest = cooldowns.keys().next().value;
+    if (oldest !== undefined && cooldowns.size > MAX_PROVIDER_COOLDOWNS) cooldowns.delete(oldest);
+  };
   return async function complete(input: LlmCompletionInput): Promise<string> {
     const subscriptions = options.subscriptions ?? codexSubscriptions();
     const steps = [
@@ -131,19 +204,58 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       ...resolveEnvProviderChain().map(provider => ({ kind: 'api' as const, provider })),
     ];
     const profile = options.platformProfile;
+    const now = Date.now();
+    for (const [key, until] of cooldowns) if (until <= now) cooldowns.delete(key);
+    const cooldownKey = (step: typeof steps[number]) => profile === 'agent-task' && step.kind === 'api'
+      ? createHash('sha256').update(JSON.stringify([step.provider.baseUrl, input.model || step.provider.model, step.provider.apiKey])).digest('hex')
+      : undefined;
+    let storeReadRetryAt = 0;
+    let checkedPersistedCooldowns = false;
+    if (store) {
+      const keys = [...new Set(steps.map(cooldownKey).filter((key): key is string => key !== undefined))];
+      if (keys.length) {
+        checkedPersistedCooldowns = true;
+        try {
+          const saved = await store.active(keys, now);
+          for (const key of keys) {
+            const until = saved.get(key);
+            if (until !== undefined && Number.isSafeInteger(until) && until > Date.now()) rememberLocal(key, until);
+          }
+        } catch {
+          reportStoreError();
+          storeReadRetryAt = Date.now() + TASK_BUSY_RETRY_MS;
+        }
+      }
+    }
+    const coolingUntil = (key: string | undefined) => key ? Math.max(cooldowns.get(key) ?? 0, storeReadRetryAt) : 0;
     const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
     let invalidResponse: Error | undefined;
     let attemptedProvider = false;
+    let retryNotBefore: number | undefined;
     for (const [index, step] of steps.entries()) {
       if (!available(step)) continue;
       input.signal.throwIfAborted();
-      if (attemptedProvider && input.beforeFallback) {
-        await input.beforeFallback();
+      const key = cooldownKey(step);
+      const until = coolingUntil(key);
+      if (until > Date.now()) {
+        retryNotBefore = Math.max(retryNotBefore ?? 0, until);
+        continue;
+      }
+      const beforeDispatch = attemptedProvider || retryNotBefore !== undefined
+        ? input.beforeFallback : checkedPersistedCooldowns ? input.beforeFirstProvider : undefined;
+      if (beforeDispatch) {
+        await beforeDispatch();
         input.signal.throwIfAborted();
+        const refreshed = coolingUntil(key);
+        if (refreshed > Date.now()) {
+          retryNotBefore = Math.max(retryNotBefore ?? 0, refreshed);
+          continue;
+        }
       }
       attemptedProvider = true;
-      const remaining = steps.slice(index + 1).filter(available);
+      const remaining = steps.slice(index + 1).filter(next =>
+        available(next) && coolingUntil(cooldownKey(next)) <= Date.now());
       const deadline = profile === 'agent-task' && !input.onDelta && remaining.length ? new AbortController() : undefined;
       const hasDeepseekBackup = remaining.some(next => next.kind === 'api'
         && next.provider.baseUrl === ARK_AGENT_PLAN_URL && next.provider.model === ARK_DEEPSEEK_FLASH);
@@ -155,7 +267,7 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       const providerId = step.kind === 'subscription' ? 'chatgpt-subscription' : step.provider.id;
       try {
         const reply = step.kind === 'api'
-          ? await completeWithProvider(step.provider, attempt)
+          ? await completeWithProvider(step.provider, attempt, profile === 'agent-task' ? TASK_BUSY_RETRY_MS : undefined)
           : await subscriptions.complete(PLATFORM_SUBJECT, attempt, { reasoning: profile && platformReasoning(profile) });
         input.signal.throwIfAborted();
         try {
@@ -167,15 +279,31 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
         return reply;
       } catch (err: any) {
         if (input.signal.aborted || (!deadline?.signal.aborted && err?.name === 'AbortError')) throw err;
+        if (err instanceof LlmProviderRetryError) {
+          retryNotBefore = Math.max(retryNotBefore ?? 0, err.retryNotBefore);
+          if (key) {
+            rememberLocal(key, err.retryNotBefore);
+            if (store) {
+              try {
+                await store.remember(key, err.retryNotBefore, Date.now());
+              } catch {
+                reportStoreError();
+              }
+            }
+          }
+        }
         const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
         failures.push({ providerId, error: deadline?.signal.aborted ? 'PROVIDER_ATTEMPT_TIMEOUT' : code + String(err?.message || err) });
       } finally {
         clearTimeout(timer);
       }
     }
-    if (invalidResponse) throw invalidResponse;
-    if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
-    throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    if (!attemptedProvider && retryNotBefore !== undefined) throw new LlmProviderCooldownError('LLM_PROVIDER_COOLDOWN', retryNotBefore);
+    if (!invalidResponse && failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
+    const failure = invalidResponse ?? new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    // A successful fallback returns above. Only an exhausted chain advises the task scheduler.
+    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(failure.message, retryNotBefore);
+    throw failure;
   };
 }
 
@@ -184,7 +312,7 @@ export function testLlmProvider(provider: LlmProviderConfig, signal: AbortSignal
   return completeWithProvider(provider, { systemPrompt: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], temperature: 0, signal });
 }
 
-async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput): Promise<string> {
+async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput, missingRetryAfterMs?: number): Promise<string> {
   const model = input.model || provider.model;
   // Ark requires temperature=1.0 for Kimi K3.1 Pro on its standard API and Agent Plan.
   const arkKimi = (model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3')
@@ -201,10 +329,10 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
       return await streamChatCompletion({
         baseUrl: provider.baseUrl, apiKey: provider.apiKey, model, messages,
         temperature,
-        signal: input.signal, onDelta: input.onDelta,
+        signal: input.signal, onDelta: input.onDelta, missingRetryAfterMs,
       });
     } catch (streamErr: any) {
-      if (streamErr?.name === 'AbortError') throw streamErr;
+      if (streamErr?.name === 'AbortError' || streamErr instanceof LlmProviderRetryError) throw streamErr;
       // 流式失败，降级到非流式后仍由外层链负责转移到下一个 provider
     }
   }
@@ -235,8 +363,10 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    honorRetryAfter(res, missingRetryAfterMs);
     const data: any = await res.json().catch(() => ({}));
-    throw new Error(data?.error?.message || data?.message || `Model API failed with ${res.status}`);
+    const message = data?.error?.message || data?.message || `Model API failed with ${res.status}`;
+    throw new Error(message);
   }
   const data: any = await res.json().catch(() => ({}));
   const text = String(data?.choices?.[0]?.message?.content || '').trim();
@@ -251,13 +381,17 @@ async function streamChatCompletion(params: {
   messages: Array<{ role: string; content: string }>;
   temperature: number; signal: AbortSignal;
   onDelta: (chunk: string) => void;
+  missingRetryAfterMs?: number;
 }): Promise<string> {
   const res = await aiFetch(`${params.baseUrl}/chat/completions`, {
     method: 'POST', signal: params.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
     body: JSON.stringify({ model: params.model, temperature: params.temperature, stream: true, messages: params.messages }),
   });
-  if (!res.ok) throw new Error(`Model API stream failed with ${res.status}`);
+  if (!res.ok) {
+    honorRetryAfter(res, params.missingRetryAfterMs);
+    throw new Error(`Model API stream failed with ${res.status}`);
+  }
   if (!res.body) throw new Error('Model API stream returned no body');
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
