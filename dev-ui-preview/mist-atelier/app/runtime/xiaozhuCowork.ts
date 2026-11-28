@@ -223,6 +223,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [checkingReceipt,setCheckingReceipt] = React.useState(false);
   const sendRequest = React.useRef<AbortController | undefined>(undefined);
   const controlRequests = React.useRef(new Map<string,AbortController>());
+  const abortTaskOperations=React.useCallback(()=>{
+    const submission=sendRequest.current,controls=[...controlRequests.current.values()];
+    sendRequest.current=undefined;
+    controlRequests.current.clear();
+    submission?.abort();
+    for(const controller of controls)controller.abort();
+  },[]);
   const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   const controlKeys=savedControls??localControls;
   const attachmentAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
@@ -352,10 +359,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const clearDeniedHistory = React.useCallback(()=>{
     deniedHistory.current++;trackedOrigin.current=undefined;
     receiptReconnectPending.current=false;receiptRead.current?.abort();
-    abortAttachmentAnswerChecks();abortOlderRead();moreRecovery.current=undefined;
+    abortAttachmentAnswerChecks();abortOlderRead();abortTaskOperations();moreRecovery.current=undefined;
+    setSubmission(undefined);setSendFailure(undefined);setControls({});setRecoveredSubmissions([]);
     setLoadingMore(false);setMoreError('');
     setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
-  },[abortOlderRead,abortAttachmentAnswerChecks]);
+  },[abortOlderRead,abortAttachmentAnswerChecks,abortTaskOperations]);
   const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
     historyRecovery.current=mode==='reconnect'?'pending':undefined;
@@ -438,7 +446,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   }, [abortOlderRead, base, enabled, scope, checkReceipts, clearDeniedHistory]);
-  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); abortOlderRead(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [abortOlderRead,load,scope]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); abortOlderRead(); receiptRead.current?.abort(); receiptRead.current=undefined; abortTaskOperations(); }; }, [abortOlderRead,abortTaskOperations,load,scope]);
   React.useEffect(() => {
     if(!base||!enabled)return;
     let resumeReceipts=false,lastRecheckAt=-Infinity;
