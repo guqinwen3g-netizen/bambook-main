@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';
+import {webcrypto} from 'node:crypto';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
-import {getByRole,getByLabelText,getByText,queryByRole,fireEvent} from '@testing-library/dom';
+import {getByRole,getByLabelText,getByText,queryByRole,fireEvent,waitFor} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
 import type { Route } from '../nav';
 const seam=vi.hoisted(()=>({api:vi.fn(),readAttachment:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:'',sourcePosition:undefined as Route['sourcePosition']}));
@@ -14,6 +15,8 @@ vi.mock('../nav',async importOriginal=>({
   automationId:seam.automationId||undefined,sourcePosition:seam.sourcePosition}}),
 }));
 import {AgentTasks} from './AgentTasks';
+import {AssistantConversationProvider} from '../runtime/assistantConversation';
+import {readTaskControls} from '../runtime/xiaozhuControlRequests';
 let host:HTMLDivElement,root:Root;
 const row=()=>({id:'task',identityId:'identity',identityName:'邮件助理',name:'核对邮件',ownerId:'sales',ownerName:'顾言',mode:'operate',instructions:'核对本人来信，移动前交本人确认。',state:'queued',version:3,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',expiresAt:'2026-11-02T00:00:00Z',stepsUsed:0,stepLimit:40,runtimeUsedMs:0,runtimeLimitMs:1800000,lastHeartbeatAt:null,checkpoint:'',result:'',waitingProposalIds:[],canControl:true});
 const identity=()=>({id:'identity',name:'邮件助理',mode:'operate',state:'active'});
@@ -694,6 +697,77 @@ it.each([false,true])('checks the exact receipt for an attachment answer and ret
  }
  expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();
  expect(getByRole(document.body,'button',{name:'确认.txt'})).toBeTruthy();
+});
+it.each([false,true])('reopens an unconfirmed attachment receipt without file bytes (%s)',async missing=>{
+ const scope='supplement-reload';
+ const question={id:'question',question:'请补交书面确认依据。',askedAt:'2026-11-01T00:10:00Z'};
+ const stored={id:'attachment',name:'确认.txt',mimeType:'text/plain',size:9};
+ const waiting={...row(),state:'waiting_human',questions:[question],canSupplementAttachments:true};
+ const answered={...waiting,state:'queued',version:4,attachments:[stored],questions:[{...question,answeredAt:'2026-11-01T00:20:00Z',attachmentIds:[stored.id]}]};
+ const mount=()=>root.render(<MistRoot><ToastProvider><AssistantConversationProvider scope="A:workspace" controlStorageScope={scope}><AgentTasks onConnections={()=>{}}/></AssistantConversationProvider></ToastProvider></MistRoot>);
+ const openAnswer=async()=>{
+  await click(getByText(host,'核对邮件'));
+  await click(getByRole(document.body,'button',{name:'补充资料',exact:true}));
+  return getByRole(document.body,'dialog',{name:'补充资料'});
+ };
+ const select=async(dialog:HTMLElement)=>{
+  const file=Object.assign(new File(['synthetic'],stored.name,{type:stored.mimeType}),{
+   arrayBuffer:async()=>new TextEncoder().encode('synthetic').buffer,
+  });
+  await act(async()=>fireEvent.change(dialog.querySelector('input[type="file"]')!,{target:{files:[file]}}));
+ };
+ let current=waiting,requestId='',posts=0,checks=0;
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.includes('/answer/receipt/')){
+    checks++;
+    expect(url).toBe('/api/mist/workspaces/workspace/agent-tasks/task/answer/receipt/'+requestId);
+    if(missing)throw Object.assign(new Error('Not found'),{status:404});
+    current=answered;
+    return {item:answered,attachmentIds:[stored.id]};
+   }
+   if(init?.method==='POST'){
+    const answer=JSON.parse(String((init.body as FormData).get('answer')));
+    expect(readTaskControls(scope).get('task')).toEqual(expect.objectContaining({
+     action:'answer',requestId:answer.requestId,version:3,questionId:question.id,hasAttachments:true,fingerprint:expect.stringMatching(/^[a-f0-9]{64}$/),
+    }));
+    expect(sessionStorage.getItem('mist.xiaozhu.controls:'+scope)).not.toMatch(/synthetic|确认.txt|"answer":/);
+    if(++posts===1){requestId=answer.requestId;throw new Error('网络中断');}
+    expect(answer.requestId).toBe(requestId);
+    current=answered;
+    return {item:answered};
+   }
+   if(url.includes('agent-identities'))return {items:[identity()],nextCursor:null};
+   if(url.includes('/history'))return {items:[],nextCursor:null};
+   if(url.endsWith('/task'))return {item:current};
+   return {items:[current],nextCursor:null};
+  });
+  act(mount);await flush();
+  const first=await openAnswer();
+  await select(first);
+  await click(getByRole(first,'button',{name:'提交答复'}));
+  await act(async()=>waitFor(()=>expect(posts).toBe(1)));
+  act(()=>root.render(null));act(mount);await flush();
+  const reopened=await openAnswer();
+  expect((getByRole(reopened,'button',{name:'添加附件'}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(reopened,'button',{name:'核对原操作'}));
+  expect(posts).toBe(1);
+  expect(checks).toBe(1);
+  if(missing){
+   expect(readTaskControls(scope).get('task')?.requestId).toBe(requestId);
+   expect((getByRole(reopened,'button',{name:'提交答复'}) as HTMLButtonElement).disabled).toBe(true);
+   await select(reopened);
+   await click(getByRole(reopened,'button',{name:'提交答复'}));
+   await act(async()=>waitFor(()=>expect(posts).toBe(2)));
+  }
+  expect(readTaskControls(scope).has('task')).toBe(false);
+  expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();
+  expect(getByRole(document.body,'button',{name:'确认.txt'})).toBeTruthy();
+ }finally{
+  vi.unstubAllGlobals();
+  sessionStorage.removeItem('mist.xiaozhu.controls:'+scope);
+ }
 });
 it('creates an explicit platform task without issuing any external credential',async()=>{
  seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(url.endsWith('/agent-task-capabilities')?{platformAvailable:true}:init?.method==='POST'?{item:{...row(),executor:'platform'}}:url.includes('agent-identities')?{items:[identity()],nextCursor:null}:{items:[],nextCursor:null}));
