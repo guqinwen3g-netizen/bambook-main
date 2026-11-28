@@ -7,7 +7,7 @@ export type RouteTarget = { versionId?: string; batchId?: string; section?: stri
 type SourcePosition =
   | {view:'calendar';scope:string;date:string;mode:'week'|'month';mineOnly:boolean}
   | {view:'crm';scope:string;customerId:string;tab:string}
-  | {view:'assistant';scope:string;taskId:string;version:number;updatedAt:string;citation:number;offset:number;conversationId?:string}
+  | {view:'assistant';scope:string;taskId:string;version:number;updatedAt:string;citation:number;offset:number;conversationId?:string;recordKey?:string}
   | {view:'reports';scope:string;from:string;to:string;currency:string;basis:'order'|'shipment'|'invoice';progress:string;fxView:'none'|'actual'|'period'|'quote'|null;fxMonth:string};
 export type Route = RouteTarget & { view: string; id?: string; sourcePosition?: SourcePosition };
 /** Attach the filters to this browser history entry only. A fresh navigation creates a fresh mistRoute. */
