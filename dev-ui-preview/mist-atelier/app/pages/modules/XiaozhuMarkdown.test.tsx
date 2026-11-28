@@ -88,6 +88,21 @@ it('opens an explicitly cited checked PDF page and keeps ambiguous or unchecked 
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('keeps the observed page link when a page result also explains its missing text layer',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const file={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:100};
+ const reads=[{at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:'scan',taskAttachmentObservedPages:[3]}];
+ const text='### scan.pdf\n第 3 页图像显示编号 SCAN-QC-7158。该页没有可提取的文字层，上述内容来自图像。';
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[file]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const link=host.querySelector('button[title="第 3 页"]') as HTMLButtonElement;
+  expect(link).not.toBeNull();
+  await act(async()=>link.click());
+  expect(preview).toHaveBeenCalledWith(file,3);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it.each(['两页均无 PDF 可提取文字','这两页没有可提取的文字层'])('links observed PDF pages after the scan explanation %s',async explanation=>{
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;

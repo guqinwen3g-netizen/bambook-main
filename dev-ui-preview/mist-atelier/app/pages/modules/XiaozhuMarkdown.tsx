@@ -232,7 +232,9 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
           &&(/^application\/pdf\b/i.test(files[index].mimeType)||/\.pdf$/i.test(files[index].name))){
           const intro=details.children.map(inlineTextStart).join('');
           if(/(?:无|没有)[^。；\n]{0,24}可提取(?:的)?文字|\bno extractable text\b/i.test(intro)
-            &&/图像|目视|扫描|\b(?:image|visual)/i.test(intro))details=tree.children[position+1];
+            &&/图像|目视|扫描|\b(?:image|visual)/i.test(intro)
+            &&!splitSectionLines(details.children).lines.some(line=>PDF_PAGE_REFERENCE.test(line.map(inlineTextStart).join('').trimStart())))
+            details=tree.children[position+1];
         }
         if(!details)continue;
         if (details.type === 'paragraph') linkSectionReference(details,index,lead?.range);

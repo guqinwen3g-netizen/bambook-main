@@ -1983,6 +1983,35 @@ it('explicitly reopens a prior attachment in the same conversation without creat
   expect(writes).toHaveBeenCalledTimes(1);
 });
 
+it('reuses a scanned PDF for a new visual page without mixing in the previous report',async()=>{
+ const priorRef='EXCLUSIVE-PAGE-3-QC-7158',nextRef='EXCLUSIVE-PAGE-5-QC-9251';
+ const complete=vi.fn(async (_input:LlmCompletionInput):Promise<string>=>tool('bambook_task',{action:'finish',outcome:'succeeded',
+  result:complete.mock.calls.length===1?'第 3 页 '+priorRef:'第 5 页 '+nextRef}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const conversationId='c_visual_followup',first=(await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify({
+  requestId:randomUUID(),name:'核对第 3 页',instructions:'请目视核对 scan.pdf 第 3 页。',conversationId,
+ })).attach('attachments',pdf('OUTSIDE-PAGE-6',6,false,[3,5]),'scan.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(first.id)).toMatchObject({state:'succeeded',result:'第 3 页 '+priorRef});
+ const writes=vi.spyOn(MistPrivateFiles.prototype,'write');
+ const next=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对第 5 页',instructions:'请只目视核对 scan.pdf 第 5 页。',conversationId,
+  historyTaskIds:[first.id],attachmentRefs:[{taskId:first.id,fileId:first.attachments[0].id}],
+ }).expect(201)).body.item;
+ await f.drain();
+ expect(next.attachments).toEqual(first.attachments);
+ expect(writes).not.toHaveBeenCalled();
+ expect(complete).toHaveBeenCalledTimes(2);
+ const secondModelInput=complete.mock.calls[1][0],text=secondModelInput.messages[0].content;
+ const facts=JSON.parse(text.slice(text.indexOf('{"task":')));
+ expect(secondModelInput.images?.map(image=>image.name)).toEqual(['scan.pdf 第 5 页']);
+ expect(facts.pdfPageImages).toEqual([{file:'scan.pdf',page:5}]);
+ expect(text).not.toContain(priorRef);
+ expect(text).not.toContain('OUTSIDE-PAGE-6');
+ expect(await f.current(next.id)).toMatchObject({state:'succeeded',result:'第 5 页 '+nextRef});
+ expect(await f.current(first.id)).toMatchObject({state:'succeeded',result:'第 3 页 '+priorRef});
+});
+
 it('rejects a missing or changed prior original before creating a follow-up', async () => {
   const f = await fixture(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读取' }));
   f.worker.start(3_600_000);
