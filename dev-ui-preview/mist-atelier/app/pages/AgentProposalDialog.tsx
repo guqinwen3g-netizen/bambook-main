@@ -126,6 +126,14 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
   let omitted = 0;
   const walk = (value: unknown, path: string) => {
     if(creditChange&&['id','patch.creditLimit','patch.currency'].includes(path))return;
+    if(customer&&path==='patch.terms'&&typeof value==='string'){
+      if(rows.length+2>limit){omitted+=2;return;}
+      rows.push(
+        {field:uiText('当前付款条件'),path:'terms.before',value:customer.terms||uiText('未填写')},
+        {field:uiText('拟改付款条件'),path:'terms.after',value:value||uiText('未填写')},
+      );
+      return;
+    }
     // mistMarket#sourceLine/save derives these from saved data; the input cannot set them.
     if(quotation&&/^(input\.(approvalHistory|requiresApproval)|input\.lines\.\d+\.(costBasis|family|marginFloor))(\.|$)/.test(path))return;
     // Image tokens select decoration, not a commercial term or a source object.

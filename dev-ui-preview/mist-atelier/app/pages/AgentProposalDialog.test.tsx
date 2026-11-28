@@ -319,6 +319,23 @@ it('shows quotation business references and exact version, and blocks missing so
  finally{act(()=>root.unmount());host.remove();}
 });
 
+it.each(['customer.update','market.customer.update'])('compares current and proposed payment terms for %s',type=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const state=createMistState({id:()=> 'id',now:'2026-11-28T04:00:00Z',actorName:'Test'},'empty');
+ state.customers=[{id:'customer-private',code:'CUS-SIM',name:'Birchline',terms:'T/T 20% 预付',creditLimit:0,currency:'GBP'} as any];
+ const proposal:any={id:'terms-proposal',ownerId:'u',owner:'Manager',summary:['变更付款条件'],state:'pending',createdAt:'2026-11-28',
+  command:{type,payload:{id:'customer-private',patch:{terms:'T/T 40% 预付'}}}};
+ const host=document.createElement('div'),root=createRoot(host);
+ document.body.append(host);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  const changes=document.querySelector('[data-agent-proposal-changes]')?.textContent;
+  expect(changes).toContain('当前付款条件 · T/T 20% 预付');
+  expect(changes).toContain('拟改付款条件 · T/T 40% 预付');
+  expect(changes).not.toContain('customer-private');
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it('shows a customer credit grant with the exact old/new currency values and requires the existing high-risk password',()=>{
  const state=createMistState({id:()=> 'id',now:'2026-11-18T04:00:00Z',actorName:'Test'},'empty');state.customers=[{id:'customer-private',code:'BCS',name:'Birchline',grade:'B',creditLimit:1000,currency:'GBP'} as any];
  const proposal:any={id:'credit-proposal',ownerId:'u',owner:'Manager',summary:['调整信用额度'],state:'pending',createdAt:'2026-11-18',risk:'high',command:{type:'market.customer.update',payload:{id:'customer-private',patch:{creditLimit:2000}}}};

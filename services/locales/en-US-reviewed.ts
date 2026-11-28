@@ -5,6 +5,8 @@ import { mailReceivingEnglish } from './en-US-mail-receiving';
 import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
+  '当前付款条件': 'Current payment terms',
+  '拟改付款条件': 'Proposed payment terms',
   '模型响应超时': 'Model response timed out',
   '模型响应超时，等待重试': 'Model response timed out. Waiting to retry.',
   '正在重试模型': 'Retrying the model',
