@@ -151,6 +151,7 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   const executionStage=state==='running'&&c.executor==='platform'&&c.platform
     ? lastStep&&lastStep.result===undefined?'tool' as const:'model' as const
     : undefined;
+  const waitingForModelQuota=readable&&state==='queued'&&c.state==='queued'&&c.platform?.waitingForModelQuota===true;
   const leaseSince=c.lease?.startedAt??0;
   // Heartbeats update the task but never restart the timer for the current phase.
   const stageSince=executionStage==='tool'&&lastStep ? Math.max(leaseSince,Date.parse(lastStep.at))
@@ -186,9 +187,10 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
+    ...(waitingForModelQuota?{waitingForModelQuota:true}:{}),
     ...(readable&&!isAgentActor(actor)&&isPersonalPlatformTask(c)&&['waiting_human','paused'].includes(state)
       &&questions.some(question=>!question.answeredAt&&!question.attachmentScopeCorrection)?{canSupplementAttachments:true}:{}),
-    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions,resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
+    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(!waitingForModelQuota&&c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions,resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
@@ -297,7 +299,7 @@ export async function claimTask(db: any, actor: AgentActor, workspaceId: string,
   if (c.expiresAt <= now || usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT) fail('AGENT_TASK_BUDGET', '任务已达到执行限额', 409);
   if ((c.platform?.providerRetryAt ?? 0) > now) return {item:taskView(c,actor,now)};
   const n = next(c, now, 'claimed', requestId, [workerId]); n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;
-  if (pendingProposalIds.length) { n.state = 'waiting_human'; n.waitingProposalIds = pendingProposalIds; await save(db, row, c, n); await event(db, n, actor, 'waiting_human', requestId, now); return { item: taskView(n, actor, now) }; }
+  if (pendingProposalIds.length) { n.state = 'waiting_human'; n.waitingProposalIds = pendingProposalIds; if(n.platform)n.platform={...n.platform,waitingForModelQuota:undefined}; await save(db, row, c, n); await event(db, n, actor, 'waiting_human', requestId, now); return { item: taskView(n, actor, now) }; }
   const runId = randomUUID(), nonce = randomUUID(), token = make(workspaceId, c.id, runId, nonce);
   n.state = 'running'; n.lease = { id: runId, nonce, grantHash: hash(token), startedAt: now, heartbeatAt: now, sequence: 0, expiresAt: Math.min(now + TASK_LEASE_MS, n.expiresAt, now + RUNTIME_LIMIT - n.runtimeUsedMs), claimRequestId: requestId, workerId };
   n.lastHeartbeatAt=now;
@@ -343,7 +345,7 @@ export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLe
   const step=newPlatformTaskStep(plan,now);
   if(prefetched)step.prefetched=true;
   else if(c.lease?.modelTurnAt!==undefined)step.modelTurnAt=c.lease.modelTurnAt;
-  const n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],modelFallbackAt:undefined,issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined}};
+  const n={...next(c,now,'model_plan','plan-'+step.id,plan),platform:{...c.platform,steps:[...c.platform.steps,step],modelFallbackAt:undefined,issue:undefined,retryAt:undefined,failures:0,checkpointBeforeIssue:undefined,waitingForModelQuota:prefetched?c.platform.waitingForModelQuota:undefined}};
   if(step.modelTurnAt!==undefined)n.lease={...c.lease!,modelTurnAt:undefined};
   if(c.platform.checkpointBeforeIssue!==undefined)n.checkpoint=c.platform.checkpointBeforeIssue;
   await save(db,row,c,n);return step;
@@ -365,12 +367,15 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
   if(issue==='quota_pending'){
-    await save(db,row,c,{...c,version:c.version+1,state:'queued',runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:now+1000}});
+    await save(db,row,c,{...c,version:c.version+1,state:'queued',runtimeUsedMs:usedRuntime(c,now),lease:undefined,
+      checkpoint:c.platform.checkpointBeforeIssue??c.checkpoint,
+      platform:{...c.platform,nextRunAt:now+1000,waitingForModelQuota:true,issue:undefined,retryAt:undefined,
+        providerRetryAt:undefined,modelFallbackAt:undefined,checkpointBeforeIssue:undefined}});
     return;
   }
   if(issue==='daily_limit'){
     // 用量上限不是模型故障：立即暂停、不计失败次数；本人次日恢复后从原步骤继续。
-    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,modelFallbackAt:undefined,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
+    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,modelFallbackAt:undefined,retryAt:undefined,waitingForModelQuota:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
     await save(db,row,c,n);await event(db,n,actor,'model_paused',requestId,now);return;
   }
   const deferred = issue === 'model_cooldown';
@@ -385,7 +390,7 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
     ? Math.min(c.expiresAt, providerRetryAt) : undefined;
   const paused = !!issue && !deferred && failures >= 3;
   const visibleIssue = deferred ? 'model_unavailable' : issue;
-  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,providerRetryAt:providerDeadline,issue:visibleIssue,failures}};
+  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,providerRetryAt:providerDeadline,waitingForModelQuota:undefined,issue:visibleIssue,failures}};
   if(visibleIssue)n.checkpoint=AGENT_TASK_ISSUE_LABEL[visibleIssue]+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
   if(issue)n.platform.checkpointBeforeIssue=c.platform.checkpointBeforeIssue??c.checkpoint;
   await save(db,row,c,n);await event(db,n,actor,action,requestId,now);
@@ -481,7 +486,7 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
     const providerRetryAt=action!=='cancel'&&(n.platform.providerRetryAt??0)>now?n.platform.providerRetryAt:undefined;
     const retryAt=n.state==='queued'?providerRetryAt:undefined;
     const nextRunAt=n.state==='waiting_time'?n.resumeAt!:n.state==='waiting_condition'?Math.min(n.condition!.nextCheckAt,now):retryAt??0;
-    n.platform={...n.platform,nextRunAt,retryAt,providerRetryAt,issue:retryAt?'model_unavailable':undefined,checkpointBeforeIssue:undefined};
+    n.platform={...n.platform,nextRunAt,retryAt,providerRetryAt,issue:retryAt?'model_unavailable':undefined,checkpointBeforeIssue:undefined,waitingForModelQuota:undefined};
   }
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
 }
@@ -648,15 +653,36 @@ export async function resolveTaskCredential(db: any, token: unknown, now: number
  * 费用按 2026-11-04 定案记到公司；收费与结算本期不做，这里只提供计量。
  */
 export type AgentDailyUsage = { date: string; tasks: number; turns: number; companyTurns: number; limits: ReturnType<typeof agentDailyLimits> };
-export async function reservePlatformModelTurn(db:any,actor:AgentActor,lease:AgentTaskLease,now:number):Promise<'reserved'|'pending'|'limit'>{
-  const {row,value:c}=await assertTaskLease(db,actor,lease,now,true);
-  if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.lease)fail('FORBIDDEN','请使用平台任务执行器',403);
-  if(c.lease.modelTurnAt!==undefined)return 'pending';
-  // The same serializable transaction reads company usage and writes the reservation.
-  const {usage,pending,companyPending}=await readAgentDailyUsage(db,lease.workspaceId,actor.userId,now,process.env);
+async function platformModelQuotaStatus(db:any,workspaceId:string,ownerId:string,now:number):Promise<'available'|'pending'|'limit'>{
+  const {usage,pending,companyPending}=await readAgentDailyUsage(db,workspaceId,ownerId,now,process.env);
   if(usage.turns>=usage.limits.turnsPerUser||usage.companyTurns>=usage.limits.turnsPerCompany)return 'limit';
   if(usage.turns+pending>=usage.limits.turnsPerUser||usage.companyTurns+companyPending>=usage.limits.turnsPerCompany)return 'pending';
-  await save(db,row,c,{...c,version:c.version+1,lease:{...c.lease,modelTurnAt:now}});
+  return 'available';
+}
+
+/** Recheck temporary quota pressure without taking another lease or writing a claim event. */
+export async function deferPlatformQuotaClaim(db:any,actor:AgentActor,task:TaskRecord,now:number):Promise<boolean>{
+  if(task.state!=='queued'||!task.platform?.waitingForModelQuota)return false;
+  await lockTaskRecord(db,task.workspaceId,task.id);
+  const {row,value:c}=await taskRecord(db,task.workspaceId,task.id);
+  if(c.state!=='queued'||!c.platform?.waitingForModelQuota)return false;
+  await assertTaskAuthority(db,actor,c,now);
+  if(c.platform.nextRunAt>now)return true;
+  // A confirmed daily cap must reach the regular pause flow. A released hold can be reserved normally.
+  if(await platformModelQuotaStatus(db,c.workspaceId,c.ownerId,now)!=='pending')return false;
+  await save(db,row,c,{...c,version:c.version+1,platform:{...c.platform,nextRunAt:now+1000}});
+  return true;
+}
+
+export async function reservePlatformModelTurn(db:any,actor:AgentActor,lease:AgentTaskLease,now:number):Promise<'reserved'|'pending'|'limit'>{
+  const {row,value:c}=await assertTaskLease(db,actor,lease,now,true);
+  if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.lease||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
+  if(c.lease.modelTurnAt!==undefined)return 'pending';
+  // The same serializable transaction reads company usage and writes the reservation.
+  const status=await platformModelQuotaStatus(db,lease.workspaceId,actor.userId,now);
+  if(status!=='available')return status;
+  await save(db,row,c,{...c,version:c.version+1,lease:{...c.lease,modelTurnAt:now},
+    platform:{...c.platform,waitingForModelQuota:undefined}});
   return 'reserved';
 }
 /**
@@ -753,7 +779,8 @@ export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | u
       && { executionStageSince: view.executionStageSince }),
     ...(view.modelFallbackSince && { modelFallbackSince: view.modelFallbackSince }),
     ...(view.runnerStatus && { runnerStatus: view.runnerStatus }),
-    ...(view.state === 'queued' && view.executionIssue?.retryAt && { retrying: true }),
+    ...(view.state === 'queued' && view.waitingForModelQuota && { waitingForModelQuota: true }),
+    ...(view.state === 'queued' && !view.waitingForModelQuota && view.executionIssue?.retryAt && { retrying: true }),
     ...(currentStep && { currentStep }),
   };
 }

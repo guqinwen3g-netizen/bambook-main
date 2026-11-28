@@ -68,6 +68,8 @@ export type AgentTaskView = {
   /** Start of the same-turn backup model attempt. */
   modelFallbackSince?: string;
   executionIssue?:{code:AgentTaskIssueCode;retryAt?:string};
+  /** The task is queued while available model quota is reserved by active work. */
+  waitingForModelQuota?: true;
   /** Absent in older servers; questions and answers use the task's existing content visibility. */
   questions?:AgentTaskQuestion[];
   resumeAt?:string|null;
@@ -100,6 +102,7 @@ export type AgentTaskActivity = {
   modelFallbackSince?: AgentTaskView['modelFallbackSince'];
   runnerStatus?: AgentTaskView['runnerStatus'];
   retrying?: boolean;
+  waitingForModelQuota?: true;
   currentStep?: string;
 };
 export type AgentTaskEvent = { action: string; at: string; actorId: string; actorName: string; version: number; state: AgentTaskState };

@@ -5,7 +5,7 @@ import{tmpdir}from'node:os';import path from'node:path';import{randomUUID}from'n
 import{createMistLocalRuntime}from'./local';import{createMistServer}from'./server';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
 import type{LlmCompletionInput}from'../ai/llmProviders';
-import{agentDailyUsage,taskRecord}from'./agentTasks';
+import{agentDailyUsage,TASK_FIELD,taskRecord,taskView}from'./agentTasks';
 import{agentDailyLimits}from'./agentLimits';
 import{mistBusinessDate}from'../shared/mistBusinessClock';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
@@ -108,8 +108,19 @@ it.each([false,true])('reserves the last daily model turn for one task (first mo
   const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;
   f.worker.start(3_600_000);
   await f.create('platform').expect(201);await f.drain();
-  const tasks=[];
-  for(let i=0;i<2;i++)tasks.push((await f.create('platform').expect(201)).body.item.id as string);
+  const tasks:string[]=[];
+  for(let i=0;i<2;i++)tasks.push((await f.human.post(f.base+'/personal-agent/tasks').send({
+   requestId:randomUUID(),name:'核对模拟来信',instructions:'核对模拟来信。',
+  }).expect(201)).body.item.id);
+  await f.local.database.$transaction(async db=>{
+   for(const id of tasks){
+    const {row,value}=await taskRecord(db,f.workspace.id,id);
+    await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{revision:0,[TASK_FIELD]:{
+     ...value,checkpoint:'模型响应超时，稍后重试。',platform:{...value.platform,issue:'model_timeout',retryAt:clock-1,
+      providerRetryAt:clock-1,checkpointBeforeIssue:'已核对来信底稿。',failures:1},
+    }}}});
+   }
+  });
   const current=()=>Promise.all(tasks.map(id=>taskRecord(f.local.database,f.workspace.id,id).then(({value})=>value)));
   await f.worker.tick();
   await vi.waitFor(async()=>{
@@ -118,8 +129,33 @@ it.each([false,true])('reserves the last daily model turn for one task (first mo
   });
   expect(complete).toHaveBeenCalledTimes(10);
   expect((await agentDailyUsage(f.local.database,f.workspace.id,'local-operator',clock)).turns).toBe(9);
+  const waiting=(await current()).find(task=>task.state==='queued')!;
+  const detail=f.base+'/agent-tasks/'+waiting.id;
+  const history=async()=>((await f.human.get(detail+'/history').expect(200)).body.items as {action:string}[])
+   .filter(event=>event.action==='claimed');
+  const item=(await f.human.get(detail).expect(200)).body.item;
+  expect(item).toMatchObject({state:'queued',waitingForModelQuota:true,checkpoint:'已核对来信底稿。'});
+  expect(item).not.toHaveProperty('executionIssue');
+  const actor=await f.local.actorForProfile('local-operator');
+  expect(taskView(waiting,actor,clock,false)).not.toHaveProperty('waitingForModelQuota');
+  const activity=(await f.human.get(f.base+'/personal-agent/activity').expect(200)).body.items;
+  expect(activity.find((item:{id:string})=>item.id===waiting.id)).toEqual({
+   id:waiting.id,name:'核对模拟来信',state:'queued',waitingForModelQuota:true,
+  });
+  expect(await history()).toHaveLength(1);
+  for(let i=0;i<2;i++){
+   clock+=1001;await f.worker.tick();
+   await vi.waitFor(async()=>{
+    const again=(await current()).find(task=>task.id===waiting.id)!;
+    expect(again).toMatchObject({state:'queued',platform:{waitingForModelQuota:true,nextRunAt:clock+1000,failures:1}});
+    expect(again.lease).toBeUndefined();
+   });
+  }
+  expect(await history()).toHaveLength(1);
+  expect(complete).toHaveBeenCalledTimes(10);
   finish();await f.worker.settled();clock+=1001;await f.drain();
   expect((await current()).map(task=>task.state).sort()).toEqual([firstFails?'queued':'paused','succeeded']);
+  expect((await f.human.get(detail).expect(200)).body.item).not.toHaveProperty('waitingForModelQuota');
   expect(complete).toHaveBeenCalledTimes(firstFails?11:10);
   expect((await agentDailyUsage(f.local.database,f.workspace.id,'local-operator',clock)).turns).toBe(10);
  }finally{finish();}

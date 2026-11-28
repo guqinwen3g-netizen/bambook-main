@@ -51,7 +51,7 @@ import { taskHistoryReadRefs, taskIntentRefsVisible, validateTaskIntentRefs } fr
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
 import {parseTaskAccessIds,personalTaskActivity,personalTaskActivityCandidates,UNFINISHED_TASK_STATES} from './agentTasks';
 import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTasks';
-import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,reservePlatformModelTurn} from './agentTasks';
+import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,deferPlatformQuotaClaim,reservePlatformModelTurn} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import {requestedTaskAttachmentScope,explicitPdfVisualPages,requestsProvidedMaterialsOnly,retryAttachmentReadScope,type PlatformTaskContext,type PlatformTaskPlan,type TaskAttachmentReadScope} from './platformTaskPlan';
@@ -322,7 +322,9 @@ export class MistRepository {
       if(c.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,c);
       await this.assertTaskHistorySources(db,row,actor,c);
       const pending=(row.state.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId&&p.state==='pending').map(p=>p.id);
-      const result=await claimTask(db,{...prior,...actor,agentExecutor:'platform'},c.workspaceId,c.id,{requestId:randomUUID(),workerId},make,Date.now(),pending);
+      const claimActor={...prior,...actor,agentExecutor:'platform' as const},now=Date.now();
+      if(!pending.length&&await deferPlatformQuotaClaim(db,claimActor,c,now))return null;
+      const result=await claimTask(db,claimActor,c.workspaceId,c.id,{requestId:randomUUID(),workerId},make,now,pending);
       if(!result.token)return null;const execution=await this.platformActor(await resolveTaskCredential(db,result.token,Date.now()));execution.agentExecutor='platform';execution.agentTaskWorkerId=workerId;return execution;
     });
   }
