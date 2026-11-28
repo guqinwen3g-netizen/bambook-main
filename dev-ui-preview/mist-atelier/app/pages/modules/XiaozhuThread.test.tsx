@@ -78,6 +78,17 @@ it('shows a timed-out attempt and the resumed retry as distinct stages',async()=
  expect(getByRole(host,'status').textContent).toBe('正在等待模型');
 });
 
+it('offers a receipt check on the original completed task after automatic recovery is exhausted',async()=>{
+ const onCheckAttachmentReceipt=vi.fn(),actions={...fns(),onCheckAttachmentReceipt,
+  controls:{t1:{busy:false,attachmentReceiptPending:true as const}}};
+ const completed=task({state:'succeeded',result:'已完成'});
+ await paint([completed],actions);
+ await act(async()=>getByRole(host,'button',{name:'核对附件回执',exact:true}).click());
+ expect(onCheckAttachmentReceipt).toHaveBeenCalledExactlyOnceWith('t1');
+ await paint([{...completed,contentRestricted:true}],actions);
+ expect(queryByRole(host,'button',{name:'核对附件回执',exact:true})).toBeNull();
+});
+
 it('exposes a focused recheck while task progress is stale',async()=>{
  const waiting=task({state:'running',executionStage:'model'});
  const onRecheckProgress=vi.fn(async()=>{});

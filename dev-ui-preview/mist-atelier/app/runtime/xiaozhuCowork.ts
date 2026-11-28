@@ -184,7 +184,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
-export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string; attachmentAnswerRecovered?:boolean };
+export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string; attachmentAnswerRecovered?:boolean; attachmentReceiptPending?:true; attachmentReceiptChecking?:true; attachmentReceiptRequestId?:string };
 const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试',resume:'继续结果未确认，可重试'};
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>, controlStorageScope?:string) {
@@ -256,17 +256,22 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
   },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
-  const recoverAttachmentAnswers=React.useCallback(():void=>{
+  const recoverAttachmentAnswers=React.useCallback((manualTaskId?:string):void=>{
     if(!base||!enabled||!navigator.onLine||document.visibilityState==='hidden')return;
     for(const task of currentTasks.current){
+      if(manualTaskId&&task.id!==manualTaskId)continue;
       const pending=controlKeys.get(task.id);
       if(pending?.action!=='answer'||!pending.hasAttachments||task.contentRestricted||controlRequests.current.has(task.id)
         ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt))continue;
       const previous=attachmentAnswerChecks.get(pending.requestId);
-      if(previous&&!previous.ready)continue;
+      if(manualTaskId ? !previous||previous.controller||previous.timer!==undefined : previous&&!previous.ready)continue;
       const controller=new AbortController(),authority=deniedHistory.current;
       const check:AttachmentReceiptCheck={attempt:(previous?.attempt??0)+1,controller};
       attachmentAnswerChecks.set(pending.requestId,check);
+      const updateReceipt=(fields:Pick<TaskControlState,'attachmentAnswerRecovered'|'attachmentReceiptPending'|'attachmentReceiptChecking'|'attachmentReceiptRequestId'>)=>
+        setControls(old=>({...old,[task.id]:{...(old[task.id]??{busy:false}),...fields}}));
+      setControls(old=>old[task.id]?.attachmentReceiptPending&&old[task.id].attachmentReceiptRequestId===pending.requestId
+        ? {...old,[task.id]:{...old[task.id],attachmentReceiptChecking:true}}:old);
       const current=()=>navigator.onLine&&!controller.signal.aborted&&deniedHistory.current===authority
         &&live.current===scope&&attachmentAnswerChecks.get(pending.requestId)===check
         &&controlKeys.get(task.id)===pending&&currentTasks.current.some(item=>item.id===task.id&&!item.contentRestricted);
@@ -278,14 +283,22 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         if(!current())return;
         forget();
         setTasks(old=>old.map(previous=>mergeTaskUpdate(previous,item)));
-        setControls(old=>({...old,[task.id]:{busy:false,attachmentAnswerRecovered:true}}));
+        updateReceipt({attachmentAnswerRecovered:true,attachmentReceiptPending:undefined,attachmentReceiptChecking:undefined,attachmentReceiptRequestId:undefined});
       },error=>{
         if(!current())return;
         const status=Number((error as {status?:number})?.status);
         // An answered question with no receipt for this request belongs to a different submission.
-        if(status===404){forget();return;}
-        const delay=ATTACHMENT_RECEIPT_RETRY_DELAYS[check.attempt-1];
-        if(delay===undefined||status===429||!transientHistoryRead(status))return;
+        if(status===404){
+          forget();
+          updateReceipt({attachmentReceiptPending:undefined,attachmentReceiptChecking:undefined,attachmentReceiptRequestId:undefined});
+          return;
+        }
+        const transient=transientHistoryRead(status);
+        const delay=manualTaskId?undefined:ATTACHMENT_RECEIPT_RETRY_DELAYS[check.attempt-1];
+        if(delay===undefined||status===429||!transient){
+          updateReceipt({attachmentReceiptPending:transient?true:undefined,attachmentReceiptChecking:undefined,attachmentReceiptRequestId:transient?pending.requestId:undefined});
+          return;
+        }
         check.timer=window.setTimeout(()=>{
           if(attachmentAnswerChecks.get(pending.requestId)!==check)return;
           check.timer=undefined;
@@ -311,13 +324,24 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       recoverAttachmentAnswers();
     };
-    window.addEventListener('offline',abortAttachmentAnswerChecks);
+    const disconnect=()=>{
+      abortAttachmentAnswerChecks();
+      setControls(old=>{
+        const checking=Object.keys(old).filter(id=>old[id].attachmentReceiptChecking);
+        if(!checking.length)return old;
+        const next={...old};
+        for(const id of checking)next[id]={...next[id],attachmentReceiptChecking:undefined};
+        return next;
+      });
+    };
+    const visible=()=>recoverAttachmentAnswers();
+    window.addEventListener('offline',disconnect);
     window.addEventListener('online',reconnect);
-    document.addEventListener('visibilitychange',recoverAttachmentAnswers);
+    document.addEventListener('visibilitychange',visible);
     return()=>{
-      window.removeEventListener('offline',abortAttachmentAnswerChecks);
+      window.removeEventListener('offline',disconnect);
       window.removeEventListener('online',reconnect);
-      document.removeEventListener('visibilitychange',recoverAttachmentAnswers);
+      document.removeEventListener('visibilitychange',visible);
       abortAttachmentAnswerChecks();
     };
   },[abortAttachmentAnswerChecks,recoverAttachmentAnswers,attachmentAnswerChecks]);
@@ -1126,6 +1150,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const pending=controlKeys.get(task.id),previous=controls[task.id];
     const matching=pending&&pending.version===task.version&&!task.contentRestricted&&task.canControl!==false;
     if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
+    if(previous?.attachmentReceiptPending&&(
+      task.contentRestricted||pending?.action!=='answer'||!pending.hasAttachments||pending.requestId!==previous.attachmentReceiptRequestId
+      ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt)
+    ))visibleControls[task.id]={...visibleControls[task.id],attachmentReceiptPending:undefined,attachmentReceiptChecking:undefined};
     if(!previous&&matching&&task.canControl)
       visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
     if(matching&&pending.action!=='resume'&&visibleControls[task.id]?.error) {
@@ -1133,5 +1161,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         ? {canCheckStop:true} : pending.action==='answer' ? {answerQuestionToCheck:pending.questionId} : {})};
     }
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts('manual',visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, submittingHere, send, refreshTask, answer, checkAnswer, cancel, checkStop, resume, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts('manual',visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, submittingHere, send, refreshTask, answer, checkAnswer, checkAttachmentReceipt:recoverAttachmentAnswers, cancel, checkStop, resume, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }

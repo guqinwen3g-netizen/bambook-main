@@ -217,6 +217,7 @@ export type ThreadActions = {
   controls?: Record<string,TaskControlState>;
   staleProgressIds?: ReadonlySet<string>;
   onRecheckProgress?: (taskId: string) => Promise<void>;
+  onCheckAttachmentReceipt?: (taskId: string) => void;
   offerProgressRecheck?: boolean;
   workLog?: { expanded: ReadonlyMap<string, boolean>; setExpanded: (taskId: string, expanded: boolean) => void };
   composerStopTaskId?: string;
@@ -327,6 +328,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
+          {control?.attachmentReceiptPending&&!t.contentRestricted&&actions.onCheckAttachmentReceipt&&<Button size="sm" variant="quiet"
+            loading={control.attachmentReceiptChecking} disabled={control.attachmentReceiptChecking}
+            onClick={()=>actions.onCheckAttachmentReceipt?.(t.id)}>{uiText('核对附件回执')}</Button>}
           {active && (progressStale || actions.offerProgressRecheck) && actions.onRecheckProgress && <ProgressRecheck taskId={t.id} onRead={actions.onRecheckProgress} />}
           {missingProposals && actions.onRefreshProposals && <Button size="sm" variant="quiet"
             disabled={actions.refreshingProposals} loading={actions.refreshingProposals}
