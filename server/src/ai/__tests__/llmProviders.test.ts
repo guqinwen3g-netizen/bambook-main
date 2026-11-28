@@ -43,6 +43,65 @@ function okCompletion(text: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
 }
 
+it('only exposes the longest observed retry delay when the provider chain is exhausted',async()=>{
+ process.env.ARK_API_KEY='primary-key';
+ process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
+ process.env.BAMBOOK_LLM_BACKUP_KEY='backup-key';
+ const clock=Date.now(),time=vi.spyOn(Date,'now').mockReturnValue(clock);
+ const busy=(seconds:number)=>new Response('{}',{status:429,headers:{'Retry-After':String(seconds)}});
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(busy(45)).mockResolvedValueOnce(okCompletion('backup report'))
+  .mockResolvedValueOnce(busy(45)).mockResolvedValueOnce(busy(75));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProviders:{chain:()=>[]}});
+  await expect(complete(BASE_INPUT)).resolves.toBe('backup report');
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore:clock+75_000});
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+ }finally{time.mockRestore();}
+});
+
+it('skips a cooling provider across agent turns and isolates a replaced credential',async()=>{
+ process.env.ARK_API_KEY='first-key';
+ let clock=Date.now();
+ const time=vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(new Response('{}',{status:429,headers:{'Retry-After':'60'}}))
+  .mockResolvedValueOnce(okCompletion('new credential'))
+  .mockResolvedValueOnce(okCompletion('resumed original'));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]}});
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore:clock+60_000});
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({message:'LLM_PROVIDER_COOLDOWN',retryNotBefore:clock+60_000});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  process.env.ARK_API_KEY='replacement-key';
+  await expect(complete(BASE_INPUT)).resolves.toBe('new credential');
+  process.env.ARK_API_KEY='first-key';clock+=60_000;
+  await expect(complete(BASE_INPUT)).resolves.toBe('resumed original');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+ }finally{time.mockRestore();}
+});
+
+it('rechecks authority before using a ready fallback when the primary is cooling down',async()=>{
+ process.env.ARK_API_KEY='primary-key';
+ process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
+ process.env.BAMBOOK_LLM_BACKUP_KEY='backup-key';
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(new Response('{}',{status:429,headers:{'Retry-After':'60'}}))
+  .mockResolvedValueOnce(okCompletion('first alternate'))
+  .mockResolvedValueOnce(okCompletion('second alternate'));
+ vi.stubGlobal('fetch',fetchMock);
+ const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]}});
+ const beforeFallback=vi.fn(async()=>{});
+ await expect(complete({...BASE_INPUT,beforeFallback})).resolves.toBe('first alternate');
+ await expect(complete({...BASE_INPUT,beforeFallback})).resolves.toBe('second alternate');
+ expect(beforeFallback).toHaveBeenCalledTimes(2);
+ expect(fetchMock).toHaveBeenCalledTimes(3);
+ await expect(complete({...BASE_INPUT,beforeFallback:async()=>{throw Error('权限已变化');}})).rejects.toThrow('权限已变化');
+ expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
 describe('A. resolveLlmProviderChain', () => {
   it('无任何 key → 空链', () => {
     expect(resolveLlmProviderChain()).toEqual([]);
