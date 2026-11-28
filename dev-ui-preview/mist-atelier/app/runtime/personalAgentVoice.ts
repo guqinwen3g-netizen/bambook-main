@@ -6,11 +6,13 @@ import { RealtimePcmPlayer } from './voiceAudio';
 import { withRequestDeadline } from './requestDeadline';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
-type Resources = { socket?: WebSocket; stream?: MediaStream; player?: RealtimePcmPlayer; capture?: AudioWorkletNode; source?: MediaStreamAudioSourceNode; gain?: GainNode; timer?: ReturnType<typeof setInterval>; setup?: AbortController; readyTimer?: number };
+type Resources = { socket?: WebSocket; stream?: MediaStream; player?: RealtimePcmPlayer; capture?: AudioWorkletNode; source?: MediaStreamAudioSourceNode; gain?: GainNode; timer?: ReturnType<typeof setInterval>; setup?: AbortController; readyTimer?: number; heartbeatInterval?: number; heartbeatDeadline?: number };
 type VoiceTaskBinding = { taskId: string; questionId?: string };
 const VOICE_SETUP_TIMEOUT_MS = 10_000;
 // Allow the server's 15-second handshake deadline to report its own result.
 const VOICE_READY_TIMEOUT_MS = 18_000;
+const VOICE_HEARTBEAT_INTERVAL_MS = 10_000;
+const VOICE_HEARTBEAT_REPLY_MS = 12_000;
 const VOICE_TIMEOUT = '语音连接超时，请重试';
 const VOICE_DISCONNECTED = '语音已断开，已交办事项继续执行';
 /** A call stays with its original account, company and conversation. */
@@ -28,6 +30,8 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
     const r = resources.current; resources.current = {};
     r.setup?.abort();
     window.clearTimeout(r.readyTimer);
+    window.clearTimeout(r.heartbeatDeadline);
+    window.clearInterval(r.heartbeatInterval);
     if (r.timer) clearInterval(r.timer);
     r.stream?.getTracks().forEach(track => track.stop());
     r.capture?.disconnect(); r.source?.disconnect(); r.gain?.disconnect();
@@ -110,11 +114,22 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
             socket.send(data);
           };
           setState('listening');
+          if (message.heartbeat === true) {
+            r.heartbeatInterval = window.setInterval(() => {
+              if (!current() || r.heartbeatDeadline !== undefined) return;
+              if (socket.readyState !== WebSocket.OPEN) { fail(VOICE_DISCONNECTED); return; }
+              r.heartbeatDeadline = window.setTimeout(() => fail(VOICE_DISCONNECTED), VOICE_HEARTBEAT_REPLY_MS);
+              socket.send(JSON.stringify({ type: 'ping' }));
+            }, VOICE_HEARTBEAT_INTERVAL_MS);
+          }
           r.timer = setInterval(() => {
             if (!current()) return;
             if (context.state === 'closed') { fail('语音设备已关闭，已交办事项继续执行'); return; }
             setState(r.player?.isPlaying() ? 'speaking' : 'listening');
           }, 150);
+        } else if (message.type === 'pong') {
+          window.clearTimeout(r.heartbeatDeadline);
+          r.heartbeatDeadline = undefined;
         } else if (message.type === 'speech_started' || message.type === 'speech_stopped') { r.player?.stop(); setReply(''); }
         else if (message.type === 'transcript') setTranscript(String(message.text ?? ''));
         else if (message.type === 'reply') setReply(previous => message.final ? String(message.text ?? '') : previous + String(message.text ?? ''));

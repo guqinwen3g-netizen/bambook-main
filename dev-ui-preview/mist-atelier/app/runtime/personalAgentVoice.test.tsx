@@ -225,6 +225,28 @@ it('cancels the deadline once the voice connection is ready', async () => {
   } finally { vi.useRealTimers(); }
 });
 
+it('ends a silent voice connection that stops returning heartbeats', async () => {
+  vi.useFakeTimers();
+  try {
+    await click('start');
+    const socket = Socket.instances[0];
+    act(() => socket.event({ type: 'ready', heartbeat: true }));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(socket.send.mock.calls.map(([message]) => JSON.parse(message))).toEqual([{ type: 'ping' }]);
+    act(() => socket.event({ type: 'pong' }));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(socket.send).toHaveBeenCalledTimes(2);
+    expect(latestVoice.state).toBe('listening');
+    await act(async () => vi.advanceTimersByTimeAsync(12_000));
+    expect(latestVoice.error).toBe('语音已断开，已交办事项继续执行');
+    expect(tracks[0].stop).toHaveBeenCalledOnce();
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(seam.close).toHaveBeenCalledOnce();
+    act(() => socket.event({ type: 'pong' }));
+    expect(latestVoice.state).toBe('error');
+  } finally { vi.useRealTimers(); }
+});
+
 it('leaves the native microphone permission prompt pending until the user decides', async () => {
   vi.useFakeTimers();
   let grant: ((value: unknown) => void) | undefined;
