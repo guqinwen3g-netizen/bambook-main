@@ -53,7 +53,14 @@ it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a request
     await flush();
     const scroll=document.querySelector<HTMLElement>('.mist-viewer-pages')!;
     expect(scroll.scrollTop).toBe(Number(pageOffset)*100);
-    scroll.scrollTop=1234;
+    const pageLabel = () => document.querySelector('.mist-viewer-title .mist-muted')?.textContent;
+    expect(pageLabel()).toContain(`第 ${Number(pageOffset)+1} 页，共 23 页`);
+    await act(async () => {
+      scroll.scrollTop=1234;
+      scroll.dispatchEvent(new Event('scroll'));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    });
+    expect(pageLabel()).toContain('第 13 页，共 23 页');
     await act(async()=>btn('放大').click());
     await flush();
     expect(scroll.scrollTop).toBe(1234);

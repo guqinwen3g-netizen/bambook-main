@@ -479,7 +479,7 @@
 .mist-viewer-image { display: flex; padding: 16px; }
 .mist-viewer-frame { margin: auto; display: flex; align-items: center; justify-content: center; flex: none; }
 .mist-viewer-frame img { display: block; flex: none; max-width: none; transform-origin: center; transition: transform .2s var(--mist-ease); }
-.mist-viewer-pages { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px; }
+.mist-viewer-pages { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px; }
 .mist-viewer-page { flex: none; background: white; border-radius: var(--mist-r-xs); overflow: hidden; }
 .mist-viewer-page canvas { display: block; }
 .mist-viewer-docx { padding: 8px 0; }
