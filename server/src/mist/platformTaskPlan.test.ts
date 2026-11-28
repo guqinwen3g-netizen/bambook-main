@@ -222,6 +222,37 @@ it('limits a PDF visual read requested after the user adds the missing originals
   expect(worksheet).toMatchObject({fileId:'sheet',worksheet:'报价',rows:[{from:23,to:23}]});
 });
 
+it('uses the page restriction in the answer that supplied the PDF and only narrows the original request',()=>{
+ const file={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200};
+ const answered={id:'q',question:'请补交扫描原件。',askedAt:'',answeredAt:'2026-11-28T00:01:00Z',
+  answer:'请目视核对 scan.pdf 第 3 页。',attachmentIds:[file.id]};
+ const fresh=requestedTaskAttachmentScope([file],'请先问我补交原件。',[answered]);
+ expect(fresh.pdfRanges.get(file.id)).toEqual({from:3,to:3});
+ expect(fresh.pdfVisualRanges.get(file.id)).toEqual({from:3,to:3});
+ const narrowed=requestedTaskAttachmentScope([file],'请只读 scan.pdf 第 2 至第 4 页。',[answered]);
+ expect(narrowed.pdfRanges.get(file.id)).toEqual({from:3,to:3});
+ const wider={...answered,answer:'请只读 scan.pdf 第 1 至第 5 页。'};
+ expect(requestedTaskAttachmentScope([file],'请只读 scan.pdf 第 2 至第 4 页。',[wider]).pdfRanges.get(file.id))
+  .toEqual({from:2,to:4});
+ expect(requestedTaskAttachmentScope([file],'请只读 scan.pdf 第 2 页。',[answered]).pdfScopeConflict).toBe(true);
+ expect(requestedTaskAttachmentScope([file],'请先问我补交原件。',[{...answered,attachmentIds:['other']}]).pdfRanges.size).toBe(0);
+});
+
+it('does not reopen a file excluded by the original request when it is later supplied with an answer',()=>{
+ const scan={id:'scan',name:'scan.pdf',mimeType:'application/pdf',size:1200},extra={...scan,id:'extra',name:'extra.pdf'};
+ const answered={id:'q',question:'请补交原件。',askedAt:'',answeredAt:'2026-11-28T00:01:00Z',attachmentIds:[extra.id],
+  answer:'请只读取 extra.pdf 第 3 页。'};
+ const scope=requestedTaskAttachmentScope([scan,extra],'请只读取 scan.pdf 第 2 页。不要读取其他附件。',[answered]);
+ expect([...scope.allowedFiles!]).toEqual(['scan']);
+});
+
+it('intersects an Excel row scope from the answer with the original scope',()=>{
+ const file={id:'sheet',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:1200};
+ const answered={id:'q',question:'请补交表格。',askedAt:'',answeredAt:'2026-11-28T00:01:00Z',attachmentIds:[file.id],
+  answer:'请只读取 quote.xlsx 的工作表「报价」第 45 至第 47 行。'};
+ expect(requestedTaskAttachmentScope([file],'请只读取 quote.xlsx 的工作表「报价」第 23 至第 46 行。',[answered]).worksheet)
+  .toMatchObject({fileId:file.id,worksheet:'报价',rows:[{from:45,to:46}]});
+});
 it('binds a PDF page limit to an exact name or numbered original in its own clause',()=>{
  const named={id:'terms',name:'terms.pdf',mimeType:'application/pdf',size:1};
  const files=[...mixedFiles,named];

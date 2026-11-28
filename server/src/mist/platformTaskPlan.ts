@@ -267,10 +267,11 @@ const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|nev
  */
 function requestedPdfVisualRanges(instructions:string,pdfRanges:ReadonlyMap<string,PdfPageScope>,pdfVisualRanges:ReadonlyMap<string,PdfPageScope>){
   const request=splitTaskRequest(instructions);
-  if(!/目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)
-    ||/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request))
+  if(/(?:不要|禁止|无需|不用|不必|不需要)\s*(?:(?:用|使用|进行)\s*)?(?:目视|按图片|看图|OCR)|\b(?:do not|don't|without)\s+(?:(?:use|perform)\s+)?(?:OCR|visually inspect)\b/i.test(request))
     return new Map<string,PdfPageScope>();
-  return pdfVisualRanges.size?pdfVisualRanges:pdfRanges.size===1?pdfRanges:new Map<string,PdfPageScope>();
+  if(pdfVisualRanges.size)return pdfVisualRanges;
+  return /目视|按图片|看图|用\s*OCR|进行\s*OCR|\b(?:visually inspect|use OCR)\b/i.test(request)&&pdfRanges.size===1
+    ?pdfRanges:new Map<string,PdfPageScope>();
 }
 
 function visualPageCount(ranges:ReadonlyMap<string,PdfPageScope>){
@@ -335,9 +336,58 @@ function selectVisualPdfPages(attachments:AgentTaskView['attachments'],instructi
   return {excluded};
 }
 
+function intersectRanges(left:readonly PdfPageRange[],right:readonly PdfPageRange[]):PdfPageRange[] {
+  return left.flatMap(first=>right.flatMap(second=>{
+    const from=Math.max(first.from,second.from),to=Math.min(first.to,second.to);
+    return from<=to?[{from,to}]:[];
+  }));
+}
+
+function narrowWorksheet(original:ReturnType<typeof requestedWorkbookWorksheet>,supplement:ReturnType<typeof requestedWorkbookWorksheet>) {
+  if(!supplement)return original;
+  if(!original)return supplement;
+  if(original.fileId&&supplement.fileId&&original.fileId!==supplement.fileId
+    ||original.worksheet&&supplement.worksheet&&original.worksheet!==supplement.worksheet)
+    return {...original,rowScopeConflict:true};
+  const worksheet=supplement.worksheet||original.worksheet;
+  const rows=original.rows&&supplement.rows?intersectRanges(original.rows,supplement.rows):supplement.rows??original.rows;
+  return {...original,worksheet,fileId:supplement.fileId??original.fileId,
+    workbookIds:[...new Set([...original.workbookIds,...supplement.workbookIds])],rows,
+    worksheetQuestion:worksheet?undefined:supplement.worksheetQuestion??original.worksheetQuestion,
+    rowScopeConflict:original.rowScopeConflict||supplement.rowScopeConflict||rows?.length===0};
+}
+
 export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
-  const {pdfRanges,pdfVisualRanges,pdfChoice,pdfScopeConflict,confirmedPdfChoices}=pdfSelection(attachments,instructions,questions);
-  const worksheet = requestedWorkbookWorksheet(attachments,instructions,questions);
+  const original=pdfSelection(attachments,instructions,questions);
+  const {pdfRanges,pdfVisualRanges,confirmedPdfChoices}=original;
+  let {pdfChoice,pdfScopeConflict}=original;
+  let worksheet=requestedWorkbookWorksheet(attachments,instructions,questions);
+  const originalAllowed=new Set(pdfRanges.keys());
+  if(worksheet?.fileId)originalAllowed.add(worksheet.fileId);
+  // A correction in a supplement applies only to the files delivered with
+  // that answer. It can narrow the task's original bounds, never expand them.
+  for(const question of questions){
+    if(!question.answeredAt||!question.answer||!question.attachmentIds?.length)continue;
+    const supplied=attachments.filter(file=>question.attachmentIds!.includes(file.id));
+    const supplemental=pdfSelection(supplied,question.answer,questions);
+    pdfScopeConflict||=supplemental.pdfScopeConflict;
+    pdfChoice??=supplemental.pdfChoice;
+    for(const fileId of supplemental.confirmedPdfChoices)confirmedPdfChoices.add(fileId);
+    for(const [fileId,requested] of supplemental.pdfRanges){
+      const previous=pdfRanges.get(fileId);
+      const ranges=previous?intersectRanges(previous.windows??[previous],requested.windows??[requested]):requested.windows??[requested];
+      if(!ranges.length){pdfScopeConflict=true;continue;}
+      pdfRanges.set(fileId,mergePdfRanges(ranges));
+      const existingImage=pdfVisualRanges.get(fileId),requestedImage=supplemental.pdfVisualRanges.get(fileId);
+      const image=existingImage??requestedImage;
+      if(!image)continue;
+      const selected=intersectRanges(ranges,image.windows??[image]);
+      const visual=existingImage&&requestedImage?intersectRanges(selected,requestedImage.windows??[requestedImage]):selected;
+      if(visual.length)pdfVisualRanges.set(fileId,mergePdfRanges(visual));
+      else pdfVisualRanges.delete(fileId);
+    }
+    worksheet=narrowWorksheet(worksheet,requestedWorkbookWorksheet(supplied,question.answer,questions));
+  }
   const request = splitTaskRequest(instructions);
   const allExcluded = EXCLUDE_ALL_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
@@ -351,8 +401,8 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   const siblings=attachments.filter(file=>!pdfRanges.has(file.id)&&(scopedNames.has(file.name)||confirmedPdfChoices.has(file.id)));
   if(!othersExcluded&&!siblings.length&&!visualSelection?.excluded.size)return {pdfRanges,pdfVisualRanges,worksheet,pdfChoice,pdfScopeConflict,pdfVisualChoice,pdfVisualCandidates};
 
-  const allowed=new Set(pdfRanges.keys());
-  if(worksheet?.fileId)allowed.add(worksheet.fileId);
+  const allowed=othersExcluded?originalAllowed:new Set(pdfRanges.keys());
+  if(!othersExcluded&&worksheet?.fileId)allowed.add(worksheet.fileId);
   const namesIn=taskAttachmentNames(attachments);
   const affirmative = /(?:^|[。！？；;!?\n]|\.[ \t]+)[ \t]*(?:(?:本次|这次|请|也|再)[ \t]*){0,2}(?:(?:只|仅)?(?:读取|阅读|核对|查看|检查|处理|读|看)|(?:please[ \t]+)?(?:only[ \t]+)?(?:read|open|check|review|inspect)(?:[ \t]+only)?\b)(?:(?!\.[ \t])[^。！？；;!?，,\n])+/giu;
   for(const clause of request.matchAll(affirmative)){
