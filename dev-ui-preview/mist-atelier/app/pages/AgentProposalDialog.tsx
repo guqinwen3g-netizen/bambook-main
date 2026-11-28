@@ -17,6 +17,7 @@ import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
 import type { OrderGovernanceInput } from '../../../../server/src/shared/mistOrderGovernance';
+import { lineQuantityFromBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
 import { emailLinkTarget } from '../../../../server/src/shared/mistEmail';
 import { orderAmounts } from './orderAmounts';
@@ -108,12 +109,37 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
   const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save',rfqCommand=command.type.startsWith('rfq.');
   const orderCreate=command.type==='order.create',orderContract=command.type==='order.governance.saveDraft';
   const currentOrder=orderContract?state?.orders.find(order=>order.id===command.payload.orderId):undefined;
-  const currentContract=currentOrder?.governance?.changeDraft?.contract??currentOrder?.governance?.contract;
+  const currentChange=currentOrder?.governance?.changeDraft;
+  const currentContract=currentChange?.contract??currentOrder?.governance?.contract;
   const contractPatch=command.payload.orderPatch as {currency?:unknown}|undefined;
+  const proposedCurrency=typeof contractPatch?.currency==='string'?contractPatch.currency.trim().toUpperCase():currentOrder?.currency;
+  const activeLines=currentOrder&&state?state.orderLines.filter(line=>line.orderId===currentOrder.id):[];
+  const currentLines=currentChange?.lines??activeLines;
+  const proposedLines=orderContract&&Array.isArray(command.payload.lines)?command.payload.lines:undefined;
   if(orderCreate){
     const lines=command.payload.lines,contract=command.payload.governance as Partial<OrderGovernanceInput>|undefined;
     const total=orderAmounts(Array.isArray(lines)?lines.map(line=>({qty:line?.qty,price:line?.price})):[]);
     rows.push({field:contract?.kind==='internal'?'内部预算':'订单总金额',path:'order.total',value:total.total===null||!Array.isArray(lines)||!lines.length?'金额无效':total.total.toFixed(2)+' '+String(command.payload.currency||'')});
+  }
+  if(currentOrder&&(proposedLines||contractPatch?.currency!==undefined||currentChange)){
+    const previous=orderAmounts(currentLines).total;
+    let proposed:number|null=null;
+    try{
+      const lines=proposedLines?.map(line=>({
+        qty:lineQuantityFromBreakdown(currentOrder.type,line??{},'订单条目').qty??line?.qty,
+        price:line?.price,
+      }))??activeLines;
+      proposed=orderAmounts(lines).total;
+    }catch{/* Keep invalid quantities visible as an invalid amount. */}
+    const previousCurrency=currentChange?.orderPatch.currency??currentOrder.currency;
+    if(proposedLines||previous!==proposed||previousCurrency!==proposedCurrency){
+      const proposedKind=(command.payload.input as Partial<OrderGovernanceInput>|undefined)?.kind??currentContract?.kind;
+      const text=(amount:number|null,currency?:string)=>amount===null||!currency?uiText('金额无效'):`${amount.toFixed(2)} ${currency}`;
+      rows.push(
+        {field:uiText(currentContract?.kind==='internal'?'当前内部预算':'当前订单金额'),path:'order.total.before',value:text(previous,previousCurrency)},
+        {field:uiText(proposedKind==='internal'?'拟改内部预算':'拟改订单金额'),path:'order.total.after',value:text(proposed,proposedCurrency)},
+      );
+    }
   }
   const rfq=rfqCommand?state?.rfqs?.find(r=>r.id===command.payload.id):undefined;
   const customerUpdate=['market.customer.update','customer.update'].includes(command.type),customer=customerUpdate?state?.customers.find(c=>c.id===command.payload.id):undefined;
@@ -124,9 +150,8 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     rows.push({field:'客户',path:'customer',value:customer!.name+' · '+customer!.code},{field:'原信用额度',path:'credit.before',value:money(customer!.creditLimit,customer!.currency)},{field:'拟设信用额度',path:'credit.after',value:money(amount,denomination)});
   }
   let omitted = 0;
-  if(state&&currentOrder&&Array.isArray(command.payload.lines)){
-    const currentLines=currentOrder.governance?.changeDraft?.lines??state.orderLines.filter(line=>line.orderId===currentOrder.id);
-    const retainedIds=new Set(command.payload.lines.map(line=>line?.id));
+  if(currentOrder&&proposedLines){
+    const retainedIds=new Set(proposedLines.map(line=>line?.id));
     for(const line of currentLines){
       if(retainedIds.has(line.id))continue;
       if(rows.length>=limit){omitted++;continue;}
@@ -179,7 +204,8 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
         text=line?.style||line?.name||proposedName||'新增条目';
       }
       else if(key==='ownerId'||key==='receiverId')text=state?.members?.find(m=>m.userId===value)?.name||'负责人已不可见';
-      else if(orderContract&&/^lines\.\d+\.price$/.test(path))text=typeof value==='number'&&Number.isFinite(value)?value.toFixed(2)+' '+String(contractPatch?.currency||currentOrder?.governance?.changeDraft?.orderPatch?.currency||currentOrder?.currency||''):'金额无效';
+      else if(orderContract&&/^lines\.\d+\.price$/.test(path))text=typeof value==='number'&&Number.isFinite(value)
+        ? value.toFixed(2)+(proposedCurrency?' '+proposedCurrency:'') : '金额无效';
       else if(/^(governance|input)\.confirmationFileIds\.\d+$/.test(path))text=state?.files.find(f=>f.id===value)?.name||'附件已不可见';
       else if(key==='sourceProductId')text=value?state?.market.products.find(p=>p.id===value)?.name||'产品已不可见':'未指定';
       else if(key==='sourceDevId')text=value?state?.devs.find(d=>d.id===value)?.code||'开发案已不可见':'未指定';

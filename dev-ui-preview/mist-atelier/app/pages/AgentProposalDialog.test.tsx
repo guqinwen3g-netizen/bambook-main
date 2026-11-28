@@ -103,6 +103,40 @@ it('shows which current draft lines will be removed before listing replacement l
  expect(proposalFieldChanges(proposal.command,true,state).rows.some(row=>row.field==='拟移除条目')).toBe(false);
 });
 
+it('compares exact order totals using quantities from the proposed breakdown',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.type='fabric';
+ order.currency='USD';
+ state.orderLines=[
+  {id:'keep',orderId:order.id,name:'量产面料',style:'SIM-A',qty:10,unit:'米',price:12},
+  {id:'remove',orderId:order.id,name:'旧面料',style:'SIM-B',qty:24,unit:'米',price:14},
+ ] as typeof state.orderLines;
+ proposal.command.payload.orderPatch={currency:'eur'};
+ proposal.command.payload.lines=[{...state.orderLines[0],qty:undefined,price:12.35,
+  breakdown:{kind:'fabric',composition:'涤纶',width:150,weight:110,rows:[{color:'Blue',quantity:10.25}]}}];
+ const rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows).toContainEqual(expect.objectContaining({field:'当前订单金额',value:'456.00 USD'}));
+ expect(rows).toContainEqual(expect.objectContaining({field:'拟改订单金额',value:'126.59 EUR'}));
+ expect(rows.find(row=>row.path==='lines.1.price')?.value).toBe('12.35 EUR');
+ proposal.command.payload.lines[0].price=12.345;
+ expect(proposalFieldChanges(proposal.command,true,state).rows.find(row=>row.path==='order.total.after')?.value).toBe('金额无效');;
+});
+
+it('uses the active order currency when the new draft omits a currency change',()=>{
+ const {state,proposal}=contractProposalFixture(),order=state.orders[0];
+ order.type='garment';
+ order.currency='USD';
+ const active={id:'keep',orderId:order.id,name:'打样外套',style:'SIM-A',qty:10,unit:'件',price:12};
+ state.orderLines=[active] as typeof state.orderLines;
+ order.governance!.changeDraft={contract:order.governance!.contract,orderPatch:{season:'AW',due:'2027-01-28',currency:'EUR'},
+  lines:[{...active,price:14}] as any,reason:'旧变更草稿',status:'draft'};
+ proposal.command.payload.lines=[active];
+ const rows=proposalFieldChanges(proposal.command,true,state).rows;
+ expect(rows).toContainEqual(expect.objectContaining({field:'当前订单金额',value:'140.00 EUR'}));
+ expect(rows).toContainEqual(expect.objectContaining({field:'拟改订单金额',value:'120.00 USD'}));
+ expect(rows.find(row=>row.path==='lines.1.price')?.value).toBe('12.00 USD');
+});
+
 it('blocks an order draft replacement when all its line changes cannot be reviewed',()=>{
  const{state,proposal}=contractProposalFixture(),order=state.orders[0];
  state.orderLines=Array.from({length:200},(_,i)=>({id:'line-'+i,orderId:order.id,name:'模拟样衣',style:'SIM-'+i,qty:10,unit:'件',price:1.95})) as typeof state.orderLines;
