@@ -1,4 +1,5 @@
 import {withRequestDeadline} from './requestDeadline';
+import {answerFingerprint,answerRequestBody,saveTaskControls,type TaskControlIntent,type TaskControlRequest} from './xiaozhuControlRequests';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -74,6 +75,9 @@ const TASK_READ_TIMEOUT_MS = 5000;
 const HISTORY_READ_TIMEOUT_MS = 10_000;
 const TASK_SEND_TIMEOUT_MS = 45_000;
 const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
+const BACKGROUND_PROGRESS_INTERVAL_MS = 3000;
+const CAPABILITY_RECOVERY_INTERVAL_MS = 30_000;
+const BACKGROUND_PROGRESS_MAX_IN_FLIGHT = 3;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
 const REPORT_ACCESS_INTERVAL_MS = 10_000;
@@ -82,6 +86,13 @@ function restrictReport(task: AgentTaskView): AgentTaskView {
   return { ...task, contentRestricted: true, name: 'Agent任务', instructions: '', checkpoint: '', result: '',
     canControl: false, attachments: undefined, intentRefs: undefined, trail: undefined, questions: [],
     waitingProposalIds: [], resumeAt: null, waitingFor: null, nextCheckAt: null, requiredRead: null };
+}
+
+async function readSubmissionReceipt(base: string, entry: PendingSubmission, signal: AbortSignal): Promise<AgentTaskView> {
+  const {item} = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
+  if (!item?.id || item.executor !== 'platform' || item.conversationId !== entry.conversationId)
+    throw new Error('提交结果暂时无法核对');
+  return item;
 }
 
 async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
@@ -99,6 +110,20 @@ async function readCoworkTask(base: string, id: string, signal: AbortSignal): Pr
   }
 }
 
+async function readAttachmentAnswerReceipt(base:string,taskId:string,request:Extract<TaskControlRequest,{action:'answer'}>,controller:AbortController){
+  const receipt=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,CONTROL_FAILURE.answer,signal=>
+    mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(taskId)+'/answer/receipt/'+encodeURIComponent(request.requestId),{signal,cache:'no-store'})) as {item:AgentTaskView;attachmentIds:string[]};
+  const question=receipt.item?.questions?.find(item=>item.id===request.questionId&&item.answeredAt);
+  if(receipt.item?.id!==taskId||receipt.item.contentRestricted||!question||!Array.isArray(receipt.attachmentIds)
+    ||!receipt.attachmentIds.length||!receipt.attachmentIds.every(id=>receipt.item.attachments?.some(file=>file.id===id)))
+    throw Error(CONTROL_FAILURE.answer);
+  return receipt.item;
+}
+
+function transientHistoryRead(status:number) {
+  return !Number.isFinite(status)||status===0||status===408||status===429||status>=500;
+}
+
 async function readCoworkHistory(base: string, signal: AbortSignal) {
   const items: AgentTaskView[] = [];
   let cursor: string | undefined;
@@ -112,15 +137,55 @@ async function readCoworkHistory(base: string, signal: AbortSignal) {
   return { items, cursor };
 }
 
+type TaskReadFlight = { controller: AbortController; result: Promise<AgentTaskView>; readers: number };
+
+/** Origin navigation and polling can cancel independently while sharing the same authorized in-flight read. */
+function shareCoworkTaskRead(flights: Map<string, TaskReadFlight>, base: string, id: string, authority: number, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const key = JSON.stringify([authority, id]);
+  let flight = flights.get(key);
+  if (!flight) {
+    const controller = new AbortController();
+    const result = readCoworkTask(base, id, controller.signal).finally(() => {
+      if (flights.get(key)?.controller === controller) flights.delete(key);
+    });
+    flight = { controller, result, readers: 0 };
+    flights.set(key, flight);
+  }
+  const active = flight;
+  active.readers++;
+  return new Promise<AgentTaskView>((resolve, reject) => {
+    let subscribed = true;
+    const release = () => {
+      if (!subscribed) return false;
+      subscribed = false;
+      signal.removeEventListener('abort', abort);
+      active.readers--;
+      if (active.readers === 0 && flights.get(key) === active) {
+        flights.delete(key);
+        active.controller.abort();
+      }
+      return true;
+    };
+    const abort = () => { if (release()) reject(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    active.result.then(
+      item => { if (release()) resolve(item); },
+      error => { if (release()) reject(error); },
+    );
+  });
+}
+
 function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTaskView {
   if (previous.id !== next.id || previous.identityId !== next.identityId || previous.executor !== next.executor
     || next.version < previous.version || next.updatedAt < previous.updatedAt) return previous;
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
-export type TaskControlState = { busy: boolean; error?: string };
+export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string; attachmentAnswerRecovered?:boolean };
+const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试',resume:'继续结果未确认，可重试'};
 
-export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
+export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>, controlStorageScope?:string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [cachedTasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [reportAccess, setReportAccess] = React.useState<{scope:string; restricted:Set<string>}>();
@@ -130,41 +195,131 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const currentTasks = React.useRef(tasks);
   currentTasks.current = tasks;
   const [checkingAvailability, setCheckingAvailability] = React.useState(true);
-  const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
-  const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
+  const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [more, setMore] = React.useState<string | undefined>(undefined);
+  const [submission, setSubmission] = React.useState<{scope:string;conversationId?:string}>();
+  const busy = submission?.scope === scope;
+  const submittingHere = busy && (!visibleConversationId || submission.conversationId === visibleConversationId);
+  const [staleProgress, setStaleProgress] = React.useState<{ scope: string; ids: ReadonlySet<string> }>();
+  const clearStaleProgress = React.useCallback((id: string) => setStaleProgress(old => {
+    if (old?.scope !== scope || !old.ids.has(id)) return old;
+    const ids = new Set(old.ids);
+    ids.delete(id);
+    return ids.size ? { scope, ids } : undefined;
+  }), [scope]);
   const live = React.useRef(scope); live.current = scope;
+  const origin = React.useRef(originTaskId); origin.current = originTaskId;
+  const trackedOrigin = React.useRef<{scope:string;id:string}|undefined>(undefined);
+  const deniedHistory = React.useRef(0);
+  const taskReads = React.useMemo(() => new Map<string, TaskReadFlight>(), [base, scope]);
+  React.useEffect(() => () => {
+    for (const flight of taskReads.values()) flight.controller.abort();
+    taskReads.clear();
+  }, [taskReads]);
   const version = React.useRef(0);
   const pending = React.useRef(new Map<string, PendingSubmission>());
   const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<Array<PendingSubmission&{fingerprint:string}>>([]);
   const receiptRead = React.useRef<AbortController|undefined>(undefined);
+  const receiptReconnectPending = React.useRef(false);
   const [checkingReceipt,setCheckingReceipt] = React.useState(false);
   const sendRequest = React.useRef<AbortController | undefined>(undefined);
   const controlRequests = React.useRef(new Map<string,AbortController>());
-  const controlKeys = React.useRef(new Map<string,{ key:string; requestId:string }>());
+  const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
+  const controlKeys=savedControls??localControls;
+  const restoredAnswerChecks=React.useMemo(()=>new Map<string,AbortController|null>(),[scope,base]);
+  const abortRestoredAnswerChecks=React.useCallback(()=>{
+    for(const controller of restoredAnswerChecks.values())controller?.abort();
+    restoredAnswerChecks.clear();
+  },[restoredAnswerChecks]);
+  React.useEffect(()=>{
+    let changed=false;
+    for(const task of tasks){
+      const pending=controlKeys.get(task.id);
+      const restoredUpload=pending?.action==='answer'&&pending.hasAttachments&&pending.restoredFromStorage;
+      if(pending&&(task.contentRestricted||!restoredUpload&&(task.version>pending.version||task.canControl===false))) {
+        controlKeys.delete(task.id);
+        changed=true;
+      }
+    }
+    if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+  },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
+  const recoverRestoredAnswers=React.useCallback(()=>{
+    if(!base||!enabled||!navigator.onLine)return;
+    for(const task of currentTasks.current){
+      const pending=controlKeys.get(task.id);
+      if(pending?.action!=='answer'||!pending.hasAttachments||!pending.restoredFromStorage||task.contentRestricted
+        ||!task.questions?.some(question=>question.id===pending.questionId&&question.answeredAt)
+        ||restoredAnswerChecks.has(pending.requestId))continue;
+      const controller=new AbortController(),authority=deniedHistory.current;
+      restoredAnswerChecks.set(pending.requestId,controller);
+      const current=()=>navigator.onLine&&!controller.signal.aborted&&deniedHistory.current===authority
+        &&live.current===scope&&restoredAnswerChecks.get(pending.requestId)===controller
+        &&controlKeys.get(task.id)===pending&&currentTasks.current.some(item=>item.id===task.id&&!item.contentRestricted);
+      const forget=()=>{
+        controlKeys.delete(task.id);
+        if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+      };
+      void readAttachmentAnswerReceipt(base,task.id,pending,controller).then(item=>{
+        if(!current())return;
+        forget();
+        setTasks(old=>old.map(previous=>mergeTaskUpdate(previous,item)));
+        setControls(old=>({...old,[task.id]:{busy:false,attachmentAnswerRecovered:true}}));
+      },error=>{
+        // An answered question with no receipt for this request belongs to a different submission.
+        if(current()&&(error as {status?:number})?.status===404)forget();
+      }).finally(()=>{
+        if(restoredAnswerChecks.get(pending.requestId)===controller)restoredAnswerChecks.set(pending.requestId,null);
+      });
+    }
+  },[base,enabled,scope,controlKeys,controlStorageScope,restoredAnswerChecks]);
+  React.useEffect(()=>{recoverRestoredAnswers();},[tasks,recoverRestoredAnswers]);
+  React.useEffect(()=>{
+    const reconnect=()=>{
+      for(const [id,controller] of restoredAnswerChecks)if(!controller)restoredAnswerChecks.delete(id);
+      recoverRestoredAnswers();
+    };
+    window.addEventListener('offline',abortRestoredAnswerChecks);
+    window.addEventListener('online',reconnect);
+    return()=>{
+      window.removeEventListener('offline',abortRestoredAnswerChecks);
+      window.removeEventListener('online',reconnect);
+      abortRestoredAnswerChecks();
+    };
+  },[abortRestoredAnswerChecks,recoverRestoredAnswers,restoredAnswerChecks]);
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
+  const historyRecovery = React.useRef<'needed'|'pending'|undefined>(undefined);
   const capabilityRead = React.useRef<AbortController | undefined>(undefined);
   const moreRead = React.useRef<AbortController | undefined>(undefined);
+  const moreRecovery = React.useRef<{cursor:string;resume?:true}|undefined>(undefined);
+  const abortOlderRead = React.useCallback(()=>{
+    const active=moreRead.current;
+    moreRead.current=undefined;
+    active?.abort();
+  },[]);
   const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
   const personalIdentity = React.useRef<string | undefined>(undefined);
-  const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
-  const checkReceipts = React.useCallback(async (automatic: boolean, conversation?: string) => {
-    if (!base || !enabled || receiptRead.current || sendRequest.current) return;
-    const missing = [...pending.current].filter(([,entry]) => automatic ? entry.recoveredFromStorage
-      : (entry.sourceConversationId??entry.conversationId) === conversation);
+  const lastAvailability=React.useRef<{scope:string;available:boolean;retryWhileVisible:boolean}|null>(null);
+  const checkReceipts = React.useCallback(async function reconcileReceipts(mode: 'startup'|'manual'|'reconnect', conversation?: string) {
+    if (!base || !enabled || live.current!==scope || (mode==='reconnect'&&!navigator.onLine)) return;
+    if (receiptRead.current || sendRequest.current) {
+      if (mode==='reconnect') receiptReconnectPending.current=true;
+      return;
+    }
+    if (mode==='reconnect') receiptReconnectPending.current=false;
+    const missing = [...pending.current].filter(([,entry]) => mode==='reconnect'
+      || (mode==='startup' ? entry.recoveredFromStorage : (entry.sourceConversationId??entry.conversationId) === conversation));
     if (!missing.length) return;
-    const controller = new AbortController();
+    const controller = new AbortController(), authority=deniedHistory.current;
     receiptRead.current=controller;setCheckingReceipt(true);
     const current=()=>live.current===scope&&receiptRead.current===controller;
+    const authorized=()=>current()&&deniedHistory.current===authority;
     try {
       const replies = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '提交结果暂时无法核对', signal =>
         Promise.allSettled(missing.map(async ([fingerprint,entry]) => {
-          const {item:task} = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
-          if (!task?.id || task.executor !== 'platform' || task.conversationId !== entry.conversationId)
-            throw new Error('提交结果暂时无法核对');
-          if (signal.aborted || !current() || pending.current.get(fingerprint)!==entry) return;
+          const task = await readSubmissionReceipt(base,entry,signal);
+          if (signal.aborted || !authorized() || pending.current.get(fingerprint)!==entry) return;
           pending.current.delete(fingerprint);
           savePendingSubmissions(scope,pending.current);
           setTasks(old=>{
@@ -175,7 +330,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           setSendFailure(old=>old&&(entry.sourceConversationId??entry.conversationId)===old.conversationId?undefined:old);
           setRecoveredSubmissions(old=>[...old,{...entry,fingerprint}]);
         })));
-      if (!current() || automatic) return;
+      if (!authorized() || mode!=='manual') return;
       const unresolved=replies.filter((_,index)=>{
         const [fingerprint,entry]=missing[index];
         return pending.current.get(fingerprint)===entry;
@@ -183,21 +338,39 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if(unresolved.length)setSendFailure({conversationId:conversation,message:unresolved.every(reply=>reply.status==='rejected'&&reply.reason?.status===404)
         ?'暂未查到原提交回执':'提交结果暂时无法核对'});
     } catch {
-      if (current()&&!automatic)setSendFailure({conversationId:conversation,message:'提交结果暂时无法核对'});
+      if (authorized()&&mode==='manual')setSendFailure({conversationId:conversation,message:'提交结果暂时无法核对'});
     } finally {
-      if(current()){receiptRead.current=undefined;setCheckingReceipt(false);}
+      if(current()){
+        receiptRead.current=undefined;setCheckingReceipt(false);
+        if(receiptReconnectPending.current)void reconcileReceipts('reconnect');
+      }
     }
   },[base,enabled,scope]);
-  const load = React.useCallback(async () => {
+  const clearDeniedHistory = React.useCallback(()=>{
+    deniedHistory.current++;trackedOrigin.current=undefined;
+    receiptReconnectPending.current=false;receiptRead.current?.abort();
+    abortRestoredAnswerChecks();abortOlderRead();moreRecovery.current=undefined;
+    setLoadingMore(false);setMoreError('');
+    setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
+  },[abortOlderRead,abortRestoredAnswerChecks]);
+  const load = React.useCallback(async (mode:'startup'|'reconnect'='startup') => {
     const run = ++version.current, bound = scope;
+    historyRecovery.current=mode==='reconnect'?'pending':undefined;
+    const keepOlderPages=mode==='reconnect'&&!!moreRecovery.current;
     historyRead.current?.abort();
     capabilityRead.current?.abort();
-    moreRead.current?.abort();
-    moreRead.current = undefined;
+    abortOlderRead();
+    if(!keepOlderPages)moreRecovery.current=undefined;
     setLoadingMore(false);
     setMoreError('');
     if (!base || !enabled) { setLoading(false); setCheckingAvailability(false); setAvailable(false); return; }
+    if(!navigator.onLine){
+      historyRecovery.current='needed';
+      setError('网络连接已断开');setLoading(false);setCheckingAvailability(false);
+      return;
+    }
     const controller = new AbortController(), capabilityController = new AbortController();
+    const knownTaskIds = new Set(currentTasks.current.map(task => task.id));
     historyRead.current = controller;
     capabilityRead.current = capabilityController;
     const current = () => run === version.current && live.current === bound;
@@ -214,30 +387,40 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       personalIdentity.current = own?.id;
       const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
+      const listedTaskIds = new Set(visible.map(task => task.id));
       setTasks(old => {
         const previous = new Map(old.map(task => [task.id, task]));
-        return visible.map(task => {
+        const history = visible.map(task => {
           const prior = previous.get(task.id);
           return prior ? mergeTaskUpdate(prior, task) : task;
         });
+        // The page can omit an explicitly opened older task or a receipt recovered while it was in flight.
+        const tracked = trackedOrigin.current;
+        const originId = tracked?.scope === bound && tracked.id === origin.current ? tracked.id : undefined;
+        const retained = old.filter(task => task.executor === 'platform' && (!own || task.identityId === own.id)
+          && !listedTaskIds.has(task.id) && (keepOlderPages || task.id === originId || !knownTaskIds.has(task.id)));
+        return retained.length ? [...history, ...retained].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : history;
       });
-      setMore(page.cursor);
+      if(!keepOlderPages)setMore(page.cursor);
       setLoading(false);
       setError('');
 
-      await checkReceipts(true);
       const result = await capability;
+      if (!current()) return;
+      if ('error' in result && [401,403,404].includes(Number((result.error as { status?:number })?.status)))
+        throw result.error;
+      await checkReceipts(mode);
       if (!current()) return;
       if ('error' in result) throw result.error;
       const nextAvailable = result.caps.platformAvailable === true && own?.state !== 'disabled';
-      lastAvailability.current = {scope:bound, available:nextAvailable};
+      lastAvailability.current = {scope:bound, available:nextAvailable,retryWhileVisible:!nextAvailable&&own?.state!=='disabled'};
       setAvailable(nextAvailable);
     } catch (e) {
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
       if (current()) {
-        if ([401,403,404].includes(Number((e as {status?:number})?.status))) {
-          setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
-        }
+        const status=Number((e as {status?:number})?.status);
+        historyRecovery.current=transientHistoryRead(status)?'needed':undefined;
+        if ([401,403,404].includes(status)) clearDeniedHistory();
         setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
         setError(e instanceof Error ? e.message : '读取失败');
       }
@@ -246,10 +429,95 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       capabilityController.abort();
       if (historyRead.current === controller) historyRead.current = undefined;
       if (capabilityRead.current === capabilityController) capabilityRead.current = undefined;
-      if (current()) { setLoading(false); setCheckingAvailability(false); }
+      if (current()) {
+        if(historyRecovery.current==='pending')historyRecovery.current=undefined;
+        setLoading(false);setCheckingAvailability(false);
+      }
     }
-  }, [base, enabled, scope, checkReceipts]);
-  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  }, [abortOlderRead, base, enabled, scope, checkReceipts, clearDeniedHistory]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); receiptReconnectPending.current=false; setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); abortOlderRead(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [abortOlderRead,load,scope]);
+  React.useEffect(() => {
+    if(!base||!enabled)return;
+    let resumeReceipts=false,lastRecheckAt=-Infinity;
+    const disconnect=()=>{
+      if(live.current!==scope)return;
+      const reason=new Error('网络连接已断开');
+      const capability=capabilityRead.current;
+      if(historyRead.current){
+        historyRecovery.current='needed';
+        historyRead.current.abort(reason);
+      }else if(capability){
+        capabilityRead.current=undefined;
+        resumeReceipts=false;
+        setCheckingAvailability(false);
+      }
+      capability?.abort(reason);
+    };
+    const recheck=async(periodic:boolean)=>{
+      if(capabilityRead.current)return;
+      lastRecheckAt=Date.now();
+      const controller=new AbortController(),run=version.current;
+      capabilityRead.current=controller;
+      if(!periodic)setCheckingAvailability(true);
+      const current=()=>live.current===scope&&version.current===run&&capabilityRead.current===controller;
+      try{
+        const [caps,mine]=await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,'任务服务检查超时',async signal=>{
+          const capabilities=mistApiRequest(base+'/agent-task-capabilities',{signal}) as Promise<{platformAvailable:boolean}>;
+          const identities=()=>mistApiRequest(base+'/agent-identities?scope=mine',{signal}) as Promise<{items:AgentIdentityView[]}>;
+          if(!periodic)return Promise.all([capabilities,identities()]);
+          const caps=await capabilities;
+          signal.throwIfAborted();
+          return [caps,caps.platformAvailable===true?await identities():undefined] as const;
+        });
+        if(!current()||controller.signal.aborted)return;
+        const own=mine?.items.find(identity=>identity.kind==='personal');
+        const nextAvailable=caps.platformAvailable===true&&own?.state!=='disabled';
+        lastAvailability.current={scope,available:nextAvailable,retryWhileVisible:!nextAvailable&&own?.state!=='disabled'};
+        setAvailable(nextAvailable);
+      }catch(error){
+        if(current()&&[401,403,404].includes(Number((error as {status?:number})?.status))){
+          resumeReceipts=false;
+          clearDeniedHistory();
+          setAvailable(false);
+          setError(error instanceof Error?error.message:'读取失败');
+        }
+      }finally{
+        if(current()){
+          capabilityRead.current=undefined;
+          setCheckingAvailability(false);
+          if(resumeReceipts&&navigator.onLine)void checkReceipts('reconnect');
+          resumeReceipts=false;
+        }
+        controller.abort();
+      }
+    };
+    const wake=(reconnect:boolean,periodic=false)=>{
+      if(!navigator.onLine||live.current!==scope||historyRecovery.current==='pending')return;
+      if(historyRecovery.current==='needed'){
+        if(reconnect)void load('reconnect');
+        return;
+      }
+      if(!historyRead.current&&lastAvailability.current?.scope===scope&&!lastAvailability.current.available){
+        resumeReceipts=reconnect||!!capabilityRead.current&&resumeReceipts;
+        void recheck(periodic);
+      }else if(reconnect)void checkReceipts('reconnect');
+    };
+    const reconnect=()=>wake(true);
+    const focus=()=>{if(document.visibilityState!=='hidden')wake(false);};
+    const recoveryTimer=window.setInterval(()=>{
+      if(document.visibilityState!=='hidden'&&lastAvailability.current?.retryWhileVisible
+        &&Date.now()-lastRecheckAt>=CAPABILITY_RECOVERY_INTERVAL_MS)wake(false,true);
+    },CAPABILITY_RECOVERY_INTERVAL_MS);
+    window.addEventListener('offline',disconnect);
+    window.addEventListener('online',reconnect);
+    window.addEventListener('focus',focus);
+    return()=>{
+      window.removeEventListener('offline',disconnect);
+      window.removeEventListener('online',reconnect);
+      window.removeEventListener('focus',focus);
+      window.clearInterval(recoveryTimer);
+    };
+  },[base,checkReceipts,clearDeniedHistory,enabled,load,scope]);
   const openReportIds = React.useMemo(() => {
     if (!visibleConversationId) return '';
     const personal = cachedTasks.filter(task => !task.automationId);
@@ -261,128 +529,271 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   React.useEffect(() => {
     if (!base || !enabled || !openReportIds) return;
     const ids = openReportIds.split(',');
+    const restoreOrder = new Map<string, number>();
+    let attempt = 0;
     let request: AbortController | undefined;
     const poll = async () => {
-      if (request || document.visibilityState === 'hidden') return;
+      if (request || !navigator.onLine || document.visibilityState === 'hidden') return;
       const controller = new AbortController();
       request = controller;
       const current = () => request === controller && live.current === scope;
-      const restricted = new Set(restrictedReports.current);
+      const authority = deniedHistory.current;
+      const authorized = () => current() && navigator.onLine && deniedHistory.current === authority;
       const readable = new Set<string>();
-      try {
-        await withRequestDeadline(controller, TASK_READ_TIMEOUT_MS, '任务暂时无法核对', async signal => {
-          for (let offset = 0; offset < ids.length; offset += TASK_ACCESS_BATCH_LIMIT) {
-            signal.throwIfAborted();
-            const batch = ids.slice(offset, offset + TASK_ACCESS_BATCH_LIMIT);
-            const result = await mistApiRequest(base + '/personal-agent/task-access?taskIds=' + encodeURIComponent(batch.join(',')),
-              { signal, cache: 'no-store' }) as { restrictedIds?: string[] };
-            if (!Array.isArray(result.restrictedIds) || result.restrictedIds.some(id => !batch.includes(id))) continue;
-            for (const id of batch) if (!result.restrictedIds.includes(id)) readable.add(id);
-            for (const id of result.restrictedIds) restricted.add(id);
-          }
-        });
-      } catch (error) {
-        if ([401, 403, 404].includes(Number((error as {status?: number})?.status))) {
-          for (const id of ids) restricted.add(id);
-          readable.clear();
-        }
-      }
-      if (!current()) return;
-      const prior = restrictedReports.current;
-      if (restricted.size !== prior.size) {
+      let offset = 0;
+      let denied = false;
+      const maskReports = (ids: readonly string[]) => {
+        const before = restrictedReports.current;
+        const restricted = new Set([...before, ...ids]);
+        if (restricted.size === before.size) return;
         restrictedReports.current = restricted;
         setReportAccess({ scope, restricted });
         setTasks(old => old.map(task => restricted.has(task.id) && !task.contentRestricted ? restrictReport(task) : task));
+      };
+      const checkBatches = async () => {
+        while (authorized() && !denied && offset < ids.length) {
+          const batch = ids.slice(offset, offset + TASK_ACCESS_BATCH_LIMIT);
+          offset += TASK_ACCESS_BATCH_LIMIT;
+          const batchController = new AbortController();
+          const abort = () => batchController.abort(controller.signal.reason);
+          controller.signal.addEventListener('abort', abort, { once:true });
+          try {
+            const result = await withRequestDeadline(batchController, TASK_READ_TIMEOUT_MS, '任务暂时无法核对', signal =>
+              mistApiRequest(base + '/personal-agent/task-access?taskIds=' + encodeURIComponent(batch.join(',')),
+                { signal, cache:'no-store' }) as Promise<{ restrictedIds?: string[] }>);
+            if (!authorized() || denied) return;
+            if (!Array.isArray(result.restrictedIds) || result.restrictedIds.some(id => !batch.includes(id))) continue;
+            for (const id of batch) if (!result.restrictedIds.includes(id)) readable.add(id);
+            maskReports(result.restrictedIds);
+          } catch (error) {
+            if (!authorized()) return;
+            if ([401, 403, 404].includes(Number((error as {status?:number})?.status))) {
+              denied = true;
+              readable.clear();
+              maskReports(ids);
+            }
+          } finally {
+            controller.signal.removeEventListener('abort', abort);
+          }
+        }
+      };
+      // A delayed batch must not postpone confirmed revocations from another batch.
+      await Promise.all([checkBatches(), checkBatches()]);
+      if (!authorized() || denied) {
+        if (current()) request = undefined;
+        return;
       }
-      // Reopen a restricted report only after a fresh full read under the new authority.
-      const toRestore = currentTasks.current.filter(task => readable.has(task.id) && task.contentRestricted).slice(0, 4);
-      const restored = await Promise.allSettled(toRestore.map(task => readCoworkTask(base, task.id, controller.signal)));
-      if (!current()) return;
-      const confirmed = new Map(restored.flatMap(reply => reply.status === 'fulfilled' && !reply.value.contentRestricted
-        ? [[reply.value.id, reply.value] as const] : []));
-      if (confirmed.size) {
-        const remaining = new Set([...restrictedReports.current].filter(id => !confirmed.has(id)));
+      // Restore each report only after its own fresh, authorized full read.
+      const toRestore = currentTasks.current.filter(task => readable.has(task.id) && task.contentRestricted)
+        .sort((left,right) => (restoreOrder.get(left.id) ?? 0) - (restoreOrder.get(right.id) ?? 0))
+        .slice(0, 4);
+      await Promise.allSettled(toRestore.map(async task => {
+        restoreOrder.set(task.id, ++attempt);
+        const next = await readCoworkTask(base, task.id, controller.signal);
+        if (!authorized() || next.contentRestricted) return;
+        const previous = currentTasks.current.find(item => item.id === task.id);
+        if (!previous?.contentRestricted || mergeTaskUpdate(previous, next) === previous) return;
+        const remaining = new Set(restrictedReports.current);
+        if (!remaining.delete(task.id)) return;
         restrictedReports.current = remaining;
-        setTasks(old => old.map(item => {
-          const next = confirmed.get(item.id);
-          return next ? mergeTaskUpdate(item, next) : item;
-        }));
+        setTasks(old => old.map(item => mergeTaskUpdate(item, next)));
         setReportAccess({ scope, restricted: remaining });
-      }
+      }));
+      if (!current()) return;
       request = undefined;
+    };
+    const suspend = () => {
+      const previous = request;
+      request = undefined;
+      previous?.abort();
     };
     const wake = () => void poll();
     const timer = window.setInterval(wake, REPORT_ACCESS_INTERVAL_MS);
     document.addEventListener('visibilitychange', wake);
     window.addEventListener('focus', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('offline', suspend);
     wake();
     return () => {
-      const previous = request;
-      request = undefined;
-      previous?.abort();
+      suspend();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
       window.removeEventListener('focus', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('offline', suspend);
     };
   }, [base, enabled, openReportIds, scope]);
+  const visiblePausedIds = visibleConversationId ? tasks.filter(task => task.state === 'paused'
+    && (task.conversationId || 'legacy_' + task.id) === visibleConversationId)
+    .slice(-BACKGROUND_PROGRESS_MAX_IN_FLIGHT).map(task => task.id).join(',') : '';
+  React.useEffect(() => {
+    if (!base || !enabled || !visiblePausedIds) return;
+    let request: AbortController | undefined;
+    const suspend = () => {
+      const previous = request;
+      request = undefined;
+      previous?.abort();
+    };
+    const wake = async () => {
+      if (request || live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
+      const controller = new AbortController(), denial = deniedHistory.current;
+      request = controller;
+      const replies = await Promise.allSettled(visiblePausedIds.split(',').map(id =>
+        shareCoworkTaskRead(taskReads, base, id, denial, controller.signal)));
+      if (request !== controller) return;
+      request = undefined;
+      if (live.current !== scope || deniedHistory.current !== denial) return;
+      const updates = new Map(replies.flatMap(reply => reply.status === 'fulfilled' ? [[reply.value.id, reply.value] as const] : []));
+      if (updates.size) setTasks(previous => previous.map(task => {
+        const next = updates.get(task.id);
+        return next ? mergeTaskUpdate(task, next) : task;
+      }));
+    };
+    window.addEventListener('focus', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('offline', suspend);
+    document.addEventListener('visibilitychange', wake);
+    return () => {
+      suspend();
+      window.removeEventListener('focus', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('offline', suspend);
+      document.removeEventListener('visibilitychange', wake);
+    };
+  }, [base, enabled, scope, taskReads, visiblePausedIds]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
-  const progressId = foregroundId ?? activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId).at(-1)?.id;
-  const progressStale = !!progressId && staleTask?.scope === scope && staleTask.id === progressId;
+  const staleProgressIds = staleProgress?.scope === scope ? staleProgress.ids : undefined;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
+  const hasProgressTargets = activeTasks.length > 0;
+  const progressTargets = React.useRef({ foregroundId, background: [] as string[] });
+  progressTargets.current = { foregroundId, background: backgroundIds ? backgroundIds.split(',') : [] };
+  const syncProgressTargets = React.useRef<(() => void) | undefined>(undefined);
+  const manualProgressRead = React.useRef<((taskId:string)=>Promise<void>|undefined)|undefined>(undefined);
+  const recheckProgress = React.useCallback(async(taskId:string)=>{ await manualProgressRead.current?.(taskId); },[]);
+
   React.useEffect(() => {
-    if ((!foregroundId && !backgroundIds) || !base || !available) return;
-    const controller = new AbortController();
-    const background = backgroundIds ? backgroundIds.split(',') : [];
-    const inFlight = new Set<string>();
+    if (!hasProgressTargets || !base || !enabled) return;
+    const inFlight = new Map<string, {controller:AbortController;promise:Promise<void>}>();
     const retry = new Map<string, { delay: number; at: number }>();
-    let lastBackground = 0;
-    const poll = () => {
-      if (controller.signal.aborted || live.current !== scope || document.visibilityState === 'hidden') return;
-      const ids = foregroundId ? [foregroundId] : [];
-      const now = Date.now();
-      if (background.length && now - lastBackground >= 3000) {
-        ids.push(...background);
-        lastBackground = now;
-      }
-      for (const id of ids) {
-        if (inFlight.has(id) || now < (retry.get(id)?.at ?? 0)) continue;
-        inFlight.add(id);
-        void readCoworkTask(base, id, controller.signal)
-          .then(next => {
-            if (controller.signal.aborted || live.current !== scope) return;
-            retry.delete(id);
-            setTasks(old => old.map(task => mergeTaskUpdate(task, next)));
-            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? undefined : old);
-          })
-          .catch(() => {
-            if (controller.signal.aborted || live.current !== scope) return;
-            const previous = retry.get(id);
-            const delay = previous ? Math.min(TASK_RETRY_MAX_MS, previous.delay * 2) : TASK_RETRY_INTERVAL_MS;
-            retry.set(id, { delay, at: Date.now() + delay });
-            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? old : { scope, id });
-          })
-          .finally(() => inFlight.delete(id));
-      }
+    const backgroundAt = new Map<string, number>();
+    const markStale = (ids: string[]) => setStaleProgress(old => {
+      const previous = old?.scope === scope ? old.ids : undefined;
+      if (previous && ids.every(id => previous.has(id))) return old;
+      return { scope, ids: new Set([...(previous ?? []), ...ids]) };
+    });
+    const readProgress=(id:string)=>{
+      const pending=inFlight.get(id);
+      if(pending)return pending.promise;
+      const controller=new AbortController(), denial=deniedHistory.current;
+      backgroundAt.set(id,Date.now()+BACKGROUND_PROGRESS_INTERVAL_MS);
+      const promise=shareCoworkTaskRead(taskReads,base,id,denial,controller.signal)
+        .then(next=>{
+          if(controller.signal.aborted||live.current!==scope||deniedHistory.current!==denial)return;
+          retry.delete(id);
+          setTasks(old=>old.map(task=>mergeTaskUpdate(task,next)));
+          clearStaleProgress(id);
+        })
+        .catch(()=>{
+          if(controller.signal.aborted||live.current!==scope)return;
+          const previous=retry.get(id);
+          const delay=previous?Math.min(TASK_RETRY_MAX_MS,previous.delay*2):TASK_RETRY_INTERVAL_MS;
+          retry.set(id,{delay,at:Date.now()+delay});
+          markStale([id]);
+        })
+        .finally(()=>{
+          if(inFlight.get(id)?.controller!==controller)return;
+          inFlight.delete(id);
+          if(!controller.signal.aborted)fillBackground();
+        });
+      inFlight.set(id,{controller,promise});
+      return promise;
     };
-    const refreshVisible = () => { lastBackground = 0; void poll(); };
-    const timer = window.setInterval(() => void poll(), foregroundId ? 1000 : 3000);
+    const manual=(id:string)=>{
+      const {foregroundId,background}=progressTargets.current;
+      if(live.current!==scope||!navigator.onLine||(id!==foregroundId&&!background.includes(id)))return;
+      return readProgress(id);
+    };
+    const abortReads = () => {
+      for(const {controller} of inFlight.values())controller.abort();
+      inFlight.clear();
+    };
+    manualProgressRead.current=manual;
+    const canPoll = () => live.current === scope && navigator.onLine && document.visibilityState !== 'hidden';
+    const isDue = (id:string,now:number) => !inFlight.has(id) && now >= (retry.get(id)?.at ?? 0);
+    function fillBackground() {
+      if (!canPoll()) return;
+      const {background,foregroundId} = progressTargets.current;
+      const backgroundInFlight = inFlight.size - (foregroundId && inFlight.has(foregroundId) ? 1 : 0);
+      const slots = BACKGROUND_PROGRESS_MAX_IN_FLIGHT - backgroundInFlight;
+      if (slots <= 0) return;
+      const now = Date.now();
+      const dueAt = (id:string) => backgroundAt.get(id) ?? 0;
+      // Unread and oldest tasks get the next freed slots before recently updated tasks.
+      const ready = background.filter(id => dueAt(id) <= now && isDue(id,now)).sort((left,right) => dueAt(left) - dueAt(right));
+      for (const id of ready.slice(0,slots)) void readProgress(id);
+    }
+    const poll = () => {
+      // An existing task may finish or pause while new model execution is unavailable.
+      if (!canPoll()) return;
+      const {foregroundId} = progressTargets.current;
+      if (foregroundId && isDue(foregroundId,Date.now())) void readProgress(foregroundId);
+      fillBackground();
+    };
+    const offline = () => {
+      abortReads();
+      const {foregroundId,background}=progressTargets.current;
+      markStale(foregroundId ? [foregroundId,...background] : background);
+    };
+    const sync = () => {
+      const {foregroundId,background}=progressTargets.current;
+      const active=new Set(background);
+      if(foregroundId)active.add(foregroundId);
+      // One finished task must not cancel reads or clear the backoff for other active tasks.
+      for(const [id,pending] of inFlight)if(!active.has(id)){
+        pending.controller.abort();
+        inFlight.delete(id);
+      }
+      for(const id of retry.keys())if(!active.has(id))retry.delete(id);
+      for(const id of backgroundAt.keys())if(!active.has(id))backgroundAt.delete(id);
+      if(navigator.onLine)poll();
+      else offline();
+    };
+    syncProgressTargets.current=sync;
+    const refreshVisible = () => {
+      if (document.visibilityState === 'hidden') {
+        abortReads();
+        return;
+      }
+      retry.clear();
+      backgroundAt.clear();
+      poll();
+    };
+    const timer = window.setInterval(poll, 1000);
     document.addEventListener('visibilitychange', refreshVisible);
-    void poll();
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', refreshVisible);
     return () => {
-      controller.abort();
+      if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
+      if(syncProgressTargets.current===sync)syncProgressTargets.current=undefined;
+      abortReads();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', refreshVisible);
     };
-  }, [foregroundId, backgroundIds, progressId, base, available, scope]);
+  }, [hasProgressTargets, base, enabled, scope, clearStaleProgress, taskReads]);
+  React.useEffect(() => {
+    syncProgressTargets.current?.();
+  }, [foregroundId, backgroundIds, base, enabled, scope]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
     const bound = scope, controller = new AbortController();
     sendRequest.current = controller;
     const isCurrent = () => live.current === bound && sendRequest.current === controller;
-    setBusy(true);
+    setSubmission({scope:bound,conversationId:visibleConversationId??conversationId});
     setSendFailure(undefined);
     setRecoveredSubmissions(old=>old.filter(entry=>(entry.sourceConversationId??entry.conversationId)!==(visibleConversationId??conversationId)));
     let firstAttempt: string | undefined, attemptedFingerprint: string | undefined;
@@ -394,6 +805,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
 
       // A receipt can be lost after commit. A refreshed thread must not change the original POST.
       let saved = pending.current.get(fingerprint);
+      let result: {item:AgentTaskView} | undefined;
+      if (saved && files.length) {
+        const original = saved;
+        try {
+          const item = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,'提交结果暂时无法核对',
+            signal => readSubmissionReceipt(base,original,signal));
+          result = {item};
+        } catch (problem) {
+          // Only a missing receipt should resend the original multipart request.
+          if ((problem as {status?:number})?.status !== 404) throw problem;
+        }
+        if (!isCurrent() || controller.signal.aborted) return null;
+      }
       if (!saved) {
         const draftKey = submissionDraftKey(message,refs);
         if ([...pending.current.values()].some(entry=>entry.recoveredFromStorage && entry.hasAttachments
@@ -411,18 +835,20 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       const {requestId,instructions,locale,historyTaskIds} = saved;
       const target = saved.conversationId;
-      const body = { requestId,instructions,locale,name: textPrefix(message,60), ...(target ? { conversationId:target } : {}),
-        ...(historyTaskIds !== undefined ? { historyTaskIds } : {}), ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
-      let submission: RequestInit = { method: 'POST', body: JSON.stringify(body) };
-      if (files.length) {
-        const form = new FormData();
-        form.append('task', JSON.stringify(body));
-        for (const file of files) form.append('attachments',file);
-        submission = { method: 'POST', body: form };
+      if (!result) {
+        const body = { requestId,instructions,locale,name: textPrefix(message,60), ...(target ? { conversationId:target } : {}),
+          ...(historyTaskIds !== undefined ? { historyTaskIds } : {}), ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
+        let submission: RequestInit = { method: 'POST', body: JSON.stringify(body) };
+        if (files.length) {
+          const form = new FormData();
+          form.append('task', JSON.stringify(body));
+          for (const file of files) form.append('attachments',file);
+          submission = { method: 'POST', body: form };
+        }
+        const uploadSeconds = Math.ceil(files.reduce((bytes,file) => bytes + file.size, 0) / UPLOAD_BYTES_PER_SECOND);
+        result = await withRequestDeadline(controller, TASK_SEND_TIMEOUT_MS + uploadSeconds * 1000, '提交结果待核对', signal =>
+          mistApiRequest(base + '/personal-agent/tasks', { ...submission, signal }) as Promise<{item: AgentTaskView}>);
       }
-      const uploadSeconds = Math.ceil(files.reduce((bytes,file) => bytes + file.size, 0) / UPLOAD_BYTES_PER_SECOND);
-      const result = await withRequestDeadline(controller, TASK_SEND_TIMEOUT_MS + uploadSeconds * 1000, '提交结果待核对', signal =>
-        mistApiRequest(base + '/personal-agent/tasks', { ...submission, signal }) as Promise<{item: AgentTaskView}>);
       if (!isCurrent()) return null;
       if (!result.item?.id || result.item.conversationId && result.item.conversationId !== target)
         throw new Error('提交结果待核对');
@@ -451,7 +877,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } finally {
       if (isCurrent()) {
         sendRequest.current = undefined;
-        setBusy(false);
+        setSubmission(undefined);
+        if(receiptReconnectPending.current)void checkReceipts('reconnect');
       }
     }
   };
@@ -459,16 +886,31 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (!item || live.current !== scope) return;
     setTasks(old => old.map(task => mergeTaskUpdate(task, item)));
   };
-  const refreshTask = async (taskId: string, signal: AbortSignal) => {
-    const bound = scope;
-    const item = await readCoworkTask(base, taskId, signal);
+  const track = (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
+    ? old.map(item=>mergeTaskUpdate(item,task)) : [...old,task]);
+  const refreshTask = async (taskId: string, signal: AbortSignal, {retainOrigin = false}: {retainOrigin?: boolean} = {}) => {
+    const bound = scope, denial = deniedHistory.current;
+    const previous = currentTasks.current.find(task => task.id === taskId);
+    const joinProgress = retainOrigin && (!previous || !previous.contentRestricted && COWORK_ACTIVE.includes(previous.state));
+    const item = await (joinProgress ? shareCoworkTaskRead(taskReads, base, taskId, denial, signal) : readCoworkTask(base, taskId, signal));
     if (signal.aborted || live.current !== bound) return;
-    setStaleTask(old => old?.scope === bound && old.id === taskId ? undefined : old);
-    applyTaskUpdate(item);
+    if (deniedHistory.current !== denial) throw new Error('任务暂时无法核对');
+    clearStaleProgress(taskId);
+    if (retainOrigin && origin.current === item.id && item.executor === 'platform' && !item.automationId
+      && item.conversationId && item.state !== 'access_changed') {
+      trackedOrigin.current = {scope:bound,id:item.id};
+      track(item);
+    } else applyTaskUpdate(item);
     return item;
   };
-  const loadMore = async () => {
+  const loadMore = React.useCallback(async () => {
     if (!more || !base || !enabled || loading || moreRead.current) return;
+    if(!navigator.onLine){
+      moreRecovery.current={cursor:more};
+      setMoreError('网络连接已断开');
+      return;
+    }
+    moreRecovery.current=undefined;
     const cursor = more, run = version.current, bound = scope, controller = new AbortController();
     const isCurrent = () => moreRead.current === controller && run === version.current && live.current === bound;
     moreRead.current = controller;
@@ -486,59 +928,131 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       });
       setMore(page.nextCursor ?? undefined);
     } catch (e) {
-      if (isCurrent()) setMoreError(e instanceof Error ? e.message : '读取失败');
+      if (isCurrent()) {
+        if(transientHistoryRead(Number((e as {status?:number})?.status)))moreRecovery.current={cursor};
+        setMoreError(e instanceof Error ? e.message : '读取失败');
+      }
     } finally {
       if (isCurrent()) {
         moreRead.current = undefined;
         setLoadingMore(false);
       }
     }
-  };
-  const controlTask = async (task:AgentTaskView, action:'answer'|'cancel', details:Record<string,string>, confirmed:(item:AgentTaskView)=>boolean) => {
+  },[base,enabled,loading,more,scope]);
+  React.useEffect(()=>{
+    if(!base||!enabled||!more)return;
+    const disconnect=()=>{
+      if(!moreRead.current||live.current!==scope)return;
+      moreRecovery.current={cursor:more};
+      abortOlderRead();
+      setLoadingMore(false);
+      setMoreError('网络连接已断开');
+    };
+    const reconnect=()=>{
+      const retry=moreRecovery.current;
+      if(!navigator.onLine||live.current!==scope||retry?.cursor!==more)return;
+      if(historyRecovery.current==='pending')retry.resume=true;
+      else void loadMore();
+    };
+    window.addEventListener('offline',disconnect);
+    window.addEventListener('online',reconnect);
+    return()=>{
+      window.removeEventListener('offline',disconnect);
+      window.removeEventListener('online',reconnect);
+    };
+  },[abortOlderRead,base,enabled,loadMore,more,scope]);
+  React.useEffect(()=>{
+    const retry=moreRecovery.current;
+    if(!loading&&!checkingAvailability&&navigator.onLine&&retry?.resume&&retry.cursor===more)void loadMore();
+  },[checkingAvailability,loadMore,loading,more]);
+  const controlTask = async (task:AgentTaskView, intent:TaskControlIntent|TaskControlRequest) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
+    const {action}=intent;
+    const checkOnly='requestId' in intent;
+    if(checkOnly&&(intent.version!==task.version||task.contentRestricted||!task.canControl))return;
+    const failure = CONTROL_FAILURE[action];
     let controller = new AbortController();
     const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
     controlRequests.current.set(task.id,controller);
-    setControls(old=>({...old,[task.id]:{busy:true}}));
+    setControls(old=>({...old,[task.id]:{busy:true,...(checkOnly?{error:failure}:{})}}));
 
-    const body = {version:task.version,...details};
-    const key = JSON.stringify([action,body]);
-    const existing = controlKeys.current.get(task.id);
-    const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
-    controlKeys.current.set(task.id,{key,requestId});
-    const failure = action==='cancel'?'停止结果未确认，可重试':'回答未确认，可重试';
+    let submitted:TaskControlRequest|undefined=checkOnly?intent:undefined;
     let error = '';
     const accept = (item:AgentTaskView) => {
       if (!isCurrent()) return;
       applyTaskUpdate(item);
-      controlKeys.current.delete(task.id);
+      controlKeys.delete(task.id);
+      if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
       window.dispatchEvent(new Event('bambook:agent-task-update'));
     };
-
+    const checkTask = async (request:TaskControlRequest) => {
+      const denial = deniedHistory.current;
+      if(request.action==='answer'&&request.hasAttachments){
+        try{
+          const item=await readAttachmentAnswerReceipt(base,task.id,request,controller);
+          if(!isCurrent()||deniedHistory.current!==denial)return;
+          clearStaleProgress(task.id);
+          accept(item);
+          error='';
+          return;
+        }catch(problem){
+          if((problem as {status?:number})?.status!==404)throw problem;
+        }
+      }
+      const latest = await readCoworkTask(base,task.id,controller.signal);
+      const answer=request.action==='answer'
+        ? latest.questions?.find(question=>question.id===request.questionId&&question.answeredAt)?.answer : undefined;
+      const confirmed = request.action==='answer'
+        ? !request.hasAttachments&&answer!==undefined&&(request.answer!==undefined
+          ? answer===request.answer : !!request.fingerprint&&await answerFingerprint(task.id,request.questionId,answer)===request.fingerprint)
+        : request.action==='resume' ? latest.version>request.version&&latest.state!=='paused'
+        : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
+      if (!isCurrent() || deniedHistory.current!==denial) return;
+      clearStaleProgress(task.id);
+      if (confirmed) {
+        accept(latest);
+        error = '';
+      } else applyTaskUpdate(latest);
+    };
     try {
-      const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
+      if (checkOnly) {
+        error = failure;
+        await checkTask(intent);
+        return;
+      }
+      const existing=controlKeys.get(task.id);
+      const files=intent.action==='answer'?intent.files??[]:[];
+      const hasAttachments=files.length>0;
+      const fingerprint=intent.action==='answer'?await answerFingerprint(task.id,intent.questionId,intent.answer,files):undefined;
+      if(!isCurrent())return;
+      if(hasAttachments&&!fingerprint)throw Error('附件无法核对，请重新选择后再试');
+      const same=existing?.version===task.version&&(intent.action!=='answer'?existing.action===intent.action
+        : existing.action==='answer'&&existing.questionId===intent.questionId
+          &&!!existing.hasAttachments===hasAttachments
+          &&(!hasAttachments&&existing.answer===intent.answer||!!fingerprint&&existing.fingerprint===fingerprint));
+      const requestId=same?existing.requestId:crypto.randomUUID();
+      submitted=intent.action==='answer'
+        ? {action:'answer',questionId:intent.questionId,answer:intent.answer,requestId,version:task.version,fingerprint,...(hasAttachments?{hasAttachments:true}:{})}
+        : {...intent,requestId,version:task.version};
+      controlKeys.set(task.id,submitted);
+      if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+      const payload={requestId,version:task.version};
+      const body=intent.action==='answer'?answerRequestBody({...payload,questionId:intent.questionId,answer:intent.answer},files):JSON.stringify(payload);
+      const timeout=hasAttachments?TASK_SEND_TIMEOUT_MS+Math.ceil(files.reduce((bytes,file)=>bytes+file.size,0)/UPLOAD_BYTES_PER_SECOND)*1000:HISTORY_READ_TIMEOUT_MS;
+      const result = await withRequestDeadline(controller,timeout,failure,signal =>
         mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/'+action,{
-          method:'POST',body:JSON.stringify({requestId,...body}),signal,
+          method:'POST',body,signal,
         }) as Promise<{item:AgentTaskView}>);
       if (result.item?.id!==task.id) throw new Error(failure);
       accept(result.item);
     } catch (problem) {
-      if (!isCurrent()) return;
+      if (!isCurrent() || checkOnly) return;
       error = (problem as {status?:number})?.status===0 ? failure
         : problem instanceof Error ? problem.message : failure;
-      // A timeout has already aborted the write signal. The read has its own deadline.
       controller = new AbortController();
       controlRequests.current.set(task.id,controller);
-      try {
-        const latest = await readCoworkTask(base,task.id,controller.signal);
-        if (!isCurrent()) return;
-        applyTaskUpdate(latest);
-        if (confirmed(latest)) {
-          controlKeys.current.delete(task.id);
-          error = '';
-          window.dispatchEvent(new Event('bambook:agent-task-update'));
-        }
-      } catch { /* The original operation remains available for an exact retry. */ }
+      try { if(submitted)await checkTask(submitted); }
+      catch { /* The original operation remains available for an exact retry. */ }
     } finally {
       if (isCurrent()) {
         controlRequests.current.delete(task.id);
@@ -546,15 +1060,32 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const answer = (task:AgentTaskView,questionId:string,text:string) => {
-    const answer = text.trim();
-    return controlTask(task,'answer',{questionId,answer},item =>
-      !!item.questions?.some(question=>question.id===questionId&&question.answeredAt&&question.answer===answer));
+  const answer = (task:AgentTaskView,questionId:string,text:string,files?:readonly File[]) =>
+    controlTask(task,{action:'answer',questionId,answer:text.trim(),files});
+  const checkAnswer = (task:AgentTaskView,questionId:string) => {
+    const submitted=controlKeys.get(task.id);
+    if (submitted?.action==='answer'&&submitted.questionId===questionId)return controlTask(task,submitted);
   };
-  const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
-    !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
+  const cancel = (task:AgentTaskView) => controlTask(task,{action:'cancel'});
+  const resume = (task:AgentTaskView) => {
+    if(available&&task.state==='paused'&&task.canControl)return controlTask(task,{action:'resume'});
+  };
+  const checkStop = (task:AgentTaskView) => {
+    const submitted=controlKeys.get(task.id);
+    if(submitted?.action==='cancel')return controlTask(task,submitted);
+  };
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
-    ? old.map(item=>mergeTaskUpdate(item,task))
-    : [...old,task]) };
+  const visibleControls={...controls};
+  for(const task of tasks){
+    const pending=controlKeys.get(task.id),previous=controls[task.id];
+    const matching=pending&&pending.version===task.version&&!task.contentRestricted&&task.canControl!==false;
+    if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
+    if(!previous&&matching&&task.canControl)
+      visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
+    if(matching&&pending.action!=='resume'&&visibleControls[task.id]?.error) {
+      visibleControls[task.id]={...visibleControls[task.id],...(pending.action==='cancel'
+        ? {canCheckStop:true} : pending.action==='answer' ? {answerQuestionToCheck:pending.questionId} : {})};
+    }
+  }
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts('manual',visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, submittingHere, send, refreshTask, answer, checkAnswer, cancel, checkStop, resume, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }
