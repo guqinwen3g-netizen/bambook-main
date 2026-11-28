@@ -73,10 +73,11 @@ export type FilePreviewProps = {
   initialPdfPage?: number;
   /** Exact visible workbook sheet name for this opening. Omit when switching attachments. */
   initialSheetName?: string;
+  initialSheetRow?: number;
 };
 
 /** 附件预览浮层：大尺寸查看，支持多附件左右切换、图片/PDF 缩放、下载。 */
-export function FilePreview({ files, index, onIndex, onClose, load, onDownload, displayNames, initialPdfPage, initialSheetName }: FilePreviewProps) {
+export function FilePreview({ files, index, onIndex, onClose, load, onDownload, displayNames, initialPdfPage, initialSheetName, initialSheetRow }: FilePreviewProps) {
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   const file = files[index];
@@ -200,7 +201,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
             {onDownload && <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button>}
           </div>} /></div>
           : !blob ? <Loading />
-          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPdfPosition={reportPdfPosition} onFail={setError} pdfJump={pdfJump?.fileId === file.id ? pdfJump : undefined} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} />}
+          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPdfPosition={reportPdfPosition} onFail={setError} pdfJump={pdfJump?.fileId === file.id ? pdfJump : undefined} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} initialSheetRow={initialSheetRow} />}
       </div>
     </div></Portal>;
 }
@@ -210,7 +211,7 @@ function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () 
   return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
-type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPdfPosition: (page: number, total: number) => void; onFail: (msg: string) => void; pdfJump?: {page:number}; initialPdfPage?: number; initialSheetName?: string };
+type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPdfPosition: (page: number, total: number) => void; onFail: (msg: string) => void; pdfJump?: {page:number}; initialPdfPage?: number; initialSheetName?: string; initialSheetRow?: number };
 function Renderer(p: RendererProps) {
   switch (p.kind) {
     case 'image': return <ImageView {...p} />;
@@ -427,8 +428,15 @@ function DocxView({ blob, onFail }: RendererProps) {
 
 const MAX_ROWS = 1000, MAX_COLS = 60;
 const colName = (i: number) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
-function SheetView({ blob, name, onFail, initialSheetName }: RendererProps) {
-  const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean> } | null>(null), [sheet, setSheet] = React.useState('');
+function SheetView({ blob, name, onFail, initialSheetName, initialSheetRow }: RendererProps) {
+  const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean>; origins: Record<string,{row:number;col:number}> } | null>(null), [sheet, setSheet] = React.useState('');
+  const paneRef=React.useRef<HTMLDivElement>(null),targetRow=React.useRef<HTMLTableRowElement>(null);
+  React.useLayoutEffect(()=>{
+    const pane=paneRef.current,row=targetRow.current;
+    if(!pane||!row)return;
+    const viewport=pane.getBoundingClientRect(),rect=row.getBoundingClientRect();
+    pane.scrollTop+=rect.top-viewport.top-(viewport.height-rect.height)/2;
+  },[book,sheet,initialSheetRow]);
   React.useEffect(() => {
     let live = true;
     (async () => {
@@ -437,18 +445,23 @@ function SheetView({ blob, name, onFail, initialSheetName }: RendererProps) {
         const ext = extOf(name);
         const wb = ext === 'csv' || ext === 'tsv' ? XLSX.read(await blob.text(), { type: 'string', raw: true, FS: ext === 'tsv' ? '\t' : undefined } as any) : XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: 'array', cellDates: true });
         const rows: Record<string, string[][]> = {}, truncated: Record<string, boolean> = {};
+        const origins:Record<string,{row:number;col:number}>={};
         for (const n of wb.SheetNames) {
-          const all = XLSX.utils.sheet_to_json<string[]>(wb.Sheets[n], { header: 1, raw: false, defval: '', blankrows: true }) as string[][];
+          const worksheet=wb.Sheets[n],range=XLSX.utils.decode_range(worksheet['!ref']??'A1');
+          const all = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, raw: false, defval: '', blankrows: true }) as string[][];
           let last = all.length; while (last > 0 && all[last - 1].every(v => String(v ?? '') === '')) last--;
           const used = all.slice(0, last);
+          const target=n===initialSheetName&&initialSheetRow!==undefined?initialSheetRow-range.s.r-1:-1;
+          const first=target>=0&&target<used.length?Math.floor(target/MAX_ROWS)*MAX_ROWS:0;
+          origins[n]={row:range.s.r+first,col:range.s.c};
           truncated[n] = used.length > MAX_ROWS || used.some(r => r.length > MAX_COLS);
-          rows[n] = used.slice(0, MAX_ROWS).map(r => r.slice(0, MAX_COLS).map(v => String(v ?? '')));
+          rows[n] = used.slice(first, first+MAX_ROWS).map(r => r.slice(0, MAX_COLS).map(v => String(v ?? '')));
         }
         if (!live) return;
         const openingSheets = initialSheetName === undefined
           ? wb.SheetNames
           : wb.SheetNames.filter((_, index) => !wb.Workbook?.Sheets?.[index]?.Hidden);
-        setBook({ names: wb.SheetNames, rows, truncated });
+        setBook({ names: wb.SheetNames, rows, truncated, origins });
         setSheet(openingSheets.find(sheetName => sheetName === initialSheetName) ?? openingSheets[0] ?? '');
       } catch { if (live) onFail('表格无法解析，请下载后用 Excel 打开'); }
     })();
@@ -456,12 +469,20 @@ function SheetView({ blob, name, onFail, initialSheetName }: RendererProps) {
   }, [blob]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!book) return <Loading />;
   const rows = book.rows[sheet] || [], cols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  const origin=book.origins[sheet]??{row:0,col:0};
+  const target=sheet===initialSheetName?initialSheetRow:undefined;
   return <div className="mist-viewer-sheet">
     {book.names.length > 1 && <div className="mist-viewer-tabs" role="tablist" aria-label={uiText("工作表")}>{book.names.map(n => <button key={n} type="button" role="tab" aria-selected={n === sheet} className="mist-viewer-tab" onClick={() => setSheet(n)}>{n}</button>)}</div>}
-    {book.truncated[sheet] && <p className="mist-note">{uiText("仅显示前 ")}{MAX_ROWS}{uiText(" 行、")}{MAX_COLS}{uiText(" 列，完整内容请下载原件。")}</p>}
-    <div className="mist-viewer-scroll">{rows.length ? <table className="mist-viewer-table" aria-label={uiText(sheet)}>
-      <thead><tr><th aria-hidden="true" />{Array.from({ length: cols }, (_, i) => <th key={i} scope="col">{colName(i)}</th>)}</tr></thead>
-      <tbody>{rows.map((r, i) => <tr key={i}><th scope="row">{uiText(i + 1)}</th>{Array.from({ length: cols }, (_, j) => <td key={j}>{r[j] ?? ''}</td>)}</tr>)}</tbody>
+    {book.truncated[sheet] && <p className="mist-note">{origin.row>0?ui`显示第 ${origin.row+1} 至 ${origin.row+rows.length} 行，最多 ${MAX_COLS} 列。完整内容请下载原件。`:
+      <>{uiText("仅显示前 ")}{MAX_ROWS}{uiText(" 行、")}{MAX_COLS}{uiText(" 列，完整内容请下载原件。")}</>}</p>}
+    <div className="mist-viewer-scroll" ref={paneRef}>{rows.length ? <table className="mist-viewer-table" aria-label={uiText(sheet)}>
+      <thead><tr><th aria-hidden="true" />{Array.from({ length: cols }, (_, i) => <th key={i} scope="col">{colName(origin.col+i)}</th>)}</tr></thead>
+      <tbody>{rows.map((r,i)=>{
+        const row=origin.row+i+1,cited=row===target;
+        return <tr key={row} ref={cited?targetRow:undefined} data-cited={cited||undefined} aria-current={cited?'location':undefined}>
+          <th scope="row">{uiText(row)}</th>{Array.from({length:cols},(_,j)=><td key={j}>{r[j]??''}</td>)}
+        </tr>;
+      })}</tbody>
     </table> : <div className="mist-viewer-center"><EmptyState compact title={uiText("这个工作表是空的")} /></div>}</div>
   </div>;
 }

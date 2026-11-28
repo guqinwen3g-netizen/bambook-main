@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
+import {screen} from '@testing-library/dom';
 const pdfMock = vi.hoisted(() => ({ getDocument: vi.fn(), options: { workerSrc: '' } }));
 vi.mock('pdfjs-dist', () => ({ getDocument: pdfMock.getDocument, GlobalWorkerOptions: pdfMock.options }));
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/assets/pdf.worker.mjs' }));
@@ -12,9 +13,9 @@ let host: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement('div'); document.body.append(host); root = createRoot(host); (URL as any).createObjectURL ??= () => 'blob:mock'; (URL as any).revokeObjectURL ??= () => {}; });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ''; });
 const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
-function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number; initialSheetName?:string; displayNames?:readonly string[] } = {}) {
+function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number; initialSheetName?:string; initialSheetRow?:number; displayNames?:readonly string[] } = {}) {
   let index = 0; const onClose = vi.fn();
-  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} initialSheetName={extra.initialSheetName} displayNames={extra.displayNames} />));
+  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} initialSheetName={extra.initialSheetName} initialSheetRow={extra.initialSheetRow} displayNames={extra.displayNames} />));
   render(); return { onClose, get index() { return index; } };
 }
 const btn = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label || b.textContent?.trim() === label) as HTMLButtonElement;
@@ -204,6 +205,22 @@ describe('附件预览浮层', () => {
     await act(async () => tab.click());
     expect(document.querySelector('table.mist-viewer-table')!.textContent).toContain('主唛');
   });
+  it('Excel：保留稀疏区域的物理行号并标记引用行', async () => {
+    const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet([]);
+    XLSX.utils.sheet_add_aoa(sheet,[['first-physical-row']],{origin:'B23'});
+    XLSX.utils.sheet_add_aoa(sheet,[['verified-row']],{origin:'B47'});
+    sheet['!ref']='B23:B47';
+    XLSX.utils.book_append_sheet(book,sheet,'报价');
+    const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
+    const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    mount([{id:'s',name:'报价.xlsx'}],async()=>blob,{initialSheetName:'报价',initialSheetRow:47});
+    await flush();
+    const target=await screen.findByRole('cell',{name:'verified-row'});
+    expect(target.closest('tr')?.getAttribute('aria-current')).toBe('location');
+    expect(target.closest('tr')?.querySelector('th')?.textContent).toBe('47');
+    expect(screen.getByRole('columnheader',{name:'B'})).toBeTruthy();
+  });
+
   it.each([
     ['辅料', '辅料'],
     ['内部草稿', '尺寸表'],

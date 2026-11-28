@@ -36,6 +36,8 @@ export type AgentTaskTrailItem = {
   taskAttachmentObservedPages?: number[];
   /** Workbook tabs with content (or a confirmed empty state) in this returned slice. */
   taskAttachmentObservedSheets?: string[];
+  /** Physical worksheet rows whose complete displayed values were in the returned text window. */
+  taskAttachmentObservedSheetRows?: Array<{sheet:string;row:number}>;
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };

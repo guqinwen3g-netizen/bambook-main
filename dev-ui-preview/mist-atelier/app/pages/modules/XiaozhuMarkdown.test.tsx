@@ -118,6 +118,22 @@ it.each(['两页均无 PDF 可提取文字','这两页没有可提取的文字�
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
+it('opens exact observed worksheet rows and keeps other rows at worksheet level',async()=>{
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const file={id:'workbook',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const reads=[{at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:file.id,
+  taskAttachmentObservedSheets:['报价'],taskAttachmentObservedSheetRows:[{sheet:'报价',row:23}]}];
+ const text='### quote.xlsx\n\n- 工作表：报价 第 23 行：原币金额。\n- 工作表：报价 第 99 行：未核对。\n\nquote.xlsx（工作表：报价 第 23 行）';
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[file]} attachmentReads={reads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll('button[title]')];
+  expect(buttons.map(button=>button.getAttribute('title'))).toEqual(['工作表 报价 第 23 行','工作表 报价','工作表 报价 第 23 行']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[file,{sheet:'报价',row:23}],[file,'报价'],[file,{sheet:'报价',row:23}]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 it('opens exact observed worksheet names and keeps unread or other-file tabs at workbook level',async()=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);

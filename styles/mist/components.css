@@ -499,6 +499,7 @@
 .mist-viewer-table th, .mist-viewer-table td { padding: 5px 9px; border-right: 1px solid var(--mist-line); border-bottom: 1px solid var(--mist-line); white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 .mist-viewer-table thead th { position: sticky; top: 0; z-index: 1; background: var(--mist-fill-2); color: var(--mist-ink-3); font-weight: var(--mist-fw-medium); text-align: center; }
 .mist-viewer-table tbody th { position: sticky; left: 0; background: var(--mist-fill-2); color: var(--mist-ink-3); font-weight: var(--mist-fw-regular); text-align: right; }
+.mist-viewer-table tr[data-cited] > :is(th, td) { background: var(--mist-accent-tint); }
 .mist-viewer-text { margin: 0; padding: 18px 20px; font-family: var(--mist-font-mono); font-size: var(--mist-text-xs); line-height: 1.65; white-space: pre-wrap; word-break: break-word; color: var(--mist-ink); }
 .mist-viewer-video { max-width: 100%; max-height: 100%; border-radius: var(--mist-r-md); background: black; }
 @media (max-width: 720px) {

@@ -2003,6 +2003,9 @@ it('gives the model original worksheet row numbers instead of positions in the e
  expect(read.text.split('\n').find((line:string)=>line.includes('QC-ROW-47'))).toMatch(/第 47 行.*QC-ROW-47/);
  expect(read.observedSheets).toEqual(['报价']);
  expect(content).not.toContain('OTHER-WORKSHEET-NO-MODEL');
+ const completed=await f.current(task.id);
+ expect(completed.trail.find((step:{taskAttachmentId?:string})=>step.taskAttachmentId===task.attachments[0].id)
+  ?.taskAttachmentObservedSheetRows).toEqual([{sheet:'报价',row:23},{sheet:'报价',row:47}]);
 });
 
 it('reuses a scanned PDF for a new visual page without mixing in the previous report',async()=>{

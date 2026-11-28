@@ -138,6 +138,16 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const scopeStart = result?.pageScopeStart;
         const earlierPages = pageRange && Number.isSafeInteger(scopeStart) && scopeStart > 1 && scopeStart === pages.pageFrom
           ? '；本次未读'+pdfPageRange(1,scopeStart-1) : '';
+        const observedSheetRows:Array<{sheet:string;row:number}>=[];
+        if(observedSheets?.length&&Array.isArray(result?.observedSheetRows)&&typeof result.text==='string'){
+          for(const row of result.observedSheetRows.slice(0,256)){
+            if(typeof row?.sheet==='string'&&observedSheets.includes(row.sheet)
+              &&Number.isSafeInteger(row.row)&&row.row>0&&row.row<=1_048_576
+              &&Number.isSafeInteger(row.start)&&Number.isSafeInteger(row.end)
+              &&row.start>=0&&row.end>row.start&&row.end<=result.text.length)
+              observedSheetRows.push({sheet:row.sheet,row:row.row});
+          }
+        }
         const worksheetRead = result?.worksheetComplete===true&&typeof result.worksheetScope==='string'
           && observedSheets?.includes(result.worksheetScope) ? text(result.worksheetScope,60) : '';
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
@@ -147,7 +157,7 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
         const readLabel=!completed&&typeof args.cursor==='string'?'续读附件':'读取附件';
-        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`${readLabel} ${file}`:`${readLabel}正文`, ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}), ...(observedPages ? {taskAttachmentObservedPages:observedPages} : {}), ...(observedSheets ? {taskAttachmentObservedSheets:observedSheets} : {}) });
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`${readLabel} ${file}`:`${readLabel}正文`, ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}), ...(observedPages ? {taskAttachmentObservedPages:observedPages} : {}), ...(observedSheets ? {taskAttachmentObservedSheets:observedSheets} : {}), ...(observedSheetRows.length?{taskAttachmentObservedSheetRows:observedSheetRows}:{}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;

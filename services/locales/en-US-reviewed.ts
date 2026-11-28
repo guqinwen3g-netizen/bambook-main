@@ -5,6 +5,8 @@ import { mailReceivingEnglish } from './en-US-mail-receiving';
 import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
+  '工作表 {0} 第 {1} 行': 'Worksheet {0}, row {1}',
+  '显示第 {0} 至 {1} 行，最多 {2} 列。完整内容请下载原件。': 'Showing rows {0} to {1}, up to {2} columns. Download the original for the full worksheet.',
   '选择要核对的页码（最多 3 页）': 'Select up to 3 pages to review',
   '客户付款条件已更新，请重新提出提议': 'The customer’s payment terms changed. Ask for a new proposal.',
   '客户已不可见，请重新核对': 'The customer is no longer visible. Recheck the source.',

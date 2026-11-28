@@ -1,4 +1,4 @@
-import { isTaskAttachment, taskAttachmentLabels, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { isTaskAttachment, taskAttachmentLabels, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachmentTarget, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import type { AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import {isOverdueMistInvoice} from '../../../../../server/src/shared/mistWorkspace';
 import {ClaimReplacementWork} from './ClaimReplacementWork';
@@ -233,7 +233,7 @@ export function AssistantPage(){
     if(originTaskId&&!fromTaskOrigin)nav.go('assistant');
   };
   const attachmentScope=scope+':'+conversationId;
-  const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string;target?:number|string}>();
+  const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string;target?:TaskAttachmentTarget}>();
   React.useEffect(()=>{setTaskPreview(undefined);},[attachmentScope]);
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
   const legacyTargets=React.useRef(new Map<string,string>());
@@ -407,7 +407,7 @@ export function AssistantPage(){
   const previewFiles=previewTask?.attachments??[];
   const previewIndex=previewFiles.findIndex(file=>file.id===taskPreview?.fileId);
   const previewFile=previewFiles[previewIndex];
-  const previewAttachment=(task:AgentTaskView,file:TaskAttachment,target?:number|string)=>{
+  const previewAttachment=(task:AgentTaskView,file:TaskAttachment,target?:TaskAttachmentTarget)=>{
     setTaskPreview({scope:attachmentScope,taskId:task.id,fileId:file.id,target});
   };
   const downloadAttachment=async(task:AgentTaskView,file:TaskAttachment)=>{
@@ -735,7 +735,8 @@ export function AssistantPage(){
     </Drawer>
     {previewTask&&previewFile&&<FilePreview key={previewTask.id} files={previewFiles} index={previewIndex} displayNames={taskAttachmentLabels(previewFiles)}
       initialPdfPage={typeof taskPreview?.target==='number'?taskPreview.target:undefined}
-      initialSheetName={typeof taskPreview?.target==='string'?taskPreview.target:undefined}
+      initialSheetName={typeof taskPreview?.target==='string'?taskPreview.target:typeof taskPreview?.target==='object'?taskPreview.target.sheet:undefined}
+    initialSheetRow={typeof taskPreview?.target==='object'?taskPreview.target.row:undefined}
       onIndex={index=>setTaskPreview({scope:attachmentScope,taskId:previewTask.id,fileId:previewFiles[index].id})}
       onClose={()=>setTaskPreview(undefined)}
       load={()=>w.readTaskAttachment(previewTask.id,previewFile)}

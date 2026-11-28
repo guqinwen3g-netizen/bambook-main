@@ -3,7 +3,7 @@ import React from 'react';
 import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import { activeAgentTaskStep, agentTaskActivityText, type AgentTaskTrailItem, type AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
-import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, taskVisualPdfPageChoices, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, taskVisualPdfPageChoices, type TaskAttachmentTarget, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../../runtime/xiaozhuActivity';
@@ -212,7 +212,7 @@ export type ThreadActions = {
   onRecoverProposal?: (id:string)=>Promise<void>;
   onOpenFile?: (fileId: string) => void;
   onDownloadAttachment?: (task: AgentTaskView, file: TaskAttachment) => Promise<void>;
-  onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment, target?: number | string) => void;
+  onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment, target?:TaskAttachmentTarget) => void;
   onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
 };
 
