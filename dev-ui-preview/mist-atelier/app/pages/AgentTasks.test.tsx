@@ -603,6 +603,33 @@ it('opens a report attachment from the task drawer and removes its preview on re
  expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
 });
 
+it('checks an uncertain stop from task details without posting again, including after closing the dialog',async()=>{
+ const active={...row(),executor:'platform',state:'running'};
+ const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
+ let current=active;
+ seam.api.mockImplementation(async(url:string,init:any)=>{
+  if(init?.method==='POST')throw Error('停止回执未送达');
+  return url.endsWith('/task')?{item:current}:url.includes('agent-identities')?{items:[identity()]}:
+    url.includes('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null};
+ });
+ act(paint);await flush();await click(getByText(host,active.name));
+ const open=()=>click(getByRole(getByRole(document.body,'dialog',{name:active.name}),'button',{name:'停止任务'}));
+ const stopDialog=()=>getByRole(document.body,'dialog',{name:'停止任务'});
+ const requests=()=>seam.api.mock.calls.filter(([url,init])=>url.endsWith('/task/cancel')&&init?.method==='POST');
+ await open();await click(getByRole(stopDialog(),'button',{name:'确认',exact:true}));
+ expect(requests()).toHaveLength(1);
+ await click(getByRole(stopDialog(),'button',{name:'核对原操作'}));
+ expect(requests()).toHaveLength(1);
+ expect(stopDialog().textContent).toContain('任务尚未停止');
+ await click(getByRole(stopDialog(),'button',{name:'取消',exact:true}));
+ await open();
+ current=stopped;
+ await click(getByRole(stopDialog(),'button',{name:'核对原操作'}));
+ expect(requests()).toHaveLength(1);
+ expect(queryByRole(document.body,'dialog',{name:'停止任务'})).toBeNull();
+ expect(getByRole(document.body,'dialog',{name:active.name}).textContent).toContain('已停止');
+});
+
 it('does not replace a committed task control receipt with an older focus read',async()=>{
  const active={...row(),executor:'platform',state:'running'};
  const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
