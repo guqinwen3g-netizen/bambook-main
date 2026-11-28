@@ -212,10 +212,14 @@ export function agentQuery(state: MistState, actor: TokenPayload, input: { type?
   return { results: matches, total, truncated: total > matches.length, readableTypes: types.map(t => t.type) };
 }
 
+export function matchesAgentObjectIdentifier(row: { id?: unknown; code?: unknown; sku?: unknown }, identifier: string): boolean {
+  return row.id === identifier || row.code === identifier || row.sku === identifier;
+}
+
 function find(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
   const type = typeOf(typeName, actor);
   if (typeof id !== 'string' || !id || id.length > 200) deny('INVALID_INPUT', '对象编号无效');
-  const row = rows(state, type).find(r => r.id === id || r.code === id || r.sku === id);
+  const row = rows(state, type).find(row => matchesAgentObjectIdentifier(row, id));
   if (!row) deny('NOT_FOUND', `${type.label}不存在或当前账号不可见`, 404);
   return { type, row };
 }
@@ -329,6 +333,15 @@ export function agentGetQuotationForOrder(
 export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown, options: { excludeTypes?: readonly string[]; relatedType?: unknown } = {}) {
   const { type, row } = find(state, actor, typeName, id);
   const relatedType = options.relatedType === undefined ? undefined : typeOf(options.relatedType, actor);
+  if(type.type==='order'&&relatedType?.type==='order_line'&&!options.excludeTypes?.includes('order_line')){
+    const lines=rows(state,relatedType).filter(line=>line.orderId===row.id);
+    const related=lines.slice(0,RELATED_LIMIT).map(line=>({
+      ...ref(relatedType,line),relation:'referenced_by' as const,
+      ...(typeof line.style==='string'&&line.style.length<=200?{style:line.style}:{}),
+    }));
+    return {...ref(type,row),related,total:lines.length,truncated:lines.length>related.length};
+  }
+
   const candidates = readable(actor, options.excludeTypes).filter(candidate => relatedType === undefined || candidate === relatedType);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
