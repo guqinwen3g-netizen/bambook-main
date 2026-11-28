@@ -3,7 +3,7 @@ import { submissionFileIdentity } from './xiaozhuSubmissions';
 export type TaskControlIntent = {action:'answer';questionId:string;answer:string;files?:readonly File[]} | {action:'cancel'|'resume'};
 type ControlRecord = {version:number;requestId:string};
 export type TaskControlRequest = ControlRecord & (
-  | {action:'answer';questionId:string;answer?:string;fingerprint?:string;hasAttachments?:true}
+  | {action:'answer';questionId:string;answer?:string;fingerprint?:string;hasAttachments?:true;restoredFromStorage?:true}
   | {action:'cancel'|'resume'}
 );
 
@@ -43,7 +43,7 @@ export function readTaskControls(scope:string): Map<string,TaskControlRequest> {
       const base={version:entry.version,requestId:entry.requestId};
       if(entry.action==='cancel'||entry.action==='resume') entries.set(id,{...base,action:entry.action});
       else if(entry.action==='answer'&&isId(entry.questionId)&&typeof entry.fingerprint==='string'&&fingerprintPattern.test(entry.fingerprint))
-        entries.set(id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint,...(entry.hasAttachments===true?{hasAttachments:true}:{})});
+        entries.set(id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint,...(entry.hasAttachments===true?{hasAttachments:true,restoredFromStorage:true}:{})});
     }
   } catch { /* The page still supports in-memory recovery. */ }
   return entries;
