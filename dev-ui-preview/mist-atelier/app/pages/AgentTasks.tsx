@@ -3,8 +3,9 @@ import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
 import {XiaozhuAttachmentChoices,XiaozhuVisualPageChoices,XiaozhuWorksheetChoices} from './modules/XiaozhuAttachmentChoices';
+import {XiaozhuAnswerFiles} from './modules/XiaozhuAnswerFiles';
 import React from 'react';
-import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
+import { Bot, Copy, Eye, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import { AGENT_TASK_ISSUE_LABEL, type AgentTaskEvent, type AgentTaskPage, type AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import { taskAttachmentChoicesForQuestion, taskAttachmentLabels, taskVisualPdfPageChoices, type TaskAttachmentTarget, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
@@ -18,6 +19,7 @@ import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
 import { activeModelFallbackSince, xiaozhuModelWaitLabel } from '../runtime/xiaozhuActivity';
+import { answerRequestBody } from '../runtime/xiaozhuControlRequests';
 
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
@@ -39,7 +41,16 @@ const accessDenied=(error:unknown)=>[401,403,404].includes(Number((error as {sta
 const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state==='succeeded'?'ok':['waiting_human','expired','budget_exhausted'].includes(state)?'warn':['failed','access_changed'].includes(state)?'bad':'neutral';
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
-type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|{kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string}|{kind:'pause'|'resume'|'cancel'|'issue';requestId:string;row:AgentTaskView};
+type AnswerPlan={kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string;files?:readonly File[]};
+type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|AnswerPlan|{kind:'pause'|'resume'|'cancel'|'issue';requestId:string;row:AgentTaskView};
+const answerPlanKey=(plan:AnswerPlan)=>JSON.stringify([plan.row.id,plan.questionId]);
+function confirmsAttachedAnswer(item:AgentTaskView|undefined,plan:AnswerPlan,receiptIds?:readonly string[]){
+ if(item?.id!==plan.row.id||contentRestricted(item))return false;
+ const question=item.questions?.find(q=>q.id===plan.questionId&&q.answeredAt);
+ const ids=question?.attachmentIds;
+ return !!ids&&ids.length===plan.files?.length&&ids.every(id=>item.attachments?.some(file=>file.id===id))
+  &&(!receiptIds||(receiptIds.length===ids.length&&receiptIds.every((id,index)=>ids[index]===id)));
+}
 async function readTaskPages(base:string,initialCursor:string|null,limit:number,signal:AbortSignal) {
  const items=new Map<string,AgentTaskView>(),seen=new Set<string>();
  let nextCursor=initialCursor,pages=0;
@@ -72,7 +83,9 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const [listNeedsRead,setListNeedsRead]=React.useState(false);
  const [loadingMore,setLoadingMore]=React.useState(false);
  const [plan,setPlan]=React.useState<Plan|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState(''),[uncertain,setUncertain]=React.useState(false),[credential,setCredential]=React.useState<{item:AgentTaskView;token:string}|null>(null);
+ const answerPlans=React.useRef(new Map<string,{plan:AnswerPlan;uncertain:boolean}>());
  const [detail,setDetail]=React.useState<AgentTaskView|null>(null),[history,setHistory]=React.useState<{items:AgentTaskEvent[];nextCursor:string|null}>({items:[],nextCursor:null}),[detailError,setDetailError]=React.useState('');
+ const [answerPreview,setAnswerPreview]=React.useState<{taskId:string;fileId:string}>();
  const [detailTarget,setDetailTarget]=React.useState<string|null>(null),[opening,setOpening]=React.useState(false);
  const [historyLoading,setHistoryLoading]=React.useState(false),[historyError,setHistoryError]=React.useState<{message:string;cursor?:string|null}|null>(null);
  const [detailNeedsRead,setDetailNeedsRead]=React.useState(false);
@@ -128,7 +141,9 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   const epoch=detailGeneration.current,abort=new AbortController();detailAbort.current=abort;
   const current=()=>alive.current&&epoch===detailGeneration.current&&detailAbort.current===abort;
   const clearDetailActions=()=>{
+   for(const [key,saved] of answerPlans.current)if(saved.plan.row.id===id)answerPlans.current.delete(key);
    setPlan(plan=>plan&&'row' in plan&&plan.row.id===id?null:plan);
+   setAnswerPreview(preview=>preview?.taskId===id?undefined:preview);
    setCredential(credential=>credential?.item.id===id?null:credential);
   };
   try{
@@ -140,6 +155,10 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    const previous=detailRef.current;
    if(previous?.id===id&&item.version<previous.version)return;
    if(contentRestricted(item))clearDetailActions();
+   for(const [key,saved] of answerPlans.current){
+    if(saved.plan.row.id===id&&item.questions?.some(question=>question.id===saved.plan.questionId&&question.answeredAt))
+     answerPlans.current.delete(key);
+   }
    setCurrentDetail(item);setDetailError('');setDetailNeedsRead(false);
    if(previous?.id===id&&previous.state!==item.state)void readDetailHistory(id,{refresh:true,afterStateChange:true});
    setPage(page=>({...page,items:page.items.map(row=>row.id===id&&row.version<=item.version?item:row)}));
@@ -173,6 +192,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    denied=true;connectionReadAt.current=undefined;loadedPages.current=1;
    auxiliary.abort();listing.abort();detailGeneration.current++;
    detailAbort.current?.abort();historyAbort.current?.abort();
+   answerPlans.current.clear();
    setPage({items:[],nextCursor:null});setCurrentDetail(null);setDetailTarget(null);setOpening(false);setPlan(null);setCredential(null);
    historyAbort.current=null;setHistoryLoading(false);setHistoryError(null);
    setIdentities([]);setPlatformAvailable(false);setError(error instanceof Error?error.message:'任务读取失败');
@@ -285,6 +305,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  },[detailTarget,readDetail,watchingDetail]);
  const openDetail=(id:string)=>{
   detailGeneration.current++;detailAbort.current?.abort();
+  setAnswerPreview(undefined);
   setDetailTarget(id);setCurrentDetail(null);setHistory({items:[],nextCursor:null});setOpening(true);setDetailError('');
   void readDetailHistory(id);
   return readDetail(id,true);
@@ -294,6 +315,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const previousRouteTask=React.useRef(routeTaskId);
  const resetDetail=()=>{
   detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setCurrentDetail(null);setOpening(false);
+  setAnswerPreview(undefined);
  };
  const closeDetail=()=>{
   resetDetail();
@@ -308,14 +330,49 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   if(routeTaskId)void openDetail(routeTaskId);
   else if(previous)resetDetail();
  },[routeTaskId,base]);
- const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
- const closePlan=()=>{if(busy)return;writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);};
+ const begin=(next:Plan)=>{
+  const saved=next.kind==='answer'?answerPlans.current.get(answerPlanKey(next)):undefined;
+  const retained=next.kind==='answer'&&saved&&saved.plan.row.version===next.row.version&&next.row.canSupplementAttachments===true?saved:undefined;
+  if(next.kind==='answer'&&!retained)answerPlans.current.delete(answerPlanKey(next));
+  setFailure('');setUncertain(retained?.uncertain??false);setCredential(null);
+  setPlan(retained&&next.kind==='answer'?{...retained.plan,row:next.row}:next);
+ };
+ const closePlan=()=>{
+  if(busy)return;
+  if(plan?.kind==='answer'){
+   const key=answerPlanKey(plan);
+   if(plan.files?.length)answerPlans.current.set(key,{plan,uncertain});
+   else answerPlans.current.delete(key);
+  }
+  writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);
+ };
+ const updateAnswer=(current:AnswerPlan,update:{answer?:string;files?:readonly File[]})=>{
+  const edited={...current,...update,requestId:current.files?.length||update.files?.length?crypto.randomUUID():current.requestId};
+  setFailure('');
+  setPlan(edited);
+ };
  const submit=async()=>{
   if(!plan||busy)return;const epoch=++writeGeneration.current,abort=new AbortController();writeAbort.current=abort;setBusy(true);setFailure('');
   const url=plan.kind==='create'?base:base+'/'+encodeURIComponent(plan.row.id)+'/'+plan.kind;
-  const body=plan.kind==='create'?{requestId:plan.requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:plan.kind==='answer'?{requestId:plan.requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer}:{requestId:plan.requestId,version:plan.row.version};
-  try{const result=await mistApiRequest(url,{method:'POST',body:JSON.stringify(body),signal:abort.signal});if(!alive.current||epoch!==writeGeneration.current)return;
+  const body=plan.kind==='answer'?answerRequestBody({requestId:plan.requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer},plan.files)
+   :JSON.stringify(plan.kind==='create'?{requestId:plan.requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:{requestId:plan.requestId,version:plan.row.version});
+  const current=()=>alive.current&&epoch===writeGeneration.current;
+  const attached=plan.kind==='answer'&&!!plan.files?.length;
+  const checkingAttachmentReceipt=attached&&uncertain;
+  try{
+   const result=checkingAttachmentReceipt
+    ? await withRequestDeadline(abort,8000,'提交结果暂时无法核对',signal=>
+     mistApiRequest(url+'/receipt/'+encodeURIComponent(plan.requestId),{signal,cache:'no-store'}))
+    : attached
+      ? await withRequestDeadline(abort,45_000+Math.ceil(plan.files!.reduce((bytes,file)=>bytes+file.size,0)/65_536)*1000,'提交结果待核对',
+       signal=>mistApiRequest(url,{method:'POST',body,signal}))
+      : await mistApiRequest(url,{method:'POST',body,signal:abort.signal});
+   if(!current())return;
+   if(attached&&(checkingAttachmentReceipt&&!Array.isArray(result.attachmentIds)
+     ||!confirmsAttachedAnswer(result.item,plan,checkingAttachmentReceipt?result.attachmentIds:undefined)))
+    throw new Error('提交结果暂时无法核对');
    if(plan.kind==='issue'){if(typeof result.token!=='string'||!result.item?.id)throw new Error('任务连接响应无效');setCredential(result);}else toast(uiText(plan.kind==='answer'?'资料已补充':plan.kind==='create'&&result.item.state==='queued'?'任务已安排':LABEL[result.item.state as AgentTaskView['state']]??'已核对当前任务状态'),'ok');
+   if(plan.kind==='answer')answerPlans.current.delete(answerPlanKey(plan));
    setPlan(null);setUncertain(false);
    const openItem=detailRef.current;
    const sameTask=openItem&&openItem.id===result.item?.id;
@@ -325,7 +382,17 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    void currentLoad.current();
    window.dispatchEvent(new Event('bambook:agent-task-update'));
    if(plan.kind==='cancel')void w.refresh();
-  }catch(e){if(alive.current&&!abort.signal.aborted&&epoch===writeGeneration.current){setFailure(e instanceof Error?e.message:'操作未完成，请重试');setUncertain(!(e as any)?.status||(e as any).status>=500);}}
+  }catch(e){
+   if(!current()||(!attached&&abort.signal.aborted))return;
+   const status=(e as {status?:number})?.status;
+   if(checkingAttachmentReceipt&&status===404){
+    setFailure('暂未查到原提交回执');
+    setUncertain(false);
+    return;
+   }
+   setFailure(e instanceof Error?e.message:'操作未完成，请重试');
+   setUncertain(checkingAttachmentReceipt||!status||status>=500||attached&&status===408);
+  }
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };
  const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);if(alive.current)toast(uiText('已复制'),'ok');}catch{if(alive.current)setError('复制失败，请重试');}};
@@ -337,6 +404,12 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const answerQuestion=answer?.row.questions?.find(q=>q.id===answer.questionId);
  const answerPicker=taskAttachmentChoicesForQuestion(answerQuestion,answer?.row.attachments);
  const visualPages=taskVisualPdfPageChoices(answerQuestion,answer?.row.attachments,answer?.answer);
+ const canAttachAnswer=answer?.row.canSupplementAttachments===true&&!answerPicker?.choices.length
+  &&!visualPages.length&&!answerQuestion?.worksheetChoiceNames?.length;
+ const detailAttachments=detail?.attachments??[];
+ const detailAttachmentLabels=taskAttachmentLabels(detailAttachments);
+ const answerPreviewFile=detail&&answerPreview?.taskId===detail.id&&!contentRestricted(detail)
+  ? detailAttachments.find(file=>file.id===answerPreview.fileId) : undefined;
  const detailOrigin=detail&&!contentRestricted(detail)&&detail.state!=='access_changed'&&detail.executor==='platform'
   ? detail.automationId?{id:detail.id,section:'automations',automationId:detail.automationId,label:'打开原规则',icon:Zap}
    :detail.conversationId?{id:detail.id,section:'task-origin',label:'打开原对话',icon:MessageSquare}
@@ -383,14 +456,27 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     {detail.waitingFor?.link&&<Button onClick={openOriginal}>{uiText('查看原资料')}</Button>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
     {detail.executionIssue&&<Banner tone="bad" title={uiText(AGENT_TASK_ISSUE_LABEL[detail.executionIssue.code])}>{!detailProgressUnavailable&&detail.state==='queued'&&detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
-    {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(q.question)}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub mist-xz-question-copy">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}
+    {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}>
+     <span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span>
+     <p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(q.question)}</p>
+     {(q.answer||!!q.attachmentIds?.length)&&<><span className="mist-label">{uiText('本人答复')}</span>
+      {q.answer&&<p className="mist-sub mist-xz-question-copy">{q.answer}</p>}
+      {!!q.attachmentIds?.length&&<div className="mist-row" data-wrap>
+       {detailAttachments.map((file,index)=>q.attachmentIds?.includes(file.id)&&
+        <Button key={file.id} icon={Eye} size="sm" variant="quiet" onClick={()=>setAnswerPreview({taskId:detail.id,fileId:file.id})}>
+         {detailAttachmentLabels[index]}
+        </Button>)}
+      </div>}
+     </>}
+     {!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}
+    </div>)}
     {detail.state==='waiting_human'&&detail.waitingProposalIds.length>0&&<Button onClick={()=>nav.go('cockpit')}>{uiText('查看待确认事项')}</Button>}
     <Button variant="quiet" icon={Copy} onClick={()=>void copy(detail.id)}>{uiText('复制任务编号')}</Button>
     {history.items.map((event,i)=><div className="mist-row" key={i}><span>{uiText(ACTION[event.action]??event.action)}</span><span className="mist-spacer"/><span className="mist-sub">{event.actorName} · {time(event.at)}</span></div>)}{historyError&&<FailureNotice title="任务记录读取失败" detail={historyError.message} retry={()=>void readDetailHistory(detail.id,historyError.cursor?{cursor:historyError.cursor}:{refresh:true})}/>}
     {history.nextCursor&&<Button disabled={historyLoading} onClick={()=>void readDetailHistory(detail.id,{cursor:history.nextCursor})}>{uiText('更多记录')}</Button>}
    </div>}
   </Drawer>
-  <Dialog open={!!plan} onClose={closePlan} title={uiText(create?'新建任务':answer?'补充资料':plan?.kind==='issue'?'连接Agent':plan?.kind==='pause'?'暂停任务':plan?.kind==='resume'?'继续任务':'停止任务')} footer={<><Button disabled={busy} onClick={closePlan}>{uiText(uncertain?'关闭':'取消')}</Button><Button variant={plan?.kind==='cancel'?'danger':'primary'} loading={busy} disabled={busy||!!create&&(!create.identityId||!create.name.trim()||!create.instructions.trim()||create.executor==='platform'&&!platformAvailable)||!!answer&&!answer.answer.trim()} onClick={()=>void submit()}>{uiText(uncertain?'核对原操作':create?'安排任务':answer?'提交答复':plan?.kind==='issue'?'生成任务连接':'确认')}</Button></>}>
+  <Dialog open={!!plan} onClose={closePlan} title={uiText(create?'新建任务':answer?'补充资料':plan?.kind==='issue'?'连接Agent':plan?.kind==='pause'?'暂停任务':plan?.kind==='resume'?'继续任务':'停止任务')} footer={<><Button disabled={busy} onClick={closePlan}>{uiText(uncertain?'关闭':'取消')}</Button><Button variant={plan?.kind==='cancel'?'danger':'primary'} loading={busy} disabled={busy||!!create&&(!create.identityId||!create.name.trim()||!create.instructions.trim()||create.executor==='platform'&&!platformAvailable)||!!answer&&!answer.answer.trim()&&!answer.files?.length} onClick={()=>void submit()}>{uiText(uncertain?'核对原操作':create?'安排任务':answer?'提交答复':plan?.kind==='issue'?'生成任务连接':'确认')}</Button></>}>
    <div className="mist-col">{failure&&<Banner tone="bad" title={failure}/>}
     {create?.executor==='platform'&&!platformAvailable&&<Banner tone="bad" title={uiText('平台执行暂不可用')}/>}{create?<FormGrid><Field label={uiText('执行方式')} required full><Select value={create.executor} disabled={uncertain||busy} options={[{value:'external',label:uiText('外部客户端')},{value:'platform',label:uiText('平台执行')}]} onChange={e=>setPlan({...create,executor:e.target.value as 'external'|'platform'})}/></Field><Field label={uiText('Agent连接')} required full><Select value={create.identityId} disabled={uncertain} onChange={e=>setPlan({...create,identityId:e.target.value})} placeholder={uiText('请选择连接')} options={active.map(i=>({value:i.id,label:`${i.name} · ${uiText(i.mode==='read'?'只读':'可办理')}`}))}/></Field><Field label={uiText('任务名称')} required full><TextInput value={create.name} disabled={uncertain} onChange={e=>setPlan({...create,name:e.target.value})} maxLength={60}/></Field><Field label={uiText('任务内容')} required full><TextArea value={create.instructions} disabled={uncertain} onChange={e=>setPlan({...create,instructions:e.target.value})} maxLength={4000} rows={5}/></Field></FormGrid>:answer?<><KeyValue items={[{label:uiText('任务'),value:answer.row.name}]} />
     {answerPicker?.choices.length ? <>
@@ -402,7 +488,9 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
        ? <XiaozhuWorksheetChoices names={answerQuestion.worksheetChoiceNames} selected={answer.answer}
            disabled={busy||uncertain} onChoose={value=>setPlan({...answer,answer:value})}/>
        : <p className="mist-sub mist-xz-question-copy">{agentQuestionCopy(answerQuestion?.question??'')}</p>}
-     <Field label={uiText(answerQuestion?.worksheetChoiceNames?.length?'工作表名称':'答复')} required><TextArea value={answer.answer} disabled={uncertain} onChange={e=>setPlan({...answer,answer:e.target.value})} maxLength={4000} rows={5}/></Field>
+     <Field label={uiText(answerQuestion?.worksheetChoiceNames?.length?'工作表名称':'答复')} required={!canAttachAnswer}><TextArea value={answer.answer} disabled={uncertain||busy} onChange={e=>updateAnswer(answer,{answer:e.target.value})} maxLength={4000} rows={5}/></Field>
+     {canAttachAnswer&&<XiaozhuAnswerFiles key={answerPlanKey(answer)} existing={answer.row.attachments}
+       files={answer.files??[]} disabled={busy||uncertain} onChange={files=>updateAnswer(answer,{files})}/>}
     </>}
    </>:plan&&'row'in plan?<><KeyValue items={[{label:uiText('任务'),value:plan.row.name},{label:uiText('当前状态'),value:uiText(statusLabel(plan.row))}]} />{plan.kind==='cancel'&&<p className="mist-sub">{uiText('停止后不再续办，已办理的业务保留。')}</p>}{plan.kind==='issue'&&plan.row.state==='running'&&<p className="mist-sub">{uiText('重新连接将中断当前执行器。')}</p>}</>:null}
    </div>
@@ -410,6 +498,8 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   <Dialog open={!!credential} onClose={()=>setCredential(null)} title={uiText('任务连接')} footer={<><Button onClick={()=>setCredential(null)}>{uiText('关闭')}</Button><Button icon={Copy} disabled={!credential||!endpoint} onClick={()=>credential&&endpoint&&void copy(JSON.stringify({mcpServers:{'bambook-task':{url:endpoint,headers:{'x-bambook-task-control':credential.token}}}},null,2))}>{uiText('复制配置')}</Button></>}>
    {credential&&<FormGrid><Field label={uiText('连接地址')} full><TextInput value={endpoint??''} readOnly/></Field><Field label={uiText('连接凭据')} full><TextInput type="password" value={credential.token} readOnly/></Field><KeyValue items={[{label:uiText('任务'),value:credential.item.name},{label:uiText('有效期至'),value:time(credential.item.expiresAt)}]}/></FormGrid>}
   </Dialog>
+  {detail&&answerPreviewFile&&<FilePreview files={[answerPreviewFile]} index={0} onIndex={()=>{}} onClose={()=>setAnswerPreview(undefined)}
+   load={()=>w.readTaskAttachment(detail.id,answerPreviewFile)} onDownload={()=>w.downloadTaskAttachment(detail.id,answerPreviewFile)}/>}
  </div>;
 }
 

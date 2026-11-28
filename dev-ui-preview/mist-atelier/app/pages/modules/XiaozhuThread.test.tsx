@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';import {createRoot,type Root} from 'react-dom/client';import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole,getByLabelText} from '@testing-library/dom';
+import {fireEvent,getByRole,queryByRole,getByLabelText} from '@testing-library/dom';
 import {MistRoot} from '../../../../../components/mist';
 import {platformTrail} from '../../../../../server/src/mist/agentTaskTrail';
 import {XiaozhuThread,dayLabel,type ThreadActions} from './XiaozhuThread';
@@ -12,6 +12,26 @@ const fns=()=>({onAnswer:vi.fn(),onCancel:vi.fn(),onRetry:vi.fn(),onCopy:vi.fn()
 const paint=(tasks:any[],f:ReturnType<typeof fns>&Partial<ThreadActions>=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('sends a new original with its own question and shows the accepted original under the answer',async()=>{
+ const f={...fns(),onPreviewAttachment:vi.fn()};
+ const open={id:'q1',question:'请补交客户确认文件。',askedAt:'2026-11-26T01:00:00Z'};
+ const waiting=task({state:'waiting_human',canSupplementAttachments:true,questions:[open]});
+ await paint([waiting],f);
+ const file=new File(['synthetic original'],'确认.txt',{type:'text/plain'});
+ const picker=host.querySelector<HTMLInputElement>('input[type="file"]')!;
+ await act(async()=>fireEvent.change(picker,{target:{files:[file]}}));
+ expect(getByRole(host,'button',{name:'移除附件 确认.txt'})).toBeTruthy();
+ await act(async()=>getByRole(host,'button',{name:'回答',exact:true}).click());
+ expect(f.onAnswer).toHaveBeenCalledExactlyOnceWith(waiting,'q1','',[file]);
+ const stored={id:'a1',name:file.name,mimeType:file.type,size:file.size};
+ const answered=task({state:'succeeded',attachments:[stored],questions:[{...open,answer:'',answeredAt:'2026-11-26T01:01:00Z',attachmentIds:[stored.id]}]});
+ await paint([answered],f);
+ const preview=getByRole(host,'button',{name:'预览原附件 确认.txt'});
+ expect(preview.closest('.mist-xz-card')?.textContent).toContain('资料已补充');
+ expect(host.querySelector('.mist-xz-user')?.textContent).not.toContain(file.name);
+ await act(async()=>preview.click());
+ expect(f.onPreviewAttachment).toHaveBeenCalledExactlyOnceWith(answered,stored);
+});
 it('offers explicit voice continuation only on eligible tasks and passes the selected task', async () => {
  const onVoiceTask=vi.fn();
  const first=task({id:'first',name:'核对交期',executor:'platform',conversationId:'c_order_review',state:'waiting_human',

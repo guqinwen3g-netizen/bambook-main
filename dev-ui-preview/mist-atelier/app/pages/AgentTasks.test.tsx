@@ -647,6 +647,54 @@ it('freezes an uncertain owner answer and retries the same question and request'
  act(paint);await flush();await click(getByText(host,'核对邮件'));await click(getByRole(document.body,'button',{name:'补充资料',exact:true}));await act(async()=>fireEvent.input(getByLabelText(document.body,/答复/,{selector:'textarea'}),{target:{value:'保留原值，等待书面依据。'}}));await click(getByRole(document.body,'button',{name:'提交答复'}));
  expect((getByLabelText(document.body,/答复/,{selector:'textarea'}) as HTMLTextAreaElement).disabled).toBe(true);await click(getByRole(document.body,'button',{name:'核对原操作'}));const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(2);expect(JSON.parse(writes[1][1].body)).toEqual(first);
 });
+it.each([false,true])('checks the exact receipt for an attachment answer and retries only an absent receipt (%s)',async missing=>{
+ const question={id:'question',question:'请补交书面确认依据。',askedAt:'2026-11-01T00:10:00Z'};
+ const stored={id:'attachment',name:'确认.txt',mimeType:'text/plain',size:9};
+ const waiting={...row(),state:'waiting_human',questions:[question],canSupplementAttachments:true};
+ const answered={...waiting,state:'queued',version:4,attachments:[stored],questions:[{...question,answeredAt:'2026-11-01T00:20:00Z',attachmentIds:[stored.id]}]};
+ let current=waiting,requestId='',posts=0;
+ seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url.includes('/answer/receipt/')){
+   expect(url).toMatch(new RegExp('/task/answer/receipt/'+requestId+'$'));
+   if(missing)throw Object.assign(new Error('Not found'),{status:404});
+   current=answered;
+   return {item:answered,attachmentIds:[stored.id]};
+  }
+  if(init?.method==='POST'){
+   expect(url).toMatch(/\/task\/answer$/);
+   expect(init.body).toBeInstanceOf(FormData);
+   const body=init.body as FormData;
+   const answer=JSON.parse(String(body.get('answer')));
+   expect(answer).toMatchObject({version:3,questionId:'question',answer:''});
+   expect((body.get('attachments') as File).name).toBe(stored.name);
+   if(++posts===1){requestId=answer.requestId;throw new Error('网络中断');}
+   expect(answer.requestId).toBe(requestId);
+   current=answered;
+   return {item:answered};
+  }
+  if(url.includes('agent-identities'))return {items:[identity()],nextCursor:null};
+  if(url.includes('/history'))return {items:[],nextCursor:null};
+  if(url.endsWith('/task'))return {item:current};
+  return {items:[current],nextCursor:null};
+ });
+ act(paint);await flush();
+ await click(getByText(host,'核对邮件'));
+ await click(getByRole(document.body,'button',{name:'补充资料',exact:true}));
+ const dialog=getByRole(document.body,'dialog',{name:'补充资料'});
+ expect(getByRole(dialog,'button',{name:'添加附件'})).toBeTruthy();
+ await act(async()=>fireEvent.change(dialog.querySelector('input[type="file"]')!,{target:{files:[new File(['synthetic'],stored.name,{type:stored.mimeType})]}}));
+ await click(getByRole(dialog,'button',{name:'提交答复'}));
+ expect((getByRole(dialog,'button',{name:'添加附件'}) as HTMLButtonElement).disabled).toBe(true);
+ await click(getByRole(dialog,'button',{name:'核对原操作'}));
+ expect(posts).toBe(1);
+ if(missing){
+  expect(getByRole(dialog,'button',{name:'移除附件 确认.txt'})).toBeTruthy();
+  await click(getByRole(dialog,'button',{name:'提交答复'}));
+  expect(posts).toBe(2);
+ }
+ expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();
+ expect(getByRole(document.body,'button',{name:'确认.txt'})).toBeTruthy();
+});
 it('creates an explicit platform task without issuing any external credential',async()=>{
  seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(url.endsWith('/agent-task-capabilities')?{platformAvailable:true}:init?.method==='POST'?{item:{...row(),executor:'platform'}}:url.includes('agent-identities')?{items:[identity()],nextCursor:null}:{items:[],nextCursor:null}));
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));await act(async()=>{fireEvent.change(getByLabelText(document.body,/执行方式/,{selector:'select'}),{target:{value:'platform'}});fireEvent.change(getByLabelText(document.body,/Agent连接/,{selector:'select'}),{target:{value:'identity'}});fireEvent.input(getByLabelText(document.body,/任务名称/,{selector:'input'}),{target:{value:'核对来信'}});fireEvent.input(getByLabelText(document.body,/任务内容/,{selector:'textarea'}),{target:{value:'核对原来信，缺资料先问本人。'}});});
